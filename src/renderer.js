@@ -1244,7 +1244,7 @@ for(const tab of document.querySelectorAll('[data-setting]'))tab.onclick=()=>{co
 let themePreference='light';try{themePreference=localStorage.getItem('ui-theme') || 'light';}catch{}
 if(!['light','dark','system'].includes(themePreference))themePreference='light';
 const systemTheme=matchMedia('(prefers-color-scheme: dark)');
-function applyTheme(){const dark=themePreference==='dark' || themePreference==='system' && systemTheme.matches;document.body.classList.toggle('dark',dark);setUITheme(dark);$('themeSelect').value=themePreference;document.querySelectorAll('[data-theme]').forEach(button=>button.classList.toggle('selected',button.dataset.theme===themePreference));}
+function applyTheme(){const dark=themePreference==='dark' || themePreference==='system' && systemTheme.matches;document.body.classList.toggle('dark',dark);document.querySelector('.credential-heading>.kuneco-logo').src=dark?'assets/brand/kuneco-mark-white.png':'assets/brand/kuneco-mark.png';setUITheme(dark);$('themeSelect').value=themePreference;document.querySelectorAll('[data-theme]').forEach(button=>button.classList.toggle('selected',button.dataset.theme===themePreference));}
 applyTheme();systemTheme.addEventListener('change',()=>{if(themePreference==='system')applyTheme();});
 $('themeSelect').onchange=()=>{themePreference=$('themeSelect').value;applyTheme();try{localStorage.setItem('ui-theme',themePreference);}catch{}};
 void action(async () => {

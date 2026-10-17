@@ -837,7 +837,7 @@ body{--wa-form-control-required-content-color:var(--wa-color-danger-on-quiet)}
 .auth-pending>.sidebar,.auth-pending>.content-area,.auth-pending>.app-toolbar,.auth-mode>.sidebar,.auth-mode>.content-area,.auth-mode>.app-toolbar,.auth-mode>#environmentSetup{visibility:hidden}
 .account-screen{position:fixed;inset:0;z-index:40000;display:flex;align-items:center;justify-content:center;padding:42px 24px 24px;background:var(--canvas);overflow:auto}
 .credential-card{width:360px;max-width:100%;border:1px solid var(--line);border-radius:12px;background:var(--surface);box-shadow:0 2px 5px #00000005;overflow:hidden}
-.credential-heading{text-align:center;padding:24px 24px 8px}.credential-heading>wa-icon{width:24px;height:24px;padding:9px;box-sizing:content-box;border:1px solid var(--line);border-radius:7px}
+.credential-heading{text-align:center;padding:24px 24px 8px}.credential-heading>.kuneco-logo{display:block;width:48px;height:48px;object-fit:contain;margin:0 auto}
 .credential-heading h1{font-size:22px;margin:16px 0 8px}.credential-heading p{font-size:12px;line-height:1.7;color:var(--muted);margin:0}
 .credential-card form>wa-input{width:auto;margin:16px 20px}.credential-card>#credentialError{font-size:12px;color:var(--wa-color-danger-on-quiet);margin:0 20px 14px;line-height:1.6}.credential-card>#credentialError:empty{display:none}
 .credential-footer{padding:16px 20px;background:var(--canvas);border-top:1px solid var(--line)}#credentialSubmit{display:block;width:100%}#credentialSubmit::part(base){width:100%;height:34px}

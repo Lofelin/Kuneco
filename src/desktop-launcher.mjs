@@ -1,6 +1,6 @@
 import {execFile} from 'node:child_process';
 import {createHash} from 'node:crypto';
-import {access, mkdir, mkdtemp, readFile, rename, rm, stat} from 'node:fs/promises';
+import {access, copyFile, mkdir, mkdtemp, readFile, rename, rm, stat} from 'node:fs/promises';
 import path from 'node:path';
 import {promisify} from 'node:util';
 import {appIdentity} from './app-identity.mjs';
@@ -15,7 +15,8 @@ export async function desktopExecutable({root, electron, platform = process.plat
   const source = path.resolve(path.dirname(electron), '../..');
   const plist = await readFile(path.join(source, 'Contents/Info.plist'));
   const binary = await stat(electron);
-  const revision = createHash('sha256').update(plist).update(`${binary.size}:${binary.mtimeMs}:Kuneco-v2:${JSON.stringify(appIdentity)}`).digest('hex').slice(0, 16);
+  const icon = path.join(root, 'src/assets/brand/kuneco.icns');
+  const revision = createHash('sha256').update(plist).update(await readFile(icon)).update(`${binary.size}:${binary.mtimeMs}:Kuneco-v3:${JSON.stringify(appIdentity)}`).digest('hex').slice(0, 16);
   const cache = path.join(root, 'node_modules/.cache/kuneco-desktop', revision);
   const bundle = path.join(cache, 'Kuneco.app');
   const executable = path.join(bundle, 'Contents/MacOS', appIdentity.title);
@@ -33,10 +34,12 @@ export async function desktopExecutable({root, electron, platform = process.plat
       CFBundleExecutable: appIdentity.title,
       CFBundleShortVersionString: appIdentity.version,
       CFBundleVersion: appIdentity.version,
+      CFBundleIconFile: 'kuneco.icns',
     };
     for (const [key, value] of Object.entries(values)) {
       await exec('/usr/libexec/PlistBuddy', ['-c', `Set :${key} ${value}`, info]);
     }
+    await copyFile(icon, path.join(staged, 'Contents/Resources/kuneco.icns'));
     await rename(path.join(staged, 'Contents/MacOS', path.basename(electron)), path.join(staged, 'Contents/MacOS', appIdentity.title));
     // Local development signature; this is not a signed/notarized release build.
     await exec('/usr/bin/codesign', ['--force', '--deep', '--preserve-metadata=entitlements', '--sign', '-', staged]);

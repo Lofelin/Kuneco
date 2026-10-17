@@ -18,6 +18,9 @@ func TestDesktopReturnTarget(t *testing.T) {
 	}
 	w := httptest.NewRecorder()
 	renderDesktopReturn(w, "https://evil.test")
+	if !strings.Contains(w.Body.String(), `class="kuneco-logo" src="data:image/png;base64,`) || strings.Contains(w.Body.String(), "ZgotmplZ") || !strings.Contains(w.Header().Get("Content-Security-Policy"), "img-src data:") {
+		t.Fatal("return page logo missing or blocked")
+	}
 	if strings.Contains(w.Body.String(), "evil.test") || strings.Contains(w.Body.String(), "<script>") {
 		t.Fatal("unsafe return rendered")
 	}

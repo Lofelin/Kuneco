@@ -481,7 +481,7 @@ async function connect(config, remember, {environmentSwitch=false}={}) {
   } finally { connecting = false; }
 }
 async function createWindow() {
-  window = new BrowserWindow({ show: false, width: authRequired && !account?.user?860:1400, height:authRequired && !account?.user?720:950, minWidth: authRequired && !account?.user?640:1050, minHeight:authRequired && !account?.user?560:760, title: 'Kuneco', titleBarStyle: 'hidden', trafficLightPosition: { x: 12, y: 14 }, backgroundColor: '#f6f7f9', webPreferences: { preload: path.join(here, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true } });
+  window = new BrowserWindow({ show: false, width: authRequired && !account?.user?860:1400, height:authRequired && !account?.user?720:950, minWidth: authRequired && !account?.user?640:1050, minHeight:authRequired && !account?.user?560:760, title: 'Kuneco', icon: path.join(here, 'assets/brand/kuneco.png'), titleBarStyle: 'hidden', trafficLightPosition: { x: 12, y: 14 }, backgroundColor: '#f6f7f9', webPreferences: { preload: path.join(here, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true } });
   window.once('ready-to-show', () => window?.show());
   window.webContents.on('did-start-loading',closeConsole);window.webContents.on('render-process-gone',closeConsole);window.webContents.on('destroyed',closeConsole);
   accountWindowSignedIn=Boolean(account?.user);
