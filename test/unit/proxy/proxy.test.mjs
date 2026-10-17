@@ -640,3 +640,55 @@ test('incomplete inbound headers remain bounded with receipt total disabled',{sk
   assert.ok(!result || result.includes('408')); // clientError intentionally closes before admission.
  }finally{client?.destroy();await g.stop();}
 });
+
+test('target scheduling rotates destinations, preserves FIFO and retires keys',async()=>{
+ const g=new ProxyGateway({protocol:'http',host:'127.0.0.1',port:9},{forwardingLimit:2,forwardingQueueLimit:6,targetForwardingLimit:1,targetQueueLimit:3,queueTimeout:80});
+ const q=g.forwarding,a=await q.acquire(undefined,'a'),b=await q.acquire(undefined,'b'),order=[];
+ const queued=(key,id)=>q.acquire(undefined,key).then(release=>{order.push(id);return release;});
+ const a1=queued('a','a1'),a2=queued('a','a2'),c=queued('c','c');
+ b();const cr=await c;assert.deepEqual(order,['c'],'blocked destination must not block others');
+ a();const ar=await a1;assert.deepEqual(order,['c','a1']);ar();const ar2=await a2;ar2();cr();
+ const hold1=await q.acquire(undefined,'x'),hold2=await q.acquire(undefined,'y');
+ const sequence=[];const next=k=>q.acquire(undefined,k).then(r=>{sequence.push(k);return r;});
+ const p1=next('a'),p2=next('a'),p3=next('b');hold1();const r1=await p1;r1();const r3=await p3;r3();const r2=await p2;r2();hold2();assert.deepEqual(sequence,['a','b','a']);
+ const hold=await q.acquire(undefined,'a');const controller=new AbortController();const cancelled=q.acquire(controller.signal,'a');controller.abort();await assert.rejects(cancelled);await assert.rejects(q.acquire(undefined,'a'),{code:'PROXY_QUEUE_TIMEOUT'});hold();
+ assert.equal(q.active,0);assert.equal(q.queue.length,0);assert.equal(q.targets.size,0);assert.equal(q.turns.length,0);
+});
+
+for(const engine of ['native','gost'])test(`${engine}: mixed targets keep verification and other destinations available`,engine==='gost'?gostTest:{},async()=>{
+ let posts=0;
+ const f=await fixture({forwardingLimit:3,forwardingQueueLimit:4,targetForwardingLimit:2,targetQueueLimit:1,queueTimeout:1000,...(engine==='gost'?{gostBinary}:{}),respond(req,res){
+  if(req.url==='/mixed'){posts++;let n=0;req.on('data',c=>n+=c.length);req.on('end',()=>{let sent=0;const timer=setInterval(()=>{res.write('x'.repeat(1024));if(++sent===20){clearInterval(timer);res.end(String(n));}},5);res.on('close',()=>clearInterval(timer));});return true;}
+ }});
+ const other=await fixture();const clients=[];
+ const connect=()=>new Promise((resolve,reject)=>{const r=http.request({host:'127.0.0.1',port:f.gateway.port,method:'CONNECT',path:new URL(f.url).host,headers:{'proxy-authorization':`Basic ${Buffer.from(`workspace:${f.gateway.token}`).toString('base64')}`}});clients.push(r);r.on('error',reject);r.on('connect',(_res,s)=>{clients.push(s);resolve(s);});r.end();});
+ try{
+  await f.gateway.verify(f.url);await other.gateway.verify(other.url);const streams=await Promise.all([connect(),connect()]);
+  const waiting=http.request({host:'127.0.0.1',port:f.gateway.port,path:f.url,headers:{'proxy-authorization':`Basic ${Buffer.from(`workspace:${f.gateway.token}`).toString('base64')}`}});clients.push(waiting);waiting.on('error',()=>{});waiting.end();
+  await waitFor(()=>f.gateway.forwarding.queue.length===1);
+  assert.equal((await request(f.gateway,f.url)).code,503);waiting.destroy();await waitFor(()=>f.gateway.forwarding.queue.length===0);
+  assert.equal((await request(f.gateway,f.url,true,'POST')).code,503,'queued mutation expires without reaching origin');
+  await assert.rejects(f.gateway.readText(new URL('/bad-probe',f.url).href));assert.equal(f.gateway.status.state,'ready');
+  const alias=new URL('/mixed',f.url);alias.hostname='proxy-target.invalid';
+  const mixed=new Promise((resolve,reject)=>{const r=http.request({host:'127.0.0.1',port:f.gateway.port,path:alias.href,method:'POST',headers:{'proxy-authorization':`Basic ${Buffer.from(`workspace:${f.gateway.token}`).toString('base64')}`}},res=>{let bytes=0;res.on('data',c=>{bytes+=c.length;res.pause();setTimeout(()=>res.resume(),10);});res.on('end',()=>resolve({status:res.statusCode,bytes}));res.on('error',reject);});clients.push(r);r.on('error',reject);let n=0;const timer=setInterval(()=>{r.write('data');if(++n===10){clearInterval(timer);r.end();}},10);r.once('close',()=>clearInterval(timer));});
+  await waitFor(()=>f.gateway.forwarding.active===3);
+  assert.equal((await f.gateway.verify(f.url)).state,'ready');assert.equal((await request(other.gateway,other.url)).code,200);
+  const result=await mixed;assert.deepEqual(result,{status:200,bytes:20482});assert.equal(posts,1);
+  assert.ok(streams.every(s=>!s.destroyed));assert.equal(f.gateway.status.capacity.forwarding.perTargetLimit,2);
+  streams.forEach(s=>s.destroy());await waitFor(()=>f.gateway.forwarding.active===0);
+  assert.equal(f.gateway.forwarding.targets.size,0);assert.equal(f.gateway.forwarding.turns.length,0);assert.equal(f.gateway.forwarding.queue.length,0);assert.equal(f.gateway.status.state,'ready');
+ }finally{clients.forEach(c=>c.destroy());await f.cleanup();await other.cleanup();}
+});
+
+test('CONNECT target accounting preserves explicit port 80 and normalizes host spelling',async()=>{
+ const g=await new ProxyGateway({protocol:'http',host:'127.0.0.1',port:9}).start();const observed=[];
+ g.update({state:'ready',ip:'203.0.113.8'});
+ g.tunnel=async(host,port)=>{observed.push({host,port,keys:[...g.forwarding.targets.keys()]});throw Object.assign(new Error('fixture refusal'),{code:'PROXY_TARGET_REFUSED'});};
+ try{
+  for(const authority of ['Example.Invalid.:80','EXAMPLE.INVALID:443'])await new Promise((resolve,reject)=>{const r=http.request({host:'127.0.0.1',port:g.port,method:'CONNECT',path:authority,headers:{'proxy-authorization':`Basic ${Buffer.from(`workspace:${g.token}`).toString('base64')}`}});r.on('connect',(res,s)=>{s.destroy();assert.equal(res.statusCode,502);resolve();});r.on('error',reject);r.end();});
+  assert.equal((await request(g,'http://EXAMPLE.INVALID./')).code,502);
+  assert.equal(observed[0].port,80);assert.equal(observed[1].port,443);assert.deepEqual(observed[2].keys,observed[0].keys);
+  assert.deepEqual(observed.slice(0,2).map(x=>x.keys),[[JSON.stringify(['example.invalid',80])],[JSON.stringify(['example.invalid',443])]]);
+  assert.equal(g.forwarding.targets.size,0);
+ }finally{await g.stop();}
+});
