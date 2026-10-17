@@ -1,3 +1,4 @@
+import {cleanupDirectTask} from './direct-task-cleanup.mjs';
 import {SPEC_LABEL,reliabilityArguments,specHash,workerImage,ensureWorker,containerStatus,inspectContainer,ensurePrivateNetwork,ensureDirectNetwork,validateContainerNetworks,ATTEMPT_LABEL,removeAttemptContainer} from './container-reliability.mjs';
 import {gatewayImage} from './gateway-image.mjs';
 
@@ -155,6 +156,7 @@ export class DockerEnvironments {
   const data=await this.load(owner),runningByEndpoint=new Map();
   for(const item of data.environments){
    if(item.id===id)continue;
+   if(!item.external)await this.stopDirectTasks(resourcePrefix(owner,item.id));
    const endpoint=item.external?.endpoint || this.endpoint;
    if(!runningByEndpoint.has(endpoint)){
     const names=await this.command(['ps','--format','{{.ID}} {{.Names}}'],{endpoint});
@@ -181,6 +183,7 @@ export class DockerEnvironments {
   const data=await this.load(owner);
   if(id?!data.environments.some(item=>item.id===id):data.localEnabled===false)throw new Error('环境不存在');
   await this.stopOtherEnvironments(owner,id);
+  if(id&&!data.environments.find(item=>item.id===id)?.external)await this.stopDirectTasks(resourcePrefix(owner,id));
   if(id){
    try{await this.start(owner,id);}
    catch(error){await this.stop(owner,id).catch(()=>{});throw new Error('目标环境启动失败，原环境已停止：'+error.message);}
@@ -254,9 +257,10 @@ export class DockerEnvironments {
  async rpc(owner,id,action,value){const {prefix}=await this.get(owner,id);const raw=await this.command(['exec','-i',prefix+'-gateway','node','/opt/dingtu/control.mjs'],{input:JSON.stringify({action,value})});return JSON.parse(raw);}
  async start(owner,id){const {item}=await this.get(owner,id);if(item.external){await this.command(['start',item.external.id],{endpoint:item.external.endpoint});return this.state(owner);}const adapter=await this.connect(owner,id,{protocol:'http',host:'192.0.2.1',port:1,username:'',password:''},null);await adapter.startWorker();return this.state(owner);}
  async stopDirectTasks(prefix){
-  await Promise.all([...(this.directTasks?.values() || [])].filter(task=>task.prefix===prefix).map(task=>task.cancel()));
-  const ids=(await this.command(['ps','-aq','--filter','label=app=dingtu-direct','--filter','label=io.kuneco.environment='+prefix])).split('\n').filter(id=>/^[a-f0-9]+$/.test(id));
-  for(const id of ids)await this.command(['stop','-t','3',id]);
+  this.directGenerations ||= new Map();this.directGenerations.set(prefix,(this.directGenerations.get(prefix)||0)+1);
+  await Promise.all([...(this.directTasks?.entries() || [])].filter(([,task])=>task.prefix===prefix).map(async([id,task])=>{await task.cancel();this.directTasks.delete(id);}));
+  const names=(await this.command(['ps','-a','--format','{{.Names}}','--filter','label=app=dingtu-direct','--filter','label=io.kuneco.environment='+prefix])).split('\n').filter(Boolean);
+  for(const name of names)await cleanupDirectTask(this,name,prefix);
  }
  async stop(owner,id){const {prefix,item}=await this.get(owner,id);if(item.external){await this.command(['stop','-t','3',item.external.id],{endpoint:item.external.endpoint});return this.state(owner);}await this.stopDirectTasks(prefix);const names=new Set((await this.command(['ps','-a','--format','{{.Names}}'])).split('\n'));for(const suffix of ['worker','gateway']){const name=prefix+'-'+suffix;if(!names.has(name))continue;await this.command(['stop','-t','5',name]);if((await this.command(['inspect','--format','{{.State.Running}}',name]))!=='false')throw new Error('容器未能停止，请重试');}return this.state(owner);}
  async connect(owner,id,config,expectedIp,onVerified){
@@ -316,29 +320,34 @@ export class DockerEnvironments {
   return saveMetadata();
  }if(!RUNTIME_INSTALL_COMMANDS[engine])throw new Error('未知运行时');await this.runRuntimeInstaller(owner,id,['bash','-o','pipefail','-c',RUNTIME_INSTALL_COMMANDS[engine]]);await this.exec(owner,id,[RUNTIME_CATALOG[engine].command,'--version']);return saveMetadata();}
  async directChatSpawner(owner,id){
+  const generations=new Map(this.directGenerations);
   const {prefix,item}=await this.get(owner,id);if(item.external)return this.externalSpawner(owner,id,item,{direct:true});
-  const binary=await this.binary('docker'),image=await workerImage(this,item.imageName || LEGACY_IMAGE);await ensureDirectNetwork(this,prefix);
+  const assertCurrent=()=>{if((generations.get(prefix)||0)!==(this.directGenerations?.get(prefix)||0))throw new Error('环境已停止或切换，不能启动旧直连任务');};
+  assertCurrent();const binary=await this.binary('docker'),image=await workerImage(this,item.imageName || LEGACY_IMAGE);assertCurrent();await ensureDirectNetwork(this,prefix);assertCurrent();
   return ({command,args=[],signal,cwd='/workspace'})=>{
-   if(signal?.aborted)throw new Error('请求已取消');const task=randomUUID();
+   assertCurrent();if(signal?.aborted)throw new Error('请求已取消');const task=randomUUID();
    const worker=prefix+'-direct-'+task;
    const run=directTaskArguments({prefix,name:worker,image,projectMounts:item.projectMounts || [],task,command,args});
    const child=spawn(binary,['--host',this.endpoint,...run],{stdio:['pipe','pipe','pipe'],env:{...process.env,DOCKER_HOST:'',DOCKER_CONTEXT:this.context}});
    const kill=child.kill.bind(child);let closed=false,cancelling;
-   const cancel=()=>cancelling ||= (async()=>{
-    // Do not kill the Docker client before creation finishes: that could leave an orphan task.
-    const deadline=Date.now()+15000;
-    while(!closed && Date.now()<deadline){
-     let container;try{container=JSON.parse(await this.command(['inspect','--format','{{json .}}',worker],{timeout:3000}));}catch{}
-     if(container?.Id){if(container.Config?.Labels?.app!=='dingtu-direct'||container.Config?.Labels?.['io.kuneco.environment']!==prefix)throw new Error('直连任务归属不匹配，已保留');try{await this.command(['stop','-t','3',container.Id]);}catch(error){if(await this.command(['ps','-aq','--filter','id='+container.Id]))throw error;return;}
-      // Also remove a created-but-not-yet-started container, closing the Docker start/cancel race.
-      try{await this.command(['rm','-f',container.Id]);}catch(error){if(await this.command(['ps','-aq','--filter','id='+container.Id]))throw error;}return;}
-     await new Promise(r=>setTimeout(r,100));
-    }
-    if(!closed)throw new Error('直连任务取消超时，请检查容器引擎');
-   })();
+   const cancel=()=>{
+    if(cancelling)return cancelling;
+    const pending=(async()=>{
+     const deadline=Date.now()+15000;
+     while(!closed && Date.now()<deadline){
+      if(await cleanupDirectTask(this,worker,prefix))return;
+      await new Promise(r=>setTimeout(r,100));
+     }
+     // A Docker client closing is not evidence that its daemon-side container stopped.
+     if(await cleanupDirectTask(this,worker,prefix))return;
+     if(!closed)throw new Error('直连任务取消超时，请检查容器引擎');
+    })();
+    cancelling=pending;void pending.catch(()=>{if(cancelling===pending)cancelling=null;});return pending;
+   };
    this.directTasks ||= new Map();this.directTasks.set(task,{prefix,cancel});
-   child.once('close',()=>{closed=true;this.directTasks.delete(task);});
-   child.kill=(type='SIGTERM')=>{void cancel().then(()=>kill(type)).catch(error=>{child.emit('error',error);});return true;};
+   const report=error=>{if(!closed && child.listenerCount('error'))child.emit('error',error);console.error('直连任务清理失败：'+error.message);};
+   child.once('close',()=>{closed=true;void cancel().then(()=>this.directTasks.delete(task)).catch(report);});
+   child.kill=(type='SIGTERM')=>{void cancel().then(()=>kill(type)).catch(report);return true;};
    const abort=()=>child.kill();signal?.addEventListener('abort',abort,{once:true});child.once('close',()=>signal?.removeEventListener('abort',abort));return child;
   };
  }
