@@ -1,3 +1,5 @@
+@import "../../features/chat/chat-search.css";
+@import "../../features/chat/draft-persistence.css";
 @import "./app-table.css";
 :root{--button-icon-gap:6px;--button-padding-inline:6px}
 :root{--app-modal-backdrop-color:rgb(160 165 175 / 18%);--app-modal-backdrop-filter:blur(4px)}

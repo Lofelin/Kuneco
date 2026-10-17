@@ -1,0 +1,2 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {draftScopeKey} from '../../../src/features/chat/draft-store.mjs';
+test('draft scopes require an account and conversation and cannot collide across boundaries',()=>{const base={owner:'a',environmentId:'b',chatId:'c'};assert.equal(draftScopeKey({...base,owner:null}),null);assert.equal(draftScopeKey({...base,chatId:null}),null);assert.equal(new Set([base,{...base,owner:'b'},{...base,environmentId:null},{...base,chatId:'d'},{owner:'a:b',environmentId:'',chatId:'c'}].map(draftScopeKey)).size,5);});

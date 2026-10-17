@@ -1,0 +1,5 @@
+.chat-draft-status{font-size:12px;line-height:18px;color:var(--muted);max-height:150px;overflow:auto}
+.chat-draft-status:empty{display:none}
+.chat-draft-status>div{padding:8px 0;border-bottom:1px solid var(--line)}
+.chat-draft-status p{margin:4px 0;overflow-wrap:anywhere}
+.chat-draft-status app-button{margin-right:6px}

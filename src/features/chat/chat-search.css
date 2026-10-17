@@ -1,0 +1,9 @@
+.chat-search-bar{display:flex;align-items:center;gap:6px;flex:none;padding:8px 0;border-bottom:1px solid var(--line);min-width:0}
+.chat-search-bar[hidden]{display:none}
+.chat-search-bar wa-input{flex:1;min-width:80px;max-width:360px}
+.chat-search-count{color:var(--muted);font-size:12px;line-height:18px;white-space:nowrap;min-width:52px;text-align:center}
+.chat-search-bar .icon-button{flex:none}
+::highlight(kuneco-chat-search){background-color:#ffe490;color:#272727}
+::highlight(kuneco-chat-search-active){background-color:#ffbd59;color:#272727}
+.chat-search-current{scroll-margin-block:80px}
+@supports not selector(::highlight(kuneco-chat-search)){.chat-search-current{background-color:rgb(255 190 65 / 22%)}}

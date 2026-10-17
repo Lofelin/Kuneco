@@ -7,7 +7,7 @@ function harness(realReasoning=false){
  if(realReasoning)globalThis.document=document;
  let context;const $=id=>id==='chat' && context?.chatRenderContainer?context.chatRenderContainer:document.getElementById(id)||Object.assign(document.body.appendChild(document.createElement('div')),{id});
  const chatSessions=['a','b','c'].map(id=>({id,engine:'deepseek',model:id,title:id,nodes:[]}));const calls=new Map();let saved=[];
- const noop=()=>{};context=vm.createContext({insightPanel:{maintaining:()=>false,refresh:()=>{}},contextPicker:{close:noop},chatScroll:{follow:noop,jump:noop,canFollow:()=>false},Date,crypto,document,mergeRuntimeActivity,$,chatRenderContainer:null,chatSessions,chatRuns:new Map(),activeChatId:'a',selectedEngine:'deepseek',selectedCodexModel:'a',busy:false,reply:null,chatOwnerID:'owner',dockerEnvironmentState:{activeId:'env'},authStates:{deepseek:{state:'signed-in'}},approvals:[],pendingChatMerges:[],
+ const noop=()=>{};context=vm.createContext({structuredClone,draftPersistence:{prepare:async()=>({}),dispatch:async()=>{},isCurrent:()=>true,accepted:async()=>{},settle:async()=>{}},insightPanel:{maintaining:()=>false,refresh:()=>{}},contextPicker:{close:noop},chatScroll:{follow:noop,jump:noop,canFollow:()=>false},Date,crypto,document,mergeRuntimeActivity,$,chatRenderContainer:null,chatSessions,chatRuns:new Map(),activeChatId:'a',selectedEngine:'deepseek',selectedCodexModel:'a',busy:false,reply:null,chatOwnerID:'owner',dockerEnvironmentState:{activeId:'env'},authStates:{deepseek:{state:'signed-in'}},approvals:[],pendingChatMerges:[],
  api:{cc:(message,rewind,id,requestId)=>new Promise((resolve,reject)=>calls.set(id,{message,rewind,requestId,resolve,reject}))},renderSessionList:noop,renderChatAvailability:noop,renderRuntime:noop,renderSessionHeader:noop,renderProfileActivity:noop,renderAuth:noop,renderApproval:noop,chatNetworkReady:()=>true,applyChatMerge:noop,createIcon:()=>document.createElement('span'),deepseekComposer:{render:noop,clear:noop},finishReasoning:realReasoning?finishReasoning:noop,reasoningView:realReasoning?reasoningView:noop,
  updateChatMessage:(node,text)=>{node.textContent=text;node.dataset.rawText=text;},saveChatView:()=>{saved.push($('chat').textContent);},
  bubble:(role,text,_engine,pending)=>{const node=document.createElement('div');node.className='bubble '+role;const content=document.createElement('div');content.className='message-content'+(pending?' reply-loading':'');content.dataset.rawText=text;content.textContent=text;node.append(content);$('chat').append(node);return content;}
@@ -16,11 +16,12 @@ function harness(realReasoning=false){
  const select=id=>{chatSessions.find(s=>s.id===context.activeChatId).nodes=[...$('chat').childNodes];context.activeChatId=id;context.selectedCodexModel=id;$('chat').replaceChildren(...chatSessions.find(s=>s.id===id).nodes);context.busy=context.chatRuns.has(id);context.reply=context.chatRuns.get(id)?.reply || null;context.updateSendButton();};
  const emit=(id,type,data,requestId=calls.get(id).requestId)=>context.dispatchWorkspaceEvent({chatId:id,requestId,type,data,owner:'owner',environmentId:'env'});
  const text=id=>id===context.activeChatId?$('chat').textContent:chatSessions.find(s=>s.id===id).nodes.map(n=>n.textContent).join('');
- return {context,calls,select,emit,text,$};
+ const waitForCall=async id=>{for(let i=0;i<20&&!calls.has(id);i++)await new Promise(resolve=>setImmediate(resolve));assert.ok(calls.has(id),'request reached API after durable prepare');};
+ return {context,calls,select,emit,text,$,waitForCall};
 }
 test('interleaved requests queue preflight output and route background replies without disturbing active draft or controls',async()=>{
- const h=harness();const a=h.context.sendChatMessage('A');h.emit('a','ccStart',{});h.emit('a','ccText','a early');
- h.select('b');assert.equal(h.context.busy,false);const b=h.context.sendChatMessage('B');h.emit('b','ccStart',{});h.calls.get('b').resolve();await b;
+ const h=harness();const a=h.context.sendChatMessage('A');await h.waitForCall('a');h.emit('a','ccStart',{});h.emit('a','ccText','a early');
+ h.select('b');assert.equal(h.context.busy,false);const b=h.context.sendChatMessage('B');await h.waitForCall('b');h.emit('b','ccStart',{});h.calls.get('b').resolve();await b;
  h.$('prompt').value='draft b';h.calls.get('a').resolve();await a;assert.equal(h.context.activeChatId,'b');assert.equal(h.$('prompt').value,'draft b');assert.match(h.text('a'),/Aa early/);assert.equal(h.text('b'),'B');
  h.emit('b','ccText','b text');h.emit('a','ccText','a late');h.emit('a','ccEnd',{});
  assert.equal(h.context.busy,true);assert.equal(h.$('send').getAttribute('aria-label'),'停止回复');assert.match(h.text('a'),/a earlya late/);assert.doesNotMatch(h.text('b'),/a early|a late/);
@@ -29,12 +30,12 @@ test('interleaved requests queue preflight output and route background replies w
  const before=h.text('b');h.emit('b','ccText','stale');assert.equal(h.text('b'),before);
 });
 test('failed preflight in one conversation does not stop another running conversation',async()=>{
- const h=harness();const a=h.context.sendChatMessage('A');h.calls.get('a').resolve();await a;h.emit('a','ccStart',{});
- h.select('b');const b=h.context.sendChatMessage('B');h.calls.get('b').reject(new Error('offline'));await assert.rejects(b,/offline/);
+ const h=harness();const a=h.context.sendChatMessage('A');await h.waitForCall('a');h.calls.get('a').resolve();await a;h.emit('a','ccStart',{});
+ h.select('b');const b=h.context.sendChatMessage('B');await h.waitForCall('b');h.calls.get('b').reject(new Error('offline'));await assert.rejects(b,/offline/);
  assert.equal(h.context.chatRuns.has('a'),true);assert.equal(h.context.chatRuns.has('b'),false);assert.equal(h.text('b'),'');h.emit('a','ccText','still running');assert.match(h.text('a'),/still running/);
 });
 test('background streaming leaves the mounted conversation and composer untouched',async()=>{
- const h=harness();const a=h.context.sendChatMessage('A');h.calls.get('a').resolve();await a;h.emit('a','ccStart',{});h.select('b');
+ const h=harness();const a=h.context.sendChatMessage('A');await h.waitForCall('a');h.calls.get('a').resolve();await a;h.emit('a','ccStart',{});h.select('b');
  const live=h.$('chat'),marker=live.ownerDocument.createElement('div');marker.textContent='visible B';live.append(marker);
  const observer=new live.ownerDocument.defaultView.MutationObserver(()=>{});observer.observe(live,{subtree:true,childList:true,characterData:true});let refreshes=0;h.context.renderRuntime=()=>refreshes++;
  for(let n=0;n<500;n++)h.emit('a','ccText','x');
@@ -42,13 +43,15 @@ test('background streaming leaves the mounted conversation and composer untouche
 });
 
 test('real routed reasoning keeps stopped and failed terminal states after ccEnd, without stopping another chat',async()=>{
- const h=harness(true);const a=h.context.sendChatMessage('A');h.calls.get('a').resolve();await a;
+ const h=harness(true);const a=h.context.sendChatMessage('A');await h.waitForCall('a');h.calls.get('a').resolve();await a;
  h.emit('a','ccReasoning','partial A');h.emit('a','ccText','answer A');
  const blockA=h.$('chat').querySelector('.assistant');assert.equal(blockA.messageReasoning.phase,'answering');
- h.select('b');const b=h.context.sendChatMessage('B');h.calls.get('b').resolve();await b;h.emit('b','ccReasoning','partial B');
+ h.select('b');const b=h.context.sendChatMessage('B');await h.waitForCall('b');h.calls.get('b').resolve();await b;h.emit('b','ccReasoning','partial B');
  const blockB=h.$('chat').querySelector('.assistant');
  h.emit('a','ccError',{status:'stopped',message:'cancelled'});h.emit('a','ccEnd',{status:'completed'});
  assert.equal(blockA.messageReasoning.phase,'stopped');assert.equal(blockA.messageReasoning.timer,null);assert.equal(blockB.messageReasoning.phase,'thinking');assert.equal(h.context.busy,true);
  h.emit('b','ccError','runtime failed');h.emit('b','ccEnd',{});assert.equal(blockB.messageReasoning.phase,'failed');assert.equal(blockB.messageReasoning.timer,null);
  assert.equal(h.context.chatSessions.find(c=>c.id==='a').chatStatus,'stopped');assert.equal(h.context.chatSessions.find(c=>c.id==='b').chatStatus,'failed');
 });
+
+test('draft persistence failure blocks runtime send and preserves unrelated running chat',async()=>{const h=harness();const a=h.context.sendChatMessage('A');await h.waitForCall('a');h.calls.get('a').resolve();await a;h.select('b');h.context.draftPersistence.prepare=async()=>{throw new Error('disk full');};await assert.rejects(h.context.sendChatMessage('B'),/disk full/);assert.equal(h.calls.has('b'),false);assert.equal(h.context.chatRuns.has('a'),true);assert.equal(h.context.chatRuns.has('b'),false);assert.equal(h.text('b'),'');});
