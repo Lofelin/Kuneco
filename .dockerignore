@@ -6,6 +6,7 @@ src/features/*
 !src/features/proxy/
 src/features/proxy/*
 !src/features/proxy/proxy.mjs
+!src/features/proxy/request-lifecycle.mjs
 !docker/
 !docker/runtime/
 !docker/runtime/Dockerfile

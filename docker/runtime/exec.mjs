@@ -1,9 +1,37 @@
 import {spawn} from 'node:child_process';
-import {writeFileSync,unlinkSync} from 'node:fs';
+import {writeFileSync,unlinkSync,existsSync} from 'node:fs';
 const [id,command,...args]=process.argv.slice(2);
-if(!/^[a-f0-9-]{36}$/.test(id))process.exit(1);
+if(!/^[a-f0-9-]{36}$/.test(id)||!command)process.exit(1);
+const pidFile='/tmp/dingtu-'+id,cancelFile=pidFile+'.cancel';
+const removeFiles=()=>{for(const file of [pidFile,cancelFile])try{unlinkSync(file);}catch{}};
+// A cancellation can arrive before Docker starts this wrapper.
+if(existsSync(cancelFile)){removeFiles();process.exit(143);}
 const child=spawn(command,args,{stdio:'inherit',detached:true});
-writeFileSync('/tmp/dingtu-'+id,String(child.pid));
-const terminate=()=>{try{process.kill(-child.pid,'SIGTERM');}catch{}};
-process.on('SIGTERM',terminate);process.on('SIGINT',terminate);
-child.on('error',()=>process.exit(1));child.on('exit',code=>{try{unlinkSync('/tmp/dingtu-'+id);}catch{}process.exit(code??1);});
+let stopping=false,exitCode=1,cleanupTimer;
+const signalGroup=signal=>{
+  if(!Number.isInteger(child.pid)||child.pid<=0)return false;
+  try{process.kill(-child.pid,signal);return true;}catch(error){if(error.code==='ESRCH')return false;throw error;}
+};
+const finish=()=>{
+  clearTimeout(cleanupTimer);
+  removeFiles();
+  process.exit(exitCode);
+};
+const stop=code=>{
+  if(stopping)return;
+  stopping=true;exitCode=code;
+  // Keep the wrapper alive even if the group leader exits on TERM: descendants
+  // can ignore it and still own inherited stdio or run background work.
+  if(!signalGroup('SIGTERM'))return finish();
+  cleanupTimer=setTimeout(()=>{signalGroup('SIGKILL');finish();},1000);
+};
+process.on('SIGTERM',()=>stop(143));
+process.on('SIGINT',()=>stop(130));
+child.once('spawn',()=>{
+  // Cancellation signals this wrapper, which owns the bounded group shutdown.
+  try{writeFileSync(pidFile,String(process.pid));}catch{return stop(1);}
+  // Publishing the PID before checking closes the cancellation/start race.
+  if(existsSync(cancelFile))stop(143);
+});
+child.once('error',()=>finish());
+child.once('exit',code=>stop(code??1));

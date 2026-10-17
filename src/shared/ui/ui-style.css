@@ -2006,3 +2006,6 @@ wa-switch{--wa-form-control-activated-color:var(--ink)}
 #chatForm,.bubble,.bubble>.message-content{border-radius:var(--chat-radius)}
 
 #chat.reply-in-progress .message-edit-action{display:none!important}
+.environment-reliability{min-width:0}
+.environment-reliability>.preference-heading{margin:0;font-size:14px;line-height:20px}
+.environment-reliability>.settings-section-description{margin:var(--settings-title-description-gap) 0 var(--settings-section-content-gap);font-size:12px;line-height:20px;color:var(--muted)}

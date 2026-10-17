@@ -1,3 +1,4 @@
+import {readContainerDisplay} from '../features/environments/container-display.mjs';
 import {ChatRuns} from '../features/chat/chat-runs.mjs';
 import {rewindPrefix,replayPrompt,deepSeekPrefix} from '../features/chat/message-rewind.mjs';
 import {connectEnvironmentProxy,restoreSelectedEnvironment} from '../features/environments/environment-proxy.mjs';
@@ -548,10 +549,11 @@ ipcMain.handle('workspace:dockerEnvironments',guarded(async(action='state',value
  if(action==='existing')return dockerEnvs.existing(dockerOwner());
  if(action==='previewExisting')return dockerEnvs.previewExisting(dockerOwner(),value.key);
  if(action==='detail'){
-  const owner=dockerOwner();let item,registry,container=null,baseImage=null,baseSystem=null;
+  const owner=dockerOwner();let item,registry,container=null,baseImage=null,baseSystem=null,reliability=null;
   if(value.id===null){const data=await dockerEnvs.load(owner);if(data.localEnabled===false)throw new Error('环境不存在');registry=activeContainerId===null?registeredRuntimes:await account.runtimes(hostname()).catch(()=>null);item={name:data.localName || '本机环境'};}
   else{item=(await dockerEnvs.get(owner,value.id)).item;registry=item.registry;
    const name=item.external?.id || resourcePrefix(owner,value.id)+'-worker';
+   const endpoint=item.external?.endpoint || dockerEnvs.endpoint;const [worker,gateway]=await Promise.all([readContainerDisplay(dockerEnvs,name,endpoint),item.external?Promise.resolve(null):readContainerDisplay(dockerEnvs,resourcePrefix(owner,value.id)+'-gateway',endpoint)]);reliability={worker,gateway};
    try{container=JSON.parse(await dockerEnvs.command(['inspect','--format','{"id":{{json .Id}},"name":{{json .Name}},"image":{{json .Config.Image}}}',name],{endpoint:item.external?.endpoint || dockerEnvs.endpoint,timeout:5000}));}catch{container={name:item.external?.name || name,image:item.imageName || null};}
   }
   if(value.id!==null){
@@ -560,7 +562,7 @@ ipcMain.handle('workspace:dockerEnvironments',guarded(async(action='state',value
   }
   if(value.id===activeContainerId && registry)registry=await runtimeView(registry,{refresh:false});
   if(owner!==dockerOwner())throw new Error('查看期间账号已变化，请重新打开环境');
-  return {id:value.id,name:item.name,external:Boolean(item.external),containerName:container?.name?.replace(/^\//,'') || null,containerId:container?.id || null,containerImage:container?.image || null,baseImage,baseSystem,createdAt:item.createdAt || null,proxyConfigured:value.id===null?null:Boolean(item.proxy?.host),checkedAt:registry?.checkedAt || null,runtimes:(registry?.runtimes || []).map(runtime=>({id:runtime.id,name:runtime.name,version:runtime.version,models:runtime.models}))};
+  return {id:value.id,name:item.name,external:Boolean(item.external),containerName:container?.name?.replace(/^\//,'') || null,containerId:container?.id || null,containerImage:container?.image || null,baseImage,baseSystem,reliability,createdAt:item.createdAt || null,proxyConfigured:value.id===null?null:Boolean(item.proxy?.host),checkedAt:registry?.checkedAt || null,runtimes:(registry?.runtimes || []).map(runtime=>({id:runtime.id,name:runtime.name,version:runtime.version,models:runtime.models}))};
  }
  if(action==='logout'){
   const owner=dockerOwner(),id=activeContainerId;

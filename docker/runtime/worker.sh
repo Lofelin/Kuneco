@@ -8,4 +8,5 @@ iptables -A OUTPUT -o lo -j ACCEPT
 iptables -A OUTPUT -d "$DINGTU_GATEWAY_IP" -p tcp --dport 8080 -j ACCEPT
 ip6tables -P OUTPUT DROP
 ip6tables -A OUTPUT -o lo -j ACCEPT
+touch /tmp/kuneco-worker-ready
 exec setpriv --reuid=1000 --regid=1000 --init-groups --bounding-set=-all sleep infinity

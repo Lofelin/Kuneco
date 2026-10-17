@@ -1,3 +1,4 @@
+import {containerDisplayRows} from '../features/environments/container-display-rows.mjs';
 import {mountMessageActions,openMessageEditor} from '../features/chat/message-actions.mjs';
 import {mountNotificationSettings} from '../features/notifications/notification-settings.mjs';
 import {generatedAvatar,runtimeAccountAvatar,setAccountAvatar} from '../vendor/generated-avatar.js';
@@ -1590,7 +1591,7 @@ async function refreshEnvironments(existing){
 
  for(const item of state.environments.filter(item=>item.id===state.activeId)){
   const row=document.createElement('div');row.className='docker-environment-row';
-  const info=document.createElement('div'),name=document.createElement('strong'),meta=document.createElement('p');name.textContent=item.name;meta.className='muted';meta.textContent=`${item.running?'运行中':'已停止'} · ${item.runtimeCount} 个运行时${item.external?' · 已有容器（原网络）':''}${item.id===state.activeId?' · 当前环境':''}`;info.append(name,meta);row.append(createIcon(environmentIcon(item.icon,'boxes')),info);
+  const info=document.createElement('div'),name=document.createElement('strong'),meta=document.createElement('p');name.textContent=item.name;meta.className='muted';meta.textContent=`${item.statusText || (item.running?'运行中':'已停止')} · ${item.runtimeCount} 个运行时${item.external?' · 已有容器（原网络）':''}${item.id===state.activeId?' · 当前环境':''}`;info.append(name,meta);row.append(createIcon(environmentIcon(item.icon,'boxes')),info);
 
   row.dataset.environmentId=item.id;
   $('environmentList').append(row);await renderEnvironmentCard(row,item.id);
@@ -1617,7 +1618,7 @@ async function renderEnvironmentCard(row,id){
   row.classList.toggle('environment-has-image-details',!local);
   const identity=document.createElement('div');identity.className='environment-identity';
   const nameLine=document.createElement('div');nameLine.className='environment-name-line';const name=document.createElement('h2');name.textContent=detail.name;
-  const status=document.createElement('span');status.className='environment-running-status';status.dataset.running=String(local || Boolean(item?.running));status.textContent=local?'本机':item?.running?'运行中':'已停止';
+  const status=document.createElement('span');status.className='environment-running-status';status.dataset.running=String(local || Boolean(item?.running));status.textContent=local?'本机':detail.reliability?.worker?.status || item?.statusText || (item?.running?'运行中':'已停止');
   const type=document.createElement('span');setEnvironmentTypeIcon(type,local);nameLine.append(name);nameLine.append(type);
   if(current){const active=createUI('wa-badge');active.className='small-tag';active.textContent='当前环境';nameLine.append(active);}if(!local)nameLine.append(status);
   const metadata=document.createElement('div');metadata.className='environment-summary-meta environment-image-versions';
@@ -1644,7 +1645,14 @@ async function renderEnvironmentCard(row,id){
    const table=document.createElement('app-table');
    renderRuntimeTable(table,detail.runtimes,{columns:[{key:'name',label:'运行时',width:'145px'},{key:'version',label:'CLI 版本',width:'175px'},{key:'models',label:'模型'}],actions:false,onOpen:runtime=>{if(owner!==accountState.user?.id || id!==dockerEnvironmentState.activeId)return;switchPage('runtime');openRuntimeDetails(runtimeRegistry.runtimes.find(entry=>entry.id===runtime.id) || runtime);}});runtimes.append(table);
   }else{const empty=document.createElement('p');empty.className='environment-runtime-empty muted';empty.textContent='尚未配置运行时。'+(id===dockerEnvironmentState.activeId?'请前往「运行时」配置。':'切换到此环境后，请前往「运行时」配置。');runtimes.append(empty);}
-  details.append(facts,runtimes);
+  details.append(facts);
+  if(!local){
+   const section=document.createElement('section');section.className='environment-reliability';
+   const heading=document.createElement('h3');heading.className='preference-heading';heading.textContent='容器状态与保障';
+   const description=document.createElement('p');description.className='settings-section-description';description.textContent=detail.external?'以下为原容器当前配置，由原容器管理方维护。':'容器自检只检查本地服务，不代表代理出口已核验。数据卷保留，规格更新失败会回退。';
+   const table=document.createElement('app-table');renderAppTable(table,{label:'容器状态与保障',columns:[{key:'label',label:'项目',width:'120px'},{key:'worker',label:detail.external?'关联容器':'工作容器'},...(!detail.external?[{key:'gateway',label:'代理网关'}]:[])],rows:containerDisplayRows(detail.reliability?.worker,detail.reliability?.gateway,{external:detail.external}),minWidth:detail.external?400:600});section.append(heading,description,table);details.append(section);
+  }
+  details.append(runtimes);
  }catch(error){if(owner===accountState.user?.id && row.isConnected)details.textContent='环境信息读取失败：'+error.message;}
 }
 
