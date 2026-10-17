@@ -8,6 +8,7 @@ export class AppButton extends WaButton {
   :host(:not([layout=custom]):not([icon-only]):not(.icon-button):not(.nav):not(.session-row):not(.account-trigger):not(.content-tab-select):not(.environment-detail-icon-button):not(.preview-round)) .button{padding-inline:var(--button-padding-inline)!important}
   slot[name=start]::slotted(*){margin-inline:0 var(--button-icon-gap)!important}
   slot[name=end]::slotted(*){margin-inline:var(--button-icon-gap) 0!important}
+  :host([icon-only]) slot[name=start]::slotted(*),:host([icon-only]) slot[name=end]::slotted(*){margin-inline:0!important}
   :host([appearance=plain]) .button,:host(.transparent-action) .button,:host(.text-button) .button{background:transparent!important;border-color:transparent!important;box-shadow:none!important}
   .button:focus-visible{outline:2px solid var(--field-focus-ring,color-mix(in srgb,var(--blue) 16%,transparent));outline-offset:2px}
   :host([layout=custom]) .button{display:inherit;align-items:inherit;justify-content:inherit;gap:inherit!important;width:100%;height:100%;min-height:0;padding:0!important;border:0;background:transparent;color:inherit;font:inherit;white-space:inherit}
