@@ -1,0 +1,9 @@
+*
+!src/
+src/*
+!src/proxy.mjs
+!docker/
+!docker/runtime/
+!docker/runtime/Dockerfile
+!docker/runtime/*.mjs
+!docker/runtime/*.sh

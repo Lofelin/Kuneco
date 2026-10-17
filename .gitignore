@@ -1,0 +1,18 @@
+# Dependencies and generated bundles
+node_modules/
+src/vendor/
+vendor/container-engine/
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Runtime data and local acceptance artifacts
+backend/data/
+backend/bin/
+artifacts/
+*.log
+.DS_Store
