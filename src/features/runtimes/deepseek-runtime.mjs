@@ -1,4 +1,4 @@
-import {compactHistory,restoreHistory} from './history-compaction.mjs';
+import {compactHistory,restoreHistory,historyHash,shouldAutoCompact} from './history-compaction.mjs';
 import {BoundedRequests} from '../proxy/request-admission.mjs';
 import {RequestLifecycle} from '../proxy/request-lifecycle.mjs';
 // Installed inside the current container; credentials and histories stay in its home volume.
@@ -109,7 +109,7 @@ export async function configureDeepSeek(directory,input,request){
  await writeFile(temporary,JSON.stringify({apiKey:input.apiKey,model,models}),{mode:0o600});await chmod(temporary,0o600);await rename(temporary,file);
  return {model,models};
 }
-export async function runDeepSeekCLI(command,input,{directory=path.join(homedir(),'.config','dingtu-deepseek'),request=requestDeepSeek,onText=()=>{},onReasoning=()=>{},onActivity=()=>{},signal}={}){
+export async function runDeepSeekCLI(command,input,{directory=path.join(homedir(),'.config','dingtu-deepseek'),request=requestDeepSeek,onText=()=>{},onReasoning=()=>{},onActivity=()=>{},onCompaction=()=>{},onUsage=()=>{},signal}={}){
  if(command==='configure-install')return configureDeepSeek(directory,input,(route)=>request(undefined,input.apiKey,route,undefined,{installation:true}));
  if(command==='configure')return configureDeepSeek(directory,input,(route,body)=>request(process.env.HTTP_PROXY,input.apiKey,route,body));
  const config=JSON.parse(await readFile(path.join(directory,'credentials.json'),'utf8'));
@@ -128,6 +128,21 @@ export async function runDeepSeekCLI(command,input,{directory=path.join(homedir(
  const model=input.model || config.model;if(!config.models.some(item=>item.model===model))throw new Error('请选择此账号可用的模型');
  const file=path.join(directory,input.sessionId+'.json');let history=[];try{history=JSON.parse(await readFile(file,'utf8'));if(!Array.isArray(history))throw new Error();}catch(error){if(error.code!=='ENOENT')throw new Error('对话历史损坏，未覆盖原记录，请新建对话');}
  if(input.history!==undefined){if(!Array.isArray(input.history)||input.history.some(m=>!['user','assistant'].includes(m.role)||!(typeof m.content==='string'||Array.isArray(m.content))))throw new Error('回退历史无效');history=input.history;}
+ let contextLimit=null;try{const catalog=await request(process.env.HTTP_PROXY,config.apiKey,'/models',undefined,{direct:input.networkMode==='direct',signal});const capacity=catalog.data?.find(m=>m.id===model)?.context_window;if(Number.isSafeInteger(capacity)&&capacity>0)contextLimit=capacity;}catch(error){if(signal?.aborted)throw error;}
+ const contextFile=file+'.context.json';let contextState=null;try{const saved=JSON.parse(await readFile(contextFile,'utf8'));if(input.history===undefined&&saved.model===model&&saved.historyHash===historyHash(JSON.stringify(history)))contextState=saved;}catch{}
+ const autoCompact=async state=>{
+  if(!shouldAutoCompact({...state,contextLimit}))return false;
+  const candidate=JSON.parse(await readFile(file,'utf8'));if(candidate.filter(m=>m.role==='user').length<3)return false;
+  const id='compact-'+Date.now()+'-'+Math.random().toString(36).slice(2),startedAt=Date.now();let compactUsage;
+  const activity={id,type:'context_compaction',provider:'deepseek',toolName:'自动上下文压缩',icon:'file-text',title:'自动压缩上下文',startedAt,input:{promptTokens:state.promptTokens,completionTokens:state.completionTokens,contextLimit,threshold:.8}};
+  onActivity({...activity,status:'in_progress'});
+  try{const record=await compactHistory({file,signal,requireReduction:true,summarize:async prompt=>{
+   const result=await request(process.env.HTTP_PROXY,config.apiKey,'/chat/completions',{model,messages:[{role:'user',content:prompt}],max_tokens:4096,stream:true,stream_options:{include_usage:true},thinking:{type:'disabled'}},{direct:input.networkMode==='direct',signal,onText:()=>{},onReasoning:()=>{}});
+   compactUsage=result.usage;const choice=result.choices?.[0];if(choice?.finish_reason!=='stop')throw new Error('摘要未完整返回，未修改原始上下文');return choice.message?.content;
+  }});const receipt={...record,automatic:true,usage:compactUsage,contextLimit,triggerTokens:state.promptTokens+Math.max(0,state.completionTokens||0)};onCompaction(receipt);onActivity({...activity,status:'completed',durationMs:Date.now()-startedAt,output:{beforeBytes:record.beforeBytes,afterBytes:record.afterBytes,backup:record.backup,message:'已保留原始备份及最近两轮；聊天记录不删除'}});return true;
+  }catch(error){onCompaction({automatic:true,status:signal?.aborted?'stopped':'failed',at:new Date().toISOString(),usage:compactUsage,contextLimit,error:error.message});onActivity({...activity,status:signal?.aborted?'stopped':'failed',durationMs:Date.now()-startedAt,error:error.message,output:'自动压缩未完成，未自动重试；原始记录保留'});throw new Error('自动上下文压缩未完成：'+error.message);}
+ };
+ if(contextState&&await autoCompact(contextState))history=JSON.parse(await readFile(file,'utf8'));
  const content=message.images.length?[...(message.text.trim()?[{type:'text',text:message.text}]:[]),...message.images.map(image=>({type:'image_url',image_url:{url:image.dataURL || image.url,detail:image.detail}}))]:message.text;
  // Old text-only history has no reasoning field. Interrupted tool calls receive an explicit
  // unknown-result response; they are never silently re-executed after a crash or stop.
@@ -140,7 +155,7 @@ export async function runDeepSeekCLI(command,input,{directory=path.join(homedir(
  const options={direct:input.networkMode==='direct',onText,onReasoning,signal};
  const tools=input.project===undefined?null:await createDeepSeekTools({cwd:input.project,signal,onActivity});
  const body={model,messages,stream:true,stream_options:{include_usage:true},thinking:{type:message.thinking},...(tools?{tools:tools.definitions,tool_choice:'auto'}:{})};
- const uploaded=[];
+ const uploaded=[],imageReferences=new Map();
  try{
   // Keep original image data in environment-local history; remote file references are temporary.
   if(totalImageBytes>64*1024*1024 || Buffer.byteLength(JSON.stringify(body))>48*1024*1024 || allImages.some(p=>p.image_url.url.startsWith('data:') && Buffer.from(p.image_url.url.split(',')[1],'base64').length>32*1024*1024)){
@@ -150,17 +165,22 @@ export async function runDeepSeekCLI(command,input,{directory=path.join(homedir(
     const [head,data]=part.image_url.url.split(','),mime=head.slice(5).split(';')[0],boundary='dingtu-'+Date.now()+'-'+i;
     const rawBody=Buffer.concat([Buffer.from('--'+boundary+'\r\nContent-Disposition: form-data; name="purpose"\r\n\r\nuser_data\r\n--'+boundary+'\r\nContent-Disposition: form-data; name="expires_after[anchor]"\r\n\r\ncreated_at\r\n--'+boundary+'\r\nContent-Disposition: form-data; name="expires_after[seconds]"\r\n\r\n3600\r\n--'+boundary+'\r\nContent-Disposition: form-data; name="file"; filename="image"\r\nContent-Type: '+mime+'\r\n\r\n'),Buffer.from(data,'base64'),Buffer.from('\r\n--'+boundary+'--\r\n')]);
     const result=await request(process.env.HTTP_PROXY,config.apiKey,'/files',undefined,{...options,onText:undefined,onReasoning:undefined,rawBody,contentType:'multipart/form-data; boundary='+boundary});
-    if(!/^file-api-[a-zA-Z0-9_-]+$/.test(result.id || ''))throw new Error('DeepSeek 图片上传失败');uploaded.push(result.id);m.content[i]={type:'file',file_id:result.id};
+    if(!/^file-api-[a-zA-Z0-9_-]+$/.test(result.id || ''))throw new Error('DeepSeek 图片上传失败');uploaded.push(result.id);imageReferences.set(part.image_url.url,{type:'file',file_id:result.id});m.content[i]={type:'file',file_id:result.id};
    }
   }
   if(Buffer.byteLength(JSON.stringify(body))>48*1024*1024)throw new Error('对话请求超过 48 MiB，请新建对话');
   const checkpoint=async()=>{const temporary=file+'.tmp';await writeFile(temporary,JSON.stringify(messages),{mode:0o600});await rename(temporary,file);};
-  const usage={prompt_tokens:0,completion_tokens:0,total_tokens:0,prompt_cache_hit_tokens:0,prompt_cache_miss_tokens:0};let answer='',count=0;
+  const usage={context_limit:contextLimit,prompt_tokens:0,completion_tokens:0,total_tokens:0,prompt_cache_hit_tokens:0,prompt_cache_miss_tokens:0};let answer='',count=0;
+  const manageContext=async actual=>{
+   const state={model,historyHash:historyHash(JSON.stringify(messages)),promptTokens:actual?.prompt_tokens,completionTokens:actual?.completion_tokens};
+   await writeFile(contextFile,JSON.stringify(state),{mode:0o600});
+   if(await autoCompact(state)){const next=JSON.parse(await readFile(file,'utf8'));messages.splice(0,messages.length,...next);body.messages=imageReferences.size?messages.map(m=>({...m,...(Array.isArray(m.content)?{content:m.content.map(p=>p.type==='image_url'&&imageReferences.has(p.image_url.url)?imageReferences.get(p.image_url.url):p)}:{})})):messages;usage.context_compacted=true;}
+  };
   for(let round=0;round<24;round++){
    signal?.throwIfAborted();if(Buffer.byteLength(JSON.stringify(body))>48*1024*1024)throw new Error('工具上下文超过 48 MiB，请新建对话');
    const result=await request(process.env.HTTP_PROXY,config.apiKey,'/chat/completions',{...body,messages:[...body.messages]},options);
    for(const key of ['prompt_tokens','completion_tokens','total_tokens','prompt_cache_hit_tokens','prompt_cache_miss_tokens']){const n=result.usage?.[key];usage[key]=usage[key]!==null&&Number.isSafeInteger(n)&&n>=0?usage[key]+n:null;}
-   usage.last_prompt_tokens=result.usage?.prompt_tokens;usage.last_completion_tokens=result.usage?.completion_tokens;
+   usage.context_compacted=false;usage.last_prompt_tokens=result.usage?.prompt_tokens;usage.last_completion_tokens=result.usage?.completion_tokens;onUsage({...usage});
    const choice=result.choices?.[0],reply=choice?.message;if(!reply)throw new Error('DeepSeek 未返回有效回复');
    const calls=reply.tool_calls||[];
    if(calls.length && (!tools||choice.finish_reason!=='tool_calls'))throw new Error('工具调用未完整结束，未执行');
@@ -171,9 +191,10 @@ export async function runDeepSeekCLI(command,input,{directory=path.join(homedir(
    }else if(typeof reply.content!=='string'||!reply.content)throw new Error('DeepSeek 未返回有效回复');
    const assistant={role:'assistant',content:reply.content||'',reasoning_content:reply.reasoning_content||'',...(calls.length?{tool_calls:calls}:{})};
    messages.push(assistant);if(body.messages!==messages)body.messages.push(assistant);answer+=assistant.content;
-   if(!calls.length){await checkpoint();return {text:answer,usage,finishReason:choice.finish_reason};}
+   if(!calls.length){await checkpoint();await manageContext(result.usage);return {text:answer,usage,finishReason:choice.finish_reason};}
    await checkpoint(); // Persist intent before executing; a restart must not repeat an unknown operation.
    for(const call of calls){signal?.throwIfAborted();count++;const result=await tools.execute(call);const response={role:'tool',tool_call_id:call.id,content:result};messages.push(response);if(body.messages!==messages)body.messages.push(response);await checkpoint();signal?.throwIfAborted();}
+   await manageContext(result.usage);
   }
   throw new Error('工具执行达到 24 轮上限，已停止；已完成的操作不会自动重试');
  }finally{for(const id of uploaded)await request(process.env.HTTP_PROXY,config.apiKey,'/files/'+id,null,{direct:options.direct}).catch(()=>{});}
@@ -181,7 +202,7 @@ export async function runDeepSeekCLI(command,input,{directory=path.join(homedir(
 }
 if(process.argv[1] && import.meta.url===pathToFileURL(process.argv[1]).href){
  const controller=new AbortController();const stop=()=>controller.abort(new Error('请求已取消'));process.on('SIGTERM',stop);process.on('SIGINT',stop);
- try{let text='';for await(const chunk of process.stdin){text+=chunk;if(text.length>300*1024*1024)throw new Error('输入过大');}const value=await runDeepSeekCLI(process.argv[2],text?JSON.parse(text):{},{signal:controller.signal,onActivity:activity=>console.log(JSON.stringify({type:'activity',activity})),onText:text=>console.log(JSON.stringify({type:'delta',text})),onReasoning:text=>console.log(JSON.stringify({type:'reasoning',text}))});console.log(JSON.stringify(process.argv[2]==='chat'?{type:'done',usage:value.usage,finishReason:value.finishReason}:value));}
+ try{let text='';for await(const chunk of process.stdin){text+=chunk;if(text.length>300*1024*1024)throw new Error('输入过大');}const value=await runDeepSeekCLI(process.argv[2],text?JSON.parse(text):{},{signal:controller.signal,onUsage:usage=>console.log(JSON.stringify({type:'usage',usage})),onCompaction:record=>console.log(JSON.stringify({type:'compaction',record})),onActivity:activity=>console.log(JSON.stringify({type:'activity',activity})),onText:text=>console.log(JSON.stringify({type:'delta',text})),onReasoning:text=>console.log(JSON.stringify({type:'reasoning',text}))});console.log(JSON.stringify(process.argv[2]==='chat'?{type:'done',usage:value.usage,finishReason:value.finishReason}:value));}
  catch(error){console.error(error.code==='ENOENT'?'尚未配置 DeepSeek API Key':error.message);process.exitCode=1;}
  finally{closeDeepSeekConnections();}
 }

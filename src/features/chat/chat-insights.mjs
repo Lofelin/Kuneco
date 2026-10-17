@@ -2,7 +2,7 @@ import path from 'node:path';
 // Usage totals and context occupancy deliberately have separate meanings.
 const number=value=>Number.isSafeInteger(value)&&value>=0?value:null;
 export function usageDetails(engine,value){
- if(engine==='deepseek')return {input:number(value?.prompt_tokens),output:number(value?.completion_tokens),cacheRead:number(value?.prompt_cache_hit_tokens),contextTokens:number(value?.last_prompt_tokens),contextLimit:null,contextLabel:'最近请求输入（实测）'};
+ if(engine==='deepseek')return {input:number(value?.prompt_tokens),output:number(value?.completion_tokens),cacheRead:number(value?.prompt_cache_hit_tokens),contextTokens:value?.context_compacted?null:number(value?.last_prompt_tokens),contextLimit:number(value?.context_limit),contextLabel:'最近请求输入（实测）'};
  if(engine==='codex'){const last=value?.context?.last;return {input:number(value?.input_tokens),output:number(value?.output_tokens),cacheRead:number(value?.cached_input_tokens),contextTokens:number(last?.inputTokens),contextLimit:number(value?.context?.modelContextWindow),contextLabel:'最近请求输入（运行时实测）'};}
  const rows=Object.values(value?.modelUsage||{});const sum=key=>rows.length&&rows.every(r=>number(r[key])!==null)?rows.reduce((n,r)=>n+r[key],0):null;
  return {input:sum('inputTokens'),output:sum('outputTokens'),cacheRead:sum('cacheReadInputTokens'),cacheWrite:sum('cacheCreationInputTokens'),contextTokens:null,contextLimit:null,contextLabel:'运行时未提供当前上下文'};

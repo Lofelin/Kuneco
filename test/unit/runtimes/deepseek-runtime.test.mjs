@@ -128,7 +128,7 @@ test('DeepSeek explicit direct chat is passed per request and does not change th
   const input={sessionId:'12345678-1234-1234-1234-123456789abc',prompt:'fixture'};
   await runDeepSeekCLI('chat',{...input,networkMode:'direct'},{directory,request});
   await runDeepSeekCLI('chat',input,{directory,request});
-  assert.deepEqual(modes,[true,false]);
+  assert.deepEqual(modes,[true,true,false,false]);
  }finally{await rm(directory,{recursive:true,force:true});}
 });
 

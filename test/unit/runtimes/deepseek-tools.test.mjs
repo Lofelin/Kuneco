@@ -49,7 +49,7 @@ test('real executor loops Skill then Bash, preserves reasoning and tool results,
 test('network failure after a side effect retains its result and does not replay it',async()=>{
  const root=await fixture(),directory=path.join(root,'config'),sessionId='12345678-1234-1234-1234-123456789012';
  try{await configureDeepSeek(directory,{apiKey:'fixture-key'},async()=>({data:[{id:'deepseek-flash'}]}));let count=0;
- await assert.rejects(runDeepSeekCLI('chat',{sessionId,prompt:'write once',project:root},{directory,request:async()=>{if(count++)throw new Error('offline');return {choices:[{message:{reasoning_content:'once',tool_calls:[call('b','Bash',{command:'printf once >> marker'})]},finish_reason:'tool_calls'}]};}}),/offline/);
+ await assert.rejects(runDeepSeekCLI('chat',{sessionId,prompt:'write once',project:root},{directory,request:async(_p,_k,route)=>{if(route==='/models')return {data:[]};if(count++)throw new Error('offline');return {choices:[{message:{reasoning_content:'once',tool_calls:[call('b','Bash',{command:'printf once >> marker'})]},finish_reason:'tool_calls'}]};}}),/offline/);
  assert.equal(await readFile(path.join(root,'marker'),'utf8'),'once');await runDeepSeekCLI('chat',{sessionId,prompt:'status',project:root},{directory,request:async(_p,_k,_r,body)=>{assert.equal(body.messages.at(-2).role,'tool');return {choices:[{message:{content:'already executed'},finish_reason:'stop'}]};}});assert.equal(await readFile(path.join(root,'marker'),'utf8'),'once');
  }finally{await rm(root,{recursive:true,force:true});}
 });
@@ -62,6 +62,6 @@ test('large command output is explicitly truncated and timeout is a failure',asy
 
 test('aborting a running tool checkpoints stopped result and never requests another model round',async()=>{
  const root=await fixture(),directory=path.join(root,'config'),controller=new AbortController(),sessionId='12345678-1234-1234-1234-123456789012';let requests=0;
- try{await configureDeepSeek(directory,{apiKey:'fixture-key'},async()=>({data:[{id:'deepseek-flash'}]}));await assert.rejects(runDeepSeekCLI('chat',{sessionId,prompt:'stop',project:root},{directory,signal:controller.signal,onActivity:e=>{if(e.status==='in_progress')setTimeout(()=>controller.abort(),50);},request:async()=>{requests++;return {choices:[{message:{tool_calls:[call('b','Bash',{command:'sleep 5'})]},finish_reason:'tool_calls'}]};}}));assert.equal(requests,1);const history=JSON.parse(await readFile(path.join(directory,sessionId+'.json'),'utf8'));assert.match(history.at(-1).content,/已停止/);}
+ try{await configureDeepSeek(directory,{apiKey:'fixture-key'},async()=>({data:[{id:'deepseek-flash'}]}));await assert.rejects(runDeepSeekCLI('chat',{sessionId,prompt:'stop',project:root},{directory,signal:controller.signal,onActivity:e=>{if(e.status==='in_progress')setTimeout(()=>controller.abort(),50);},request:async(_p,_k,route)=>{if(route==='/models')return {data:[]};requests++;return {choices:[{message:{tool_calls:[call('b','Bash',{command:'sleep 5'})]},finish_reason:'tool_calls'}]};}}));assert.equal(requests,1);const history=JSON.parse(await readFile(path.join(directory,sessionId+'.json'),'utf8'));assert.match(history.at(-1).content,/已停止/);}
  finally{await rm(root,{recursive:true,force:true});}
 });
