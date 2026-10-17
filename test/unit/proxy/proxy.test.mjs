@@ -544,8 +544,36 @@ for(const engine of ['native','gost'])test(`${engine}: HTTP response deadlines r
   await until(()=>f.gateway.status.capacity.forwarding.active===1);
   const status=f.gateway.status;
   assert.equal(status.state,'ready');assert.equal(status.connections,1);assert.equal(status.capacity.forwarding.http,0);assert.equal(status.capacity.forwarding.connect,1);
-  assert.deepEqual(status.capacity.forwarding.responseTimeouts,{headers:1,body:1});assert.equal(status.capacity.forwarding.clientCancelledTotal,0);assert.equal(stream.destroyed,false);
+  assert.deepEqual(status.capacity.forwarding.responseTimeouts,{headers:1,body:1,upload:0,downstream:0});assert.equal(status.capacity.forwarding.clientCancelledTotal,0);assert.equal(stream.destroyed,false);
   stream.destroy();await until(()=>f.gateway.status.connections===0&&f.gateway.status.capacity.forwarding.active===0);
   assert.equal(f.gateway.status.capacity.forwarding.establishedTotal,4);assert.equal(f.gateway.status.capacity.forwarding.queued,0);
  }finally{stream?.destroy();await f.cleanup();}
+});
+
+for(const engine of ['native','gost'])test(`${engine}: slow upload and downstream backpressure use progress deadlines and bounded phase metrics`,engine==='gost'?gostTest:{},async()=>{
+ const size=16*1024*1024;
+ const f=await fixture({responseHeadersTimeout:80,responseBodyTimeout:80,uploadIdleTimeout:100,downstreamIdleTimeout:600,...(engine==='gost'?{gostBinary}:{}),respond(req,res){
+  if(req.url==='/upload'){let bytes=0;req.on('data',c=>bytes+=c.length);req.on('end',()=>res.end(String(bytes)));return true;}
+  if(req.url==='/download'){res.writeHead(200,{'content-length':size});res.end(Buffer.alloc(size,97));return true;}
+ }});
+ const auth={'Proxy-Authorization':'Basic '+Buffer.from('workspace:'+f.gateway.token).toString('base64')},base=new URL(f.url).origin;
+ const until=async predicate=>{for(let i=0;i<300&&!predicate();i++)await new Promise(r=>setTimeout(r,10));assert.ok(predicate());};
+ try{
+  await f.gateway.verify(f.url);
+  const uploaded=await new Promise((resolve,reject)=>{const req=http.request({host:'127.0.0.1',port:f.gateway.port,path:base+'/upload',method:'POST',headers:auth},res=>{let data='';res.on('data',c=>data+=c);res.on('end',()=>resolve({code:res.statusCode,data}));});req.on('error',reject);let n=0;const timer=setInterval(()=>{req.write('chunk');if(++n===10){clearInterval(timer);req.end();}},25);req.once('close',()=>clearInterval(timer));});
+  assert.deepEqual(uploaded,{code:200,data:'50'});
+  const stalled=await new Promise((resolve,reject)=>{const req=http.request({host:'127.0.0.1',port:f.gateway.port,path:base+'/upload',method:'POST',headers:auth},res=>{res.resume();res.on('end',()=>{resolve(res.statusCode);req.destroy();});});req.on('error',reject);req.write('partial');});assert.equal(stalled,504);
+  const downloaded=await new Promise((resolve,reject)=>{const req=http.get({host:'127.0.0.1',port:f.gateway.port,path:base+'/download',headers:auth},res=>{let bytes=0;res.pause();setTimeout(()=>res.resume(),250);res.on('data',c=>{bytes+=c.length;res.pause();setTimeout(()=>res.resume(),8);});res.on('error',reject);res.on('end',()=>resolve(bytes));});req.on('error',reject);});assert.equal(downloaded,size);
+  await f.gateway.readText(f.url);await f.gateway.readText(f.url);await until(()=>f.gateway.status.connections===0);
+  const metrics=f.gateway.status.performance;
+  assert.ok(metrics['http.cold.success'].phases.upload.p95Ms>150);
+  assert.ok(metrics['http.cold.success'].phases.downstream.p95Ms>0);
+  assert.equal(metrics['http.cold.timeout'].count,1);assert.ok(metrics['probe.reused.success'].count>=1);assert.ok(f.gateway.status.performanceReuse.probe.reuseRate>0);assert.equal(f.gateway.status.performanceReuse.verification.reuseRate,0);
+  assert.equal(f.gateway.status.capacity.forwarding.responseTimeouts.upload,1);assert.equal(f.gateway.status.capacity.forwarding.responseTimeouts.body,0);
+  assert.equal(f.gateway.status.state,'ready');assert.equal(f.gateway.status.capacity.forwarding.active,0);
+  // A receiver that never resumes is bounded by the downstream deadline, not body idle.
+  const stuck=http.get({host:'127.0.0.1',port:f.gateway.port,path:base+'/download',headers:auth},res=>{res.pause();res.on('error',()=>{});});stuck.on('error',()=>{});
+  try{await until(()=>f.gateway.status.capacity.forwarding.responseTimeouts.downstream===1);await until(()=>f.gateway.status.capacity.forwarding.active===0);}finally{stuck.destroy();}
+  assert.equal(f.gateway.status.capacity.forwarding.responseTimeouts.body,0);
+ }finally{await f.cleanup();}
 });

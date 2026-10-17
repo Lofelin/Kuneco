@@ -55,3 +55,10 @@ test('DeepSeek CONNECT timeout and cancellation are bounded without request repl
   await assert.rejects(pending,e=>e.name==='AbortError');assert.equal(connects,2);
  }finally{closeDeepSeekConnections();for(const s of peers)s.destroy();upstream.close();}
 });
+
+test('phase statistics keep a bounded window and record completion exactly once',async()=>{
+ const {PerformanceStats}=await import('../../../src/features/proxy/request-lifecycle.mjs');const stats=new PerformanceStats();
+ for(let i=0;i<300;i++){const timing=stats.start('probe');timing.advance('connect');timing.advance('headers');timing.finish('success');timing.finish('error');}
+ const snapshot=stats.snapshot();assert.equal(snapshot['probe.cold.success'].count,300);assert.equal(snapshot['probe.cold.success'].windowSamples,128);assert.equal(snapshot['probe.cold.error'],undefined);
+ assert.ok(snapshot['probe.cold.success'].phases.total.p95Ms>=0);
+});

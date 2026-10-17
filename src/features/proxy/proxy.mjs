@@ -1,4 +1,4 @@
-import {RequestLifecycle} from './request-lifecycle.mjs';
+import {RequestLifecycle,PerformanceStats} from './request-lifecycle.mjs';
 import {startGost} from './gost-sidecar.mjs';
 import http from 'node:http';
 import https from 'node:https';
@@ -79,7 +79,7 @@ class AdmissionQueue {
 }
 
 export class ProxyGateway extends EventEmitter {
-  constructor(config, { timeout = 15000, allowLocalTargets = false, ca = undefined, expectedIp = null, healthInterval = 60000, retryBase = 5000, retryMax = 300000, leaseMs = 180000, jitter = 0.2, onVerified = null, listenHost = '127.0.0.1', listenPort = 0, gostBinary = null, coreRetryBase = 1000, coreRetryMax = 30000, coreRetryLimit = 5, coreStableMs = 60000, forwardingLimit = 64, forwardingQueueLimit = 128, queueTimeout = 15000, responseHeadersTimeout = 30000, responseBodyTimeout = 30000 } = {}) {
+  constructor(config, { timeout = 15000, allowLocalTargets = false, ca = undefined, expectedIp = null, healthInterval = 60000, retryBase = 5000, retryMax = 300000, leaseMs = 180000, jitter = 0.2, onVerified = null, listenHost = '127.0.0.1', listenPort = 0, gostBinary = null, coreRetryBase = 1000, coreRetryMax = 30000, coreRetryLimit = 5, coreStableMs = 60000, forwardingLimit = 64, forwardingQueueLimit = 128, queueTimeout = 15000, responseHeadersTimeout = 30000, responseBodyTimeout = 30000, uploadIdleTimeout = 30000, downstreamIdleTimeout = 30000 } = {}) {
     super();
     this.config = validateProxy(config);
     if (expectedIp && !net.isIP(expectedIp)) throw new Error('固定出口 IP 无效');
@@ -90,9 +90,10 @@ export class ProxyGateway extends EventEmitter {
     this.coreGeneration=0;this.coreAvailable=!gostBinary;this.coreAttempts=0;
     this.monitoring = false; this.quarantined = false; this.failures = 0;
     this.timeout = timeout;
-    for(const value of [responseHeadersTimeout,responseBodyTimeout])if(!Number.isFinite(value)||value<=0)throw new Error('无效响应超时');
-    Object.assign(this,{responseHeadersTimeout,responseBodyTimeout});
-    this.forwardMetrics={http:0,connect:0,establishedTotal:0,clientCancelledTotal:0,abortedTotal:0,responseTimeouts:{headers:0,body:0}};
+    for(const value of [responseHeadersTimeout,responseBodyTimeout,uploadIdleTimeout,downstreamIdleTimeout])if(!Number.isFinite(value)||value<=0)throw new Error('无效响应超时');
+    Object.assign(this,{responseHeadersTimeout,responseBodyTimeout,uploadIdleTimeout,downstreamIdleTimeout});
+    this.performanceStats=new PerformanceStats();
+    this.forwardMetrics={http:0,connect:0,establishedTotal:0,clientCancelledTotal:0,abortedTotal:0,responseTimeouts:{headers:0,body:0,upload:0,downstream:0}};
     this.ca = ca;
     this.allowLocalTargets = allowLocalTargets;
     this.sockets = new Set();
@@ -110,6 +111,8 @@ export class ProxyGateway extends EventEmitter {
     if(!this._status)return this._status;
     const count=group=>Object.values(group).reduce((n,list)=>n+list.length,0);
     let active=0,idle=0;for(const agent of this.requestAgents.values()){active+=count(agent.sockets);idle+=count(agent.freeSockets);}
+    this._status.performance=this.performanceStats.snapshot();
+    this._status.performanceReuse=this.performanceStats.reuse();
     this._status.connections=this.forwardMetrics.http+this.forwardMetrics.connect;
     this._status.capacity={forwarding:{...this.forwarding.snapshot(),...this.forwardMetrics,responseTimeouts:{...this.forwardMetrics.responseTimeouts}},probes:this.probeAdmission.snapshot(),verification:this.exitAdmission.snapshot()};
     this._status.requestPool={...this.poolStats,activeSockets:active,idleSockets:idle};
@@ -316,21 +319,22 @@ export class ProxyGateway extends EventEmitter {
   }
   async forwardConnect(req, client, head) {
     if (!this.authorized(req)) return client.end('HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm="workspace"\r\n\r\n');
-    const scope=this.forwardingScope(client);let host,port,upstream;
+    const scope=this.forwardingScope(client),timings=this.performanceStats.start('connect');let host,port,upstream;
     try {
       this.assertOpen();
       const parsed=new URL(`http://${req.url}`);host=parsed.hostname.replace(/^\[|\]$/g,'');port=Number(parsed.port || 443);
       if(parsed.username || parsed.password || parsed.pathname!=='/')throw proxyError('INVALID_TARGET');
       await scope.acquire();this.assertOpen();scope.signal.throwIfAborted();
-      upstream=await this.tunnel(host,port,{signal:scope.signal});
+      upstream=await this.tunnel(host,port,{signal:scope.signal,onPhase:phase=>timings.advance(phase)});
       this.assertOpen();scope.signal.throwIfAborted();
+      timings.finish('success');
       client.write('HTTP/1.1 200 Connection Established\r\n\r\n');
       if(head.length)upstream.write(head);
       scope.connected('connect');client.pipe(upstream);upstream.pipe(client);upstream.resume();
       upstream.once('close',()=>{scope.finish();client.destroy();});
       this.update({});
     }catch(error){
-      upstream?.destroy();scope.finish();
+      timings.finish(scope.signal.aborted?'cancelled':error.code==='PROXY_QUEUE_TIMEOUT'?'timeout':'error');upstream?.destroy();scope.finish();
       if(!client.destroyed)client.end(`HTTP/1.1 ${['PROXY_BUSY','PROXY_QUEUE_TIMEOUT'].includes(error.code)?'503 Service Unavailable':'502 Bad Gateway'}\r\nConnection: close\r\n\r\n`);
       if(!scope.signal.aborted)this.reportFailure(error,host,port);
     }
@@ -338,14 +342,14 @@ export class ProxyGateway extends EventEmitter {
   async forward(req,res){
     if(!this.authorized(req)){res.writeHead(407,{'Proxy-Authenticate':'Basic realm="workspace"'});return res.end();}
     let target;try{target=new URL(req.url);if(target.protocol!=='http:')throw new Error();}catch{res.writeHead(400);return res.end('代理仅接受 HTTP 请求或 HTTPS CONNECT');}
-    const scope=this.forwardingScope(res);res.once('finish',scope.finish);let socket,upstream,life;
+    const scope=this.forwardingScope(res),timings=this.performanceStats.start('http');res.once('finish',scope.finish);let socket,upstream,life;
     try{
       this.assertOpen();await scope.acquire();this.assertOpen();scope.signal.throwIfAborted();
-      socket=await this.tunnel(target.hostname,Number(target.port || 80),{signal:scope.signal});
+      socket=await this.tunnel(target.hostname,Number(target.port || 80),{signal:scope.signal,onPhase:phase=>timings.advance(phase)});
       this.assertOpen();scope.signal.throwIfAborted();
       const headers={...req.headers,host:target.host};delete headers['proxy-authorization'];delete headers['proxy-connection'];
       const agent=new http.Agent({keepAlive:false});agent.createConnection=()=>socket;
-      life=new RequestLifecycle({signal:scope.signal,timeouts:{queue:0,connect:0,tunnel:0,tls:0,headers:this.responseHeadersTimeout,body:this.responseBodyTimeout,total:0}});
+      life=new RequestLifecycle({signal:scope.signal,timings,timeouts:{queue:0,connect:0,tunnel:0,tls:0,headers:this.responseHeadersTimeout,body:this.responseBodyTimeout,upload:this.uploadIdleTimeout,downstream:this.downstreamIdleTimeout,total:0}});
       life.rejectOnAbort(error=>{if(error.code==='REQUEST_TIMEOUT'){
         this.forwardMetrics.responseTimeouts[error.phase]++;scope.finish();
         this.reportFailure(error,target.hostname,Number(target.port || 80));
@@ -355,11 +359,11 @@ export class ProxyGateway extends EventEmitter {
         res.writeHead(response.statusCode,response.headers);response.pipe(res);
         response.once('error',()=>res.destroy());response.once('end',()=>socket.destroy());
       });
-      life.bind(upstream,{customConnection:true});scope.connected('http');
-      upstream.once('close',()=>{life.finish();scope.finish();socket.destroy();agent.destroy();});
+      life.bind(upstream,{customConnection:true,uploadSource:req,downstream:res});scope.connected('http');
+      upstream.once('close',()=>{socket.destroy();agent.destroy();});
       upstream.on('error',()=>{if(!res.destroyed){if(!res.headersSent)res.writeHead(502);res.end();if(!scope.signal.aborted&&!life.signal.aborted)this.reportFailure(proxyError('TARGET_STREAM_ERROR'),target.hostname,Number(target.port || 80));}socket.destroy();});
       req.pipe(upstream);socket.resume();
-    }catch(error){life?.finish();socket?.destroy();scope.finish();if(!res.destroyed){if(!res.headersSent)res.writeHead(['PROXY_BUSY','PROXY_QUEUE_TIMEOUT'].includes(error.code)?503:502);res.end('代理未就绪或连接繁忙');}if(!scope.signal.aborted)this.reportFailure(error,target.hostname,Number(target.port || 80));}
+    }catch(error){timings.finish(scope.signal.aborted?'cancelled':error.code==='PROXY_QUEUE_TIMEOUT'?'timeout':'error');life?.finish();socket?.destroy();scope.finish();if(!res.destroyed){if(!res.headersSent)res.writeHead(['PROXY_BUSY','PROXY_QUEUE_TIMEOUT'].includes(error.code)?503:502);res.end('代理未就绪或连接繁忙');}if(!scope.signal.aborted)this.reportFailure(error,target.hostname,Number(target.port || 80));}
   }
   async checkServiceLatencies(targets = {claude:'https://www.anthropic.com/',openai:'https://openai.com/'}) {
     if(this.closed || this.serviceChecking)return;
@@ -422,7 +426,7 @@ export class ProxyGateway extends EventEmitter {
     const target=new URL(url);
     if(!['http:','https:'].includes(target.protocol) || target.username || target.password)throw new Error('不支持的检测地址');
     const agent=this.requestAgent(target,{fresh}),client=target.protocol==='https:'?https:http;
-    const life=new RequestLifecycle({signal,timeouts:{queue:this.timeout,connect:this.timeout,tunnel:this.timeout,tls:this.timeout,headers:this.timeout,body:this.timeout,total:this.timeout*3,...timeouts}});this.pendingRequests.add(life);
+    const life=new RequestLifecycle({signal,timings:this.performanceStats.start(fresh?'verification':'probe'),timeouts:{queue:this.timeout,connect:this.timeout,tunnel:this.timeout,tls:this.timeout,headers:this.timeout,body:this.timeout,total:this.timeout*3,...timeouts}});this.pendingRequests.add(life);
     let release;
     try{release=await (fresh?this.exitAdmission:this.probeAdmission).acquire(life.signal);life.signal.throwIfAborted();return await new Promise((resolve,reject)=>{
       life.rejectOnAbort(reject);
