@@ -39,7 +39,7 @@ import { createRestrictedCCSpawner } from '../features/runtimes/cc-network-guard
 import { evaluateEnvironment, readSystemEnvironment } from '../features/environments/environment-gate.mjs';
 import { protectBrowserContents } from '../features/browser/browser-policy.mjs';
 import {BrowserCookieSync} from '../features/browser/browser-cookies.mjs';
-import {AccountClient,directRequest} from '../features/account/account-client.mjs';
+import {AccountClient} from '../features/account/account-client.mjs';
 import { parseIproyalExport } from '../features/proxy/iproyal-import.mjs';
 
 const here = fileURLToPath(new URL('../',import.meta.url));
@@ -62,7 +62,7 @@ function cookieContext(){
  request:async body=>{
   if(ctx.sync.mode!=='account' || dockerOwner()!==owner || activeContainerId!==id || !account?.token)throw new Error('账号或环境已变化');
   const token=account.token,url=account.serverURL+'/v1/me/browser-cookies?environment='+encodeURIComponent(id || 'local');
-  const result=await directRequest(url,{token,method:body?'PUT':'GET',body});let data;try{data=JSON.parse(result.data);}catch{throw new Error('Cookie 同步服务不可用');}
+  const result=await account.transport(url,{token,method:body?'PUT':'GET',body});let data;try{data=JSON.parse(result.data);}catch{throw new Error('Cookie 同步服务不可用');}
   if(result.status>=400)throw new Error(data.error || 'Cookie 同步失败');ctx.error='';return data;
  },onError:()=>{ctx.error='Cookie 同步失败，请检查账号服务后刷新重试';}});
  ctx.sync.mode=pref.mode;cookieSyncs.set(key,ctx);return ctx;
@@ -328,6 +328,7 @@ function abortRun() {
   approvals.clear();
 }
 async function stopGateway({preserveDirectChat=false}={}) {
+  account?.closeConnections();
   clearInterval(healthTimer); healthTimer = null;
   if(!preserveDirectChat || run?.networkMode!=='direct')abortRun();
   if (gateway) { const old = gateway; gateway = null; await old.stop(); }
@@ -1100,7 +1101,7 @@ app.whenReady().then(async () => {
   app.configureHostResolver({ enableBuiltInResolver: false, secureDnsMode: 'off' });
   await loadConfig();
   desktopReturn=await createDesktopReturn(()=>{if(window && !window.isDestroyed()){if(window.isMinimized())window.restore();window.show();window.focus();app.focus({steal:true});}});
-  account=new AccountClient({returnURL:desktopReturn.url,serverURL:process.env.WORKSPACE_ACCOUNT_SERVER_URL || 'http://localhost:8787',sessionFile:path.join(app.getPath('userData'),'account-session.bin'),storage:safeStorage,directIP:fixtureMode?async()=>'203.0.113.99':undefined,openExternal:url=>fixtureMode?Promise.resolve():shell.openExternal(url)});
+  account=new AccountClient({environment:()=>activeContainerId,returnURL:desktopReturn.url,serverURL:process.env.WORKSPACE_ACCOUNT_SERVER_URL || 'http://localhost:8787',sessionFile:path.join(app.getPath('userData'),'account-session.bin'),storage:safeStorage,directIP:fixtureMode?async()=>'203.0.113.99':undefined,openExternal:url=>fixtureMode?Promise.resolve():shell.openExternal(url)});
   account.on('change',state=>{emit('account',state);if(gateway)gateway.regionRetryAt=0;refreshProxyRegion();});
   connectionRecords=new ConnectionRecords({directory:path.join(app.getPath('userData'),'connection-records'),encrypt:value=>{if(!safeStorage.isEncryptionAvailable())throw new Error('系统加密不可用');return safeStorage.encryptString(value);},decrypt:value=>safeStorage.decryptString(value)});
   dockerEnvs=new DockerEnvironments({defaultLocalEnabled:fixtureMode && !authRequired,directory:path.join(app.getPath('userData'),'docker-environments'),sourceRoot:path.join(here,'..'),encrypt:value=>{if(!safeStorage.isEncryptionAvailable())throw new Error('系统加密不可用');return safeStorage.encryptString(value);},decrypt:value=>safeStorage.decryptString(value)});
@@ -1139,5 +1140,5 @@ app.whenReady().then(async () => {
     }, 1500);
   }
 });
-app.on('before-quit', () => { learningAutomations?.stop(); closeConsole(); void directBrowserTransport?.close(); desktopReturn?.close(); containerLogin?.kill(); account?.cancel(); clearInterval(environmentTimer); abortRun(); clearInterval(healthTimer); if (gateway) { gateway.block('应用退出'); void gateway.stop(); } });
+app.on('before-quit', () => { learningAutomations?.stop(); closeConsole(); void directBrowserTransport?.close(); desktopReturn?.close(); containerLogin?.kill(); account?.cancel(); account?.closeConnections(); clearInterval(environmentTimer); abortRun(); clearInterval(healthTimer); if (gateway) { gateway.block('应用退出'); void gateway.stop(); } });
 app.on('window-all-closed', () => app.quit());

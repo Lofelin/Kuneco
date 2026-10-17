@@ -13,10 +13,10 @@ export function accountServerURL(value) {
   return url.origin;
 }
 // Explicit agents do not inherit HTTP_PROXY/HTTPS_PROXY or the app gateway.
-export async function directRequest(url,{method='GET',body,token,signal}={}) {
+export async function directRequest(url,{method='GET',body,token,signal,agent:pooledAgent}={}) {
   const target=new URL(url),client=target.protocol==='https:'?https:http;
   if(!['https:','http:'].includes(target.protocol))throw new Error('不支持的账号接口');
-  const agent=target.protocol==='https:'?new https.Agent({keepAlive:false}):new http.Agent({keepAlive:false});
+  const agent=pooledAgent || (target.protocol==='https:'?new https.Agent({keepAlive:false}):new http.Agent({keepAlive:false}));
   try{return await new Promise((resolve,reject)=>{
     const data=body===undefined?undefined:Buffer.from(JSON.stringify(body));
     const headers={'user-agent':'FixedEgressWorkspace/0.1','accept':'application/json'};
@@ -25,14 +25,27 @@ export async function directRequest(url,{method='GET',body,token,signal}={}) {
       const chunks=[];let size=0;res.on('data',chunk=>{size+=chunk.length;if(size>2*1024*1024)req.destroy(new Error('账号响应过大'));else chunks.push(chunk);});
       res.on('error',reject);res.on('end',()=>resolve({status:res.statusCode,type:res.headers['content-type'] || '',data:Buffer.concat(chunks)}));
     });req.setTimeout(15000,()=>req.destroy(new Error('账号服务连接超时')));req.on('error',reject);req.end(data);
-  });}finally{agent.destroy();}
+  });}finally{if(!pooledAgent)agent.destroy();}
 }
 export class AccountClient extends EventEmitter {
-  constructor({serverURL,sessionFile,storage,openExternal,directIP,returnURL}){super();this.serverURL=accountServerURL(serverURL);this.sessionFile=sessionFile;this.storage=storage;this.openExternal=openExternal;this.returnURL=returnURL;this.directIP=directIP;this.token=null;this.user=null;this.status='signed-out';this.controller=null;this.avatar=null;this.version=0;}
+  constructor({serverURL,sessionFile,storage,openExternal,directIP,returnURL,environment=()=>null}){super();this.serverURL=accountServerURL(serverURL);this.sessionFile=sessionFile;this.storage=storage;this.openExternal=openExternal;this.returnURL=returnURL;this.directIP=directIP;this.token=null;this.user=null;this.status='signed-out';this.controller=null;this.avatar=null;this.version=0;this.environment=environment;this.agents=new Map();this.pendingRequests=new Set();}
   state(){return {user:this.user,avatarFallback:defaultAccountAvatar(this.user,this.serverURL),avatar:this.avatar || defaultAccountAvatar(this.user,this.serverURL),status:this.status,serverURL:this.serverURL};}
   changed(){this.emit('change',this.state());}
+  closeConnections(){for(const controller of this.pendingRequests)controller.abort();this.pendingRequests.clear();for(const agent of this.agents.values())agent.destroy();this.agents.clear();this.poolScope=null;}
+  async transport(url,options={}){
+    const scope=JSON.stringify([this.user?.id || null,this.environment(),this.token,this.version]);
+    if(scope!==this.poolScope){this.closeConnections();this.poolScope=scope;}
+    const target=new URL(url);let agent=this.agents.get(target.origin);
+    if(!agent){const Client=target.protocol==='https:'?https:http;agent=new Client.Agent({keepAlive:true,maxSockets:4,maxFreeSockets:2,timeout:30000});this.agents.set(target.origin,agent);}
+    // Account/control-plane traffic remains explicitly direct; it is never a
+    // fallback for an environment-proxied request. Node does not replay requests.
+    const controller=new AbortController();this.pendingRequests.add(controller);
+    const signal=options.signal?AbortSignal.any([options.signal,controller.signal]):controller.signal;
+    try{return await directRequest(url,{...options,signal,token:target.origin===this.serverURL?(options.token ?? this.token):undefined,agent});}
+    finally{this.pendingRequests.delete(controller);}
+  }
   async request(route,options={}) {
-    let res;try{res=await directRequest(this.serverURL+route,{token:this.token,...options});}catch(error){if(error.name==='AbortError')throw error;throw new Error('账号服务暂不可用，请确认 Go 服务已启动');}
+    let res;try{res=await this.transport(this.serverURL+route,options);}catch(error){if(error.name==='AbortError')throw error;throw new Error('账号服务暂不可用，请确认 Go 服务已启动');}
     let data;try{data=JSON.parse(res.data.toString());}catch{throw new Error('账号服务响应格式错误');}
     if(res.status>=400){const error=new Error(data.error || '账号请求失败');error.status=res.status;throw error;}return data;
   }
@@ -45,7 +58,7 @@ export class AccountClient extends EventEmitter {
   async profile(signal){
     const token=this.token,version=this.version;const user=await this.request('/v1/me',{signal});let avatar=null;
     if(this.token!==token || this.version!==version)throw new Error('账号已变化');
-    try{const image=await directRequest(this.serverURL+'/v1/me/avatar',{token:this.token,signal});if(image.status===200 && /^image\/(png|jpeg|webp)$/.test(image.type))avatar=`data:${image.type};base64,${image.data.toString('base64')}`;}catch{}
+    try{const image=await this.transport(this.serverURL+'/v1/me/avatar',{signal});if(image.status===200 && /^image\/(png|jpeg|webp)$/.test(image.type))avatar=`data:${image.type};base64,${image.data.toString('base64')}`;}catch{}
     if(signal?.aborted || this.token!==token || this.version!==version)throw new Error('账号已变化');this.user=user;this.profileToken=token;this.avatar=avatar;this.status='signed-in';await this.persist();this.changed();return this.state();
   }
   async restore(){
@@ -72,7 +85,7 @@ export class AccountClient extends EventEmitter {
     const version=++this.version;const controller=new AbortController();this.controller=controller;this.status='signing-in';this.changed();
     try{
       const verifier=randomBytes(32).toString('base64url'),challenge=createHash('sha256').update(verifier).digest('base64url');
-      let directIp;try{if(this.directIP)directIp=await this.directIP();else{const probe=await directRequest('https://api.ipify.org?format=json',{signal:controller.signal});if(probe.status===200)directIp=JSON.parse(probe.data.toString()).ip;}}catch{}
+      let directIp;try{if(this.directIP)directIp=await this.directIP();else{const probe=await this.transport('https://api.ipify.org?format=json',{signal:controller.signal});if(probe.status===200)directIp=JSON.parse(probe.data.toString()).ip;}}catch{}
       const flow=await this.request('/v1/auth/google/start',{method:'POST',body:{challenge,directIp,...(this.returnURL?{returnURL:this.returnURL}:{})},signal:controller.signal});
       const authorization=new URL(flow.authorizationUrl);if(authorization.origin!==this.serverURL || authorization.pathname!=='/v1/auth/google/authorize')throw new Error('登录跳转地址无效');
       await this.openExternal(authorization.toString());const deadline=Date.now()+600000;
@@ -91,9 +104,9 @@ export class AccountClient extends EventEmitter {
   }
   cancel(){this.controller?.abort();}
   async logout(){
-    this.version++;this.cancel();let serverRevoked=true;
+    this.version++;this.cancel();this.closeConnections();let serverRevoked=true;
     try{if(this.token)await this.request('/v1/auth/logout',{method:'POST'});}catch{serverRevoked=false;}
-    this.token=null;this.user=null;this.avatar=null;this.status='signed-out';await rm(this.sessionFile,{force:true});this.changed();return {serverRevoked};
+    this.closeConnections();this.token=null;this.user=null;this.avatar=null;this.status='signed-out';await rm(this.sessionFile,{force:true});this.changed();return {serverRevoked};
   }
   async updateProfile(value){if(!this.user)throw new Error("请先登录");const owner=this.user.id,version=this.version;await this.request("/v1/me/profile",{method:"PUT",body:value});if(this.user?.id!==owner||this.version!==version)throw new Error("保存时账号已变化");return this.profile();}
   async chats(){if(!this.user)throw new Error('请先登录');const owner=this.user.id,version=this.version,token=this.token;const result=await this.request('/v1/me/chats');result.payload=await decodeChatPayload(result.payload,async(id,environment)=>{if(this.user?.id!==owner || this.version!==version)throw new Error('对话账号已变化');return this.request('/v1/me/chat-objects/'+encodeURIComponent(environment)+'/'+id);});if(this.user?.id!==owner || this.version!==version || this.token!==token)throw new Error('对话账号已变化');return result;}

@@ -39,34 +39,48 @@ export function normalizeDeepSeekInput(value){
  const thinking=input.thinking || 'enabled';if(!['enabled','disabled'].includes(thinking))throw new Error('思考模式无效');return {text:input.text,images:normalized,thinking};
 }
 
+// This module runs inside one account/environment worker process. Scope also
+// includes the gateway credential, API credential and explicit routing mode.
+let requestPool;
+export function closeDeepSeekConnections(){
+ const old=requestPool;requestPool=null;
+ if(old){old.closed=true;old.agent.destroy();for(const pending of old.pending)pending.destroy();}
+}
 export function requestDeepSeek(proxyURL,key,route,body,{installation=false,direct:chatDirect=false,onText,onReasoning,rawBody,contentType}={}){
  return new Promise((resolve,reject)=>{
   const direct=chatDirect || installation && route==='/models' && body===undefined;
   let proxy;if(!direct){try{proxy=new URL(proxyURL);}catch{return reject(new Error('请先连接当前环境的代理'));}}
   if(!direct && proxy.protocol!=='http:')return reject(new Error('DeepSeek 需要当前环境的 HTTP 代理网关'));
-  const agent=new https.Agent({keepAlive:false});
-  if(!direct)agent.createConnection=(_options,done)=>{
-   let completed=false;const callback=(...args)=>{if(completed)return;completed=true;done(...args);};
+  const scope=JSON.stringify([proxyURL,key,direct]);
+  if(requestPool?.scope!==scope)closeDeepSeekConnections();
+  const fresh=!requestPool;
+  if(fresh)requestPool={scope,agent:new https.Agent({keepAlive:true,maxSockets:4,maxFreeSockets:2,timeout:30000,maxCachedSessions:0}),pending:new Set(),closed:false};
+  const pool=requestPool,agent=pool.agent;
+  if(fresh && !direct)agent.createConnection=(_options,done)=>{
+   let completed=false;const callback=(error,socket)=>{if(completed)return;completed=true;if(pool.closed){socket?.destroy();error=new Error('代理作用域已变化');}done(error,socket);};
    const headers={Host:'api.deepseek.com:443'};
    if(proxy.username)headers['Proxy-Authorization']='Basic '+Buffer.from(decodeURIComponent(proxy.username)+':'+decodeURIComponent(proxy.password)).toString('base64');
    const tunnel=http.request({hostname:proxy.hostname,port:proxy.port || 80,method:'CONNECT',path:'api.deepseek.com:443',headers,timeout:15000});
+   pool.pending.add(tunnel);tunnel.once('close',()=>pool.pending.delete(tunnel));
    tunnel.once('error',()=>callback(new Error('代理连接失败')));
    tunnel.once('timeout',()=>tunnel.destroy(new Error('代理连接超时')));
    tunnel.once('connect',(response,socket,head)=>{
     if(response.statusCode!==200){socket.destroy();callback(new Error('代理拒绝连接'));return;}
     if(head.length)socket.unshift(head);
     const secure=tls.connect({socket,servername:'api.deepseek.com',rejectUnauthorized:true});
+    pool.pending.add(secure);secure.once('close',()=>pool.pending.delete(secure));
+    secure.once('close',()=>callback(new Error('DeepSeek TLS 连接已关闭')));
     secure.setTimeout(15000,()=>secure.destroy(new Error('TLS 连接超时')));secure.once('error',()=>callback(new Error('DeepSeek TLS 连接失败')));
-    secure.once('secureConnect',()=>{secure.setTimeout(0);callback(null,secure);});
+    secure.once('secureConnect',()=>{secure.setTimeout(0);pool.pending.delete(secure);callback(null,secure);});
    });tunnel.end();
   };
   const payload=rawBody || (body?JSON.stringify(body):null);
   const request=https.request({hostname:'api.deepseek.com',port:443,path:route,method:route.startsWith('/files/') && body===null?'DELETE':payload?'POST':'GET',agent,headers:{Authorization:'Bearer '+key,'Content-Type':contentType || 'application/json',...(payload?{'Content-Length':Buffer.byteLength(payload)}:{})},timeout:120000},response=>{
-   if(response.statusCode===200 && body?.stream){readDeepSeekStream(response,onText,onReasoning).then(resolve,reject).finally(()=>agent.destroy());return;}
+   if(response.statusCode===200 && body?.stream){readDeepSeekStream(response,onText,onReasoning).then(resolve,reject).catch(()=>{});return;}
    let data='';response.setEncoding('utf8');response.on('data',chunk=>{data+=chunk;if(data.length>4_000_000)request.destroy(new Error('响应过大'));});
-   response.on('error',()=>{agent.destroy();reject(new Error('DeepSeek 响应中断'));});
-   response.on('end',()=>{agent.destroy();if(response.statusCode!==200){reject(new Error(response.statusCode===401?'API Key 无效':response.statusCode===402?'DeepSeek 账户余额不足':response.statusCode===429?'DeepSeek 请求过于频繁，请稍后重试':response.statusCode===400?'DeepSeek 请求参数或上下文超限，请检查模型与图片':'DeepSeek 请求失败（HTTP '+response.statusCode+'）'));return;}try{resolve(JSON.parse(data));}catch{reject(new Error('DeepSeek 响应无效'));}});
-  });request.once('error',()=>{agent.destroy();reject(new Error(direct?'DeepSeek API Key 校验失败，请检查网络连接':'DeepSeek 请求中断，请检查代理连接'));});request.once('timeout',()=>request.destroy());request.end(payload);
+   response.on('error',()=>{reject(new Error('DeepSeek 响应中断'));});
+   response.on('end',()=>{if(response.statusCode!==200){reject(new Error(response.statusCode===401?'API Key 无效':response.statusCode===402?'DeepSeek 账户余额不足':response.statusCode===429?'DeepSeek 请求过于频繁，请稍后重试':response.statusCode===400?'DeepSeek 请求参数或上下文超限，请检查模型与图片':'DeepSeek 请求失败（HTTP '+response.statusCode+'）'));return;}try{resolve(JSON.parse(data));}catch{reject(new Error('DeepSeek 响应无效'));}});
+  });pool.pending.add(request);request.once('close',()=>pool.pending.delete(request));request.once('error',()=>{reject(new Error(direct?'DeepSeek API Key 校验失败，请检查网络连接':'DeepSeek 请求中断，请检查代理连接'));});request.once('timeout',()=>request.destroy());request.end(payload);
  });
 }
 export async function configureDeepSeek(directory,input,request){
@@ -122,4 +136,5 @@ export async function runDeepSeekCLI(command,input,{directory=path.join(homedir(
 if(process.argv[1] && import.meta.url===pathToFileURL(process.argv[1]).href){
  try{let text='';for await(const chunk of process.stdin){text+=chunk;if(text.length>300*1024*1024)throw new Error('输入过大');}const value=await runDeepSeekCLI(process.argv[2],text?JSON.parse(text):{},{onText:text=>console.log(JSON.stringify({type:'delta',text})),onReasoning:text=>console.log(JSON.stringify({type:'reasoning',text}))});console.log(JSON.stringify(process.argv[2]==='chat'?{type:'done',usage:value.usage,finishReason:value.finishReason}:value));}
  catch(error){console.error(error.code==='ENOENT'?'尚未配置 DeepSeek API Key':error.message);process.exitCode=1;}
+ finally{closeDeepSeekConnections();}
 }

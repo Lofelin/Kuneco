@@ -169,7 +169,7 @@ test('SOCKS5 上游认证及域名解析在代理端完成', async () => {
     await gateway.readText(`http://test-target.invalid:${targetPort}/`);
     assert.equal((await gateway.verify(`http://test-target.invalid:${targetPort}/`)).state, 'ready');
     assert.equal((await request(gateway, `http://test-target.invalid:${targetPort}/`)).code, 200);
-    assert.equal(destinations.length, 3);
+    assert.equal(destinations.length, 2);
   } finally { await gateway.stop(); for (const s of sockets) s.destroy(); await close(proxy); await close(target); }
 });
 
@@ -314,7 +314,7 @@ test('service latency uses proxy HEAD responses without requiring API credential
     await f.gateway.verify(f.url);
     const before=f.tunnels;
     await f.gateway.checkServiceLatencies({claude:f.url,openai:f.url.replace('/exit','/bad-probe')});
-    assert.equal(f.tunnels-before,2);
+    assert.equal(f.tunnels-before,1);
     assert.equal(f.gateway.status.serviceLatencies.claude.statusCode,200);
     assert.equal(f.gateway.status.serviceLatencies.openai.statusCode,503);
     assert.ok(f.gateway.status.serviceLatencies.claude.latencyMs>=0);
@@ -461,4 +461,23 @@ test('GOST stable verified recovery resets the crash budget',gostTest,async()=>{
   await waitFor(()=>f.gateway.status.state==='ready'&&f.gateway.coreAttempts===0);
   assert.equal(f.gateway.status.coreAttempts,0);
  }finally{await f.cleanup();}
+});
+
+for(const engine of ['native','gost'])test(engine+': probe pools reuse origins, survive probe failures and retire on quarantine/stop',{skip:engine==='gost'&&!existsSync(gostBinary)},async()=>{
+ const f=await fixture(engine==='gost'?{gostBinary}:{}),other=await fixture();
+ try{
+  await f.gateway.verify(f.url);const tunnels=f.tunnels;
+  await f.gateway.verify(f.url);await f.gateway.checkServiceLatencies({service:f.url});
+  assert.equal(f.tunnels,tunnels,'same origin shares established tunnel across GET/HEAD');
+  const agent=f.gateway.requestAgents.get(new URL(f.url).origin);
+  await f.gateway.verify(f.url.replace('/exit','/bad-probe'));
+  assert.equal(f.gateway.status.state,'ready');await f.gateway.verify(f.url);assert.equal(f.gateway.requestAgents.get(new URL(f.url).origin),agent);
+  const beforeOrigin=f.tunnels;await f.gateway.readText(other.url);assert.equal(f.tunnels,beforeOrigin+1,'different origin has separate pool');
+  await other.gateway.verify(f.url);assert.equal(other.tunnels,1,'another environment cannot reuse first gateway pool');
+  f.offline();await assert.rejects(f.gateway.readText(f.url));f.online();
+  await f.gateway.verify(f.url);assert.equal(f.gateway.status.verificationState,'verified');
+  f.changeIp();await f.gateway.verify(f.url);assert.equal(f.gateway.quarantined,true);assert.equal(f.gateway.requestAgents.size,0);
+  const hits=f.hits;await assert.rejects(f.gateway.readText(f.url));assert.equal(f.hits,hits);
+  await other.gateway.stop();assert.equal(other.gateway.requestAgents.size,0);await assert.rejects(other.gateway.readText(f.url));
+ }finally{await f.cleanup();await other.cleanup();}
 });

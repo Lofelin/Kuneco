@@ -64,3 +64,31 @@ test('late chat GET and PUT responses reject after account or token generation c
  let release;client.request=()=>new Promise(resolve=>release=resolve);const get=client.chats();client.user={id:'B'};client.token='token-B';client.version++;release({revision:1,payload:{sessions:[{id:'A-chat'}]}});await assert.rejects(get,/对话账号已变化/);
  client.user={id:'A'};client.token='A-first';const put=client.saveChats({revision:1,payload:{}},'A');client.token='A-second';client.version++;release({revision:2});await assert.rejects(put,/对话账号已变化/);
 });
+
+
+test('account API pools isolate owner, environment and origin; failed mutations are never replayed',async()=>{
+ let env='a',posts=0;const ports=[];
+ const server=http.createServer((req,res)=>{ports.push(req.socket.remotePort);if(req.method==='POST'){posts++;req.socket.destroy();return;}res.end('{}');});
+ await new Promise(r=>server.listen(0,'127.0.0.1',r));const url='http://127.0.0.1:'+server.address().port;
+ const foreign=http.createServer((req,res)=>{assert.equal(req.headers.authorization,undefined,'account token must never reach another origin');res.end('{}');});await new Promise(r=>foreign.listen(0,'127.0.0.1',r));
+ const client=new AccountClient({serverURL:url,environment:()=>env});client.user={id:'one'};client.token='one';
+ try{
+  await client.transport('http://127.0.0.1:'+foreign.address().port+'/');
+  await client.request('/a');await client.request('/b');assert.equal(ports[0],ports[1]);
+  env='b';await client.request('/c');assert.notEqual(ports[1],ports[2]);
+  client.user={id:'two'};client.token='two';await client.request('/d');assert.notEqual(ports[2],ports[3]);
+  await assert.rejects(client.request('/mutation',{method:'POST',body:{value:1}}));assert.equal(posts,1);
+  await client.request('/after');assert.notEqual(ports[3],ports.at(-1));
+ }finally{client.closeConnections();server.closeAllConnections();foreign.closeAllConnections();await Promise.all([new Promise(r=>server.close(r)),new Promise(r=>foreign.close(r))]);}
+});
+
+test('retiring an account pool cancels active and queued requests',async()=>{
+ let started;const received=new Promise(r=>started=r);
+ const server=http.createServer(()=>started());await new Promise(r=>server.listen(0,'127.0.0.1',r));
+ const client=new AccountClient({serverURL:'http://127.0.0.1:'+server.address().port});
+ try{
+  const results=Promise.allSettled(Array.from({length:8},()=>client.request('/pending')));
+  await received;client.closeConnections();
+  assert.ok((await results).every(r=>r.status==='rejected'));assert.equal(client.pendingRequests.size,0);
+ }finally{client.closeConnections();server.closeAllConnections();await new Promise(r=>server.close(r));}
+});

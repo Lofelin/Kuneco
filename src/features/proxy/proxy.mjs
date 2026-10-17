@@ -72,8 +72,10 @@ export class ProxyGateway extends EventEmitter {
     this.ca = ca;
     this.allowLocalTargets = allowLocalTargets;
     this.sockets = new Set();
+    this.requestAgents = new Map(); this.poolGeneration = 0;
     this.token = randomBytes(24).toString('hex');
-    this.status = { state: 'blocked', ip: expectedIp, reason: '尚未验证出口', connections: 0 };
+    this.poolStats={connections:0,requests:0,reused:0};
+    this.status = { requestPool:this.poolStats,state: 'blocked', ip: expectedIp, reason: '尚未验证出口', connections: 0 };
     this.closed = false;
   }
   update(patch) { this.status = { ...this.status, ...patch }; this.emit('status', this.status); }
@@ -84,6 +86,7 @@ export class ProxyGateway extends EventEmitter {
     return socket;
   }
   block(reason = '代理已停止', { recoverable = false } = {}) {
+    this.clearRequestPools();
     this.update({ state: 'blocked', reason, recovering: recoverable && this.monitoring, nextRetryAt: null });
     for (const socket of this.sockets) socket.destroy();
     if (recoverable && this.monitoring && !this.checking) this.scheduleCheck(this.retryBase);
@@ -313,27 +316,61 @@ export class ProxyGateway extends EventEmitter {
       if(this.monitoring && !this.closed && this.serviceProbes===true){clearTimeout(this.serviceTimer);this.serviceTimer=setTimeout(()=>void this.checkServiceLatencies(),this.healthInterval);this.serviceTimer.unref?.();}
     }
   }
+  clearRequestPools() {
+    this.poolGeneration++;
+    for(const agent of this.requestAgents.values())agent.destroy();
+    this.requestAgents.clear();
+  }
+  requestAgent(target) {
+    if(this.closed || this.quarantined || !this.coreAvailable)throw proxyError('GATEWAY_BLOCKED');
+    const key=target.origin;
+    if(this.requestAgents.has(key))return this.requestAgents.get(key);
+    // One gateway belongs to one account/environment and immutable proxy config.
+    // No global agents: stop/block/core replacement invalidates this whole generation.
+    const generation=this.poolGeneration,client=target.protocol==='https:'?https:http;
+    const agent=new client.Agent({keepAlive:true,maxSockets:4,maxTotalSockets:4,maxFreeSockets:2,timeout:90000,maxCachedSessions:0});
+    agent.createConnection=(_options,callback)=>{
+      let socket;
+      const valid=()=>!this.closed && !this.quarantined && this.coreAvailable && generation===this.poolGeneration;
+      void (async()=>{
+        if(!valid())throw proxyError('GATEWAY_BLOCKED');
+        socket=await this.tunnel(target.hostname,Number(target.port || (target.protocol==='https:'?443:80)));
+        if(!valid())throw proxyError('GATEWAY_BLOCKED');
+        if(target.protocol==='https:'){
+          socket=this.track(tls.connect({ca:this.ca,socket,servername:net.isIP(target.hostname)?undefined:target.hostname}));
+          await new Promise((resolve,reject)=>{
+            const timer=setTimeout(()=>socket.destroy(proxyError('PROXY_TIMEOUT')),this.timeout);
+            socket.once('secureConnect',()=>{clearTimeout(timer);resolve();});
+            socket.once('error',error=>{clearTimeout(timer);error.proxyScope='target';reject(error);});
+            socket.once('close',()=>{clearTimeout(timer);reject(proxyError('PROXY_CLOSED'));});
+          });
+        }
+        if(!valid())throw proxyError('GATEWAY_BLOCKED');
+        this.poolStats.connections++;socket.resume();callback(null,socket);
+      })().catch(error=>{socket?.destroy();callback(error);});
+    };
+    // Bound origin count without evicting active requests. An ephemeral pool is
+    // unnecessary for our fixed probe/API destinations; reject excess origins.
+    if(this.requestAgents.size>=32){agent.destroy();throw proxyError('POOL_LIMIT');}
+    this.requestAgents.set(key,agent);return agent;
+  }
   async readText(url, {headersOnly=false} = {}) {
-    const target = new URL(url);
-    if (!['http:', 'https:'].includes(target.protocol)) throw new Error('不支持的检测地址');
-    const raw = await this.tunnel(target.hostname, Number(target.port || (target.protocol === 'https:' ? 443 : 80)));
-    const socket = target.protocol === 'https:' ? this.track(tls.connect({ ca: this.ca, socket: raw, servername: target.hostname })) : raw;
-    return new Promise((resolve, reject) => {
-      const client = target.protocol === 'https:' ? https : http;
-      const agent = new client.Agent({ keepAlive: false });
-      agent.createConnection = () => socket;
-      const request = client.request(target, { agent, method:headersOnly?'HEAD':'GET', headers: { accept: 'application/json' } }, response => {
-        if(headersOnly){resolve({statusCode:response.statusCode});response.destroy();socket.destroy();return;}
-        let body = ''; response.setEncoding('utf8');
-        response.on('data', chunk => { body += chunk; if (body.length > 65536) request.destroy(new Error('检测响应过大')); });
-        response.on('error', reject);
-        response.on('end', () => { socket.destroy(); response.statusCode === 200 ? resolve(body) : reject(new Error('出口检测服务响应异常')); });
+    const target=new URL(url);
+    if(!['http:','https:'].includes(target.protocol) || target.username || target.password)throw new Error('不支持的检测地址');
+    const agent=this.requestAgent(target),client=target.protocol==='https:'?https:http;
+    return new Promise((resolve,reject)=>{
+      const request=client.request(target,{agent,method:headersOnly?'HEAD':'GET',headers:{accept:'application/json'}},response=>{
+        let body='';response.setEncoding('utf8');
+        response.on('data',chunk=>{body+=chunk;if(body.length>65536)request.destroy(new Error('检测响应过大'));});
+        response.once('error',reject);
+        response.once('end',()=>headersOnly?resolve({statusCode:response.statusCode}):response.statusCode===200?resolve(body):reject(new Error('出口检测服务响应异常')));
       });
-      const deadline = setTimeout(() => request.destroy(proxyError('PROXY_TIMEOUT')), this.timeout);
-      request.once('close', () => clearTimeout(deadline));
-      request.setTimeout(this.timeout, () => request.destroy(proxyError('PROXY_TIMEOUT')));
-      request.on('error', err => { socket.destroy(); err.proxyScope='target'; reject(err); });
-      request.end(); socket.resume();
+      const deadline=setTimeout(()=>request.destroy(proxyError('PROXY_TIMEOUT')),this.timeout);
+      request.once('close',()=>clearTimeout(deadline));
+      // No retry, including stale keep-alive sockets. The next scheduled check
+      // may create a new proxied connection; it never falls back to direct.
+      request.once('socket',()=>{this.poolStats.requests++;if(request.reusedSocket)this.poolStats.reused++;});
+      request.once('error',reject);request.end();
     });
   }
   async verify(urls = ['https://api.ipify.org?format=json', 'https://checkip.amazonaws.com/']) {
