@@ -16,8 +16,5 @@ dialog{width:550px;max-width:90vw;max-height:90vh;overflow:auto;background:var(-
 /* Keep navigation failures visible above the embedded website. */
 #browserMessage.has-error{display:block;flex-shrink:0;margin:8px 10px;padding:10px 12px;color:var(--red,#c53030);background:var(--surface);border:1px solid var(--line);border-radius:6px;font-size:12px;line-height:1.6}
 
-.browser-route-status{display:inline-flex;align-items:center;gap:6px;white-space:nowrap;flex-shrink:0;font-size:12px;line-height:18px;padding:5px 8px;border-radius:5px;background:var(--soft);color:var(--muted)}
-.browser-route-status wa-icon{width:14px;height:14px;font-size:14px}
-.browser-route-status[data-route="proxy"]{color:var(--blue)}
 
 .reply-loading{display:flex;align-items:center;gap:5px;min-height:24px}.reply-loading span{width:6px;height:6px;border-radius:50%;background:var(--muted);animation:reply-loading-pulse 1.2s ease-in-out infinite}.reply-loading span:nth-child(2){animation-delay:.15s}.reply-loading span:nth-child(3){animation-delay:.3s}@keyframes reply-loading-pulse{0%,80%,100%{opacity:.3;transform:translateY(0)}40%{opacity:1;transform:translateY(-3px)}}@media(prefers-reduced-motion:reduce){.reply-loading span{animation:none;opacity:.6}}

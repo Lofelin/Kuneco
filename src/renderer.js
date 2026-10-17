@@ -733,15 +733,6 @@ function renderBrowserTabs(state) {
   }
   $('browserTabs').active=state.activeId;
   const active = state.tabs.find(tab => tab.id === state.activeId);
-  $('browserRouteStatus').classList.toggle('hidden',!mixed || !active);
-  if(active && mixed){
-   const route=active.route,label=route==='proxy'?'代理':route==='direct'?'直连':active.error?'未连接':'正在选择…';
-   $('browserRouteStatus').dataset.route=route || 'pending';
-   $('browserRouteLabel').textContent=label;
-   $('browserRouteIcon').src='assets/icons/'+(route==='proxy'?'shield-check':route==='direct'?'globe':'loader-circle')+'.svg';
-   $('browserRouteStatus').title=route?'当前网站主域名实际使用'+(route==='proxy'?'应用代理':'本机网络直连')+'；其他域名的资源单独选择线路。':'当前网站尚未建立连接';
-   $('browserRouteStatus').setAttribute('aria-label','当前网站线路：'+label);
-  }
   if (active) {
     $('browserMessage').classList.toggle('has-error', Boolean(active.error));
     if (!addressEditing) $('address').value = active.url;
