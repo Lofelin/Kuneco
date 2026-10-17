@@ -1,3 +1,4 @@
+import {RequestLifecycle} from './request-lifecycle.mjs';
 import {startGost} from './gost-sidecar.mjs';
 import http from 'node:http';
 import https from 'node:https';
@@ -72,7 +73,7 @@ export class ProxyGateway extends EventEmitter {
     this.ca = ca;
     this.allowLocalTargets = allowLocalTargets;
     this.sockets = new Set();
-    this.requestAgents = new Map(); this.poolGeneration = 0;
+    this.requestAgents = new Map(); this.poolGeneration = 0;this.pendingRequests=new Set();
     this.token = randomBytes(24).toString('hex');
     this.poolStats={connections:0,requests:0,reused:0};
     this.status = { requestPool:this.poolStats,state: 'blocked', ip: expectedIp, reason: '尚未验证出口', connections: 0 };
@@ -186,13 +187,15 @@ export class ProxyGateway extends EventEmitter {
     });
     return this.checking;
   }
-  async tunnel(host, port) {
+  async tunnel(host, port, {signal,onPhase=()=>{}}={}) {
+    signal?.throwIfAborted();onPhase('connect');
     if (this.closed || !this.coreAvailable) throw proxyError('GATEWAY_BLOCKED');
     if (!this.allowLocalTargets && localTarget(host)) throw proxyError('TARGET_BLOCKED');
     const c = this.sidecar?.config || this.config;
     if (c.protocol === 'socks5') {
       // Build and track the upstream socket before the SOCKS handshake so stop() also cancels pending handshakes.
-      const existing_socket = await this.openSocket(false);
+      const existing_socket = await this.openSocket(false,signal);
+      onPhase('tunnel');
       const result = await SocksClient.createConnection({
         proxy: { host: c.host, port: c.port, type: 5, userId: c.username, password: c.password },
         command: 'connect', destination: { host, port }, existing_socket, timeout: this.timeout,
@@ -200,7 +203,8 @@ export class ProxyGateway extends EventEmitter {
       if (this.closed) { result.socket.destroy(); throw new Error('代理已停止'); }
       return this.track(result.socket);
     }
-    const socket = await this.openSocket(c.protocol === 'https');
+    const socket = await this.openSocket(c.protocol === 'https',signal);
+    onPhase('tunnel');
     return new Promise((resolve, reject) => {
       let buffer = Buffer.alloc(0);
       const timer = setTimeout(() => fail(proxyError('PROXY_TIMEOUT')), this.timeout);
@@ -226,10 +230,12 @@ export class ProxyGateway extends EventEmitter {
       socket.write(`CONNECT ${destination} HTTP/1.1\r\nHost: ${destination}\r\n${auth}Connection: keep-alive\r\n\r\n`);
     });
   }
-  async openSocket(secure) {
+  async openSocket(secure,signal) {
+    signal?.throwIfAborted();
     const c = this.sidecar?.config || this.config;
     return new Promise((resolve, reject) => {
       const socket = this.track(secure ? tls.connect({ ca: this.ca, host: c.host, port: c.port, servername: net.isIP(c.host) ? undefined : c.host }) : net.connect({ host: c.host, port: c.port }));
+      const abort=()=>socket.destroy(signal.reason);signal?.addEventListener('abort',abort,{once:true});socket.once('close',()=>signal?.removeEventListener('abort',abort));if(signal?.aborted)abort();
       socket.setNoDelay(true); socket.setKeepAlive(true, 30000);
       const timer = setTimeout(() => fail(proxyError('PROXY_TIMEOUT')), this.timeout);
       const clean = () => { clearTimeout(timer); socket.off('error', fail); socket.off('close', ended); };
@@ -308,7 +314,7 @@ export class ProxyGateway extends EventEmitter {
       const results=await Promise.all(Object.entries(targets).map(async([id,url])=>{
         const started=performance.now();
         try { const response=await this.readText(url,{headersOnly:true});return [id,{latencyMs:Math.round(performance.now()-started),statusCode:response.statusCode}]; }
-        catch(error){return [id,{error:error.code==='PROXY_TIMEOUT'?'timeout':'unavailable'}];}
+        catch(error){return [id,{error:['PROXY_TIMEOUT','REQUEST_TIMEOUT'].includes(error.code)?'timeout':'unavailable',...(error.phase?{phase:error.phase}:{})}];}
       }));
       if(!this.closed && this.status.state==='ready')this.update({serviceLatencies:Object.fromEntries(results)});
     } finally {
@@ -318,25 +324,28 @@ export class ProxyGateway extends EventEmitter {
   }
   clearRequestPools() {
     this.poolGeneration++;
+    for(const life of this.pendingRequests)life.abort(proxyError('GATEWAY_BLOCKED'));this.pendingRequests.clear();
     for(const agent of this.requestAgents.values())agent.destroy();
     this.requestAgents.clear();
   }
-  requestAgent(target) {
+  requestAgent(target,{fresh=false}={}) {
     if(this.closed || this.quarantined || !this.coreAvailable)throw proxyError('GATEWAY_BLOCKED');
     const key=target.origin;
-    if(this.requestAgents.has(key))return this.requestAgents.get(key);
+    if(!fresh && this.requestAgents.has(key))return this.requestAgents.get(key);
     // One gateway belongs to one account/environment and immutable proxy config.
     // No global agents: stop/block/core replacement invalidates this whole generation.
     const generation=this.poolGeneration,client=target.protocol==='https:'?https:http;
     const agent=new client.Agent({keepAlive:true,maxSockets:4,maxTotalSockets:4,maxFreeSockets:2,timeout:90000,maxCachedSessions:0});
     agent.createConnection=(_options,callback)=>{
+      const life=_options.requestLifecycle;
       let socket;
-      const valid=()=>!this.closed && !this.quarantined && this.coreAvailable && generation===this.poolGeneration;
+      const valid=()=>!this.closed && !this.quarantined && this.coreAvailable && generation===this.poolGeneration && !life?.signal.aborted;
       void (async()=>{
         if(!valid())throw proxyError('GATEWAY_BLOCKED');
-        socket=await this.tunnel(target.hostname,Number(target.port || (target.protocol==='https:'?443:80)));
+        socket=await this.tunnel(target.hostname,Number(target.port || (target.protocol==='https:'?443:80)),{signal:life?.signal,onPhase:phase=>life?.advance(phase)});
         if(!valid())throw proxyError('GATEWAY_BLOCKED');
         if(target.protocol==='https:'){
+          life?.advance('tls');
           socket=this.track(tls.connect({ca:this.ca,socket,servername:net.isIP(target.hostname)?undefined:target.hostname}));
           await new Promise((resolve,reject)=>{
             const timer=setTimeout(()=>socket.destroy(proxyError('PROXY_TIMEOUT')),this.timeout);
@@ -351,27 +360,28 @@ export class ProxyGateway extends EventEmitter {
     };
     // Bound origin count without evicting active requests. An ephemeral pool is
     // unnecessary for our fixed probe/API destinations; reject excess origins.
-    if(this.requestAgents.size>=32){agent.destroy();throw proxyError('POOL_LIMIT');}
-    this.requestAgents.set(key,agent);return agent;
+    if(!fresh && this.requestAgents.size>=32){agent.destroy();throw proxyError('POOL_LIMIT');}
+    if(!fresh)this.requestAgents.set(key,agent);return agent;
   }
-  async readText(url, {headersOnly=false} = {}) {
+  async readText(url, {headersOnly=false,fresh=false,signal,timeouts} = {}) {
     const target=new URL(url);
     if(!['http:','https:'].includes(target.protocol) || target.username || target.password)throw new Error('不支持的检测地址');
-    const agent=this.requestAgent(target),client=target.protocol==='https:'?https:http;
-    return new Promise((resolve,reject)=>{
-      const request=client.request(target,{agent,method:headersOnly?'HEAD':'GET',headers:{accept:'application/json'}},response=>{
+    const agent=this.requestAgent(target,{fresh}),client=target.protocol==='https:'?https:http;
+    const life=new RequestLifecycle({signal,timeouts:{queue:this.timeout,connect:this.timeout,tunnel:this.timeout,tls:this.timeout,headers:this.timeout,body:this.timeout,total:this.timeout*3,...timeouts}});this.pendingRequests.add(life);
+    try{return await new Promise((resolve,reject)=>{
+      life.rejectOnAbort(reject);
+      const request=client.request(target,{agent,signal:life.signal,requestLifecycle:life,method:headersOnly?'HEAD':'GET',headers:{accept:'application/json'}},response=>{
         let body='';response.setEncoding('utf8');
         response.on('data',chunk=>{body+=chunk;if(body.length>65536)request.destroy(new Error('检测响应过大'));});
         response.once('error',reject);
         response.once('end',()=>headersOnly?resolve({statusCode:response.statusCode}):response.statusCode===200?resolve(body):reject(new Error('出口检测服务响应异常')));
       });
-      const deadline=setTimeout(()=>request.destroy(proxyError('PROXY_TIMEOUT')),this.timeout);
-      request.once('close',()=>clearTimeout(deadline));
+      life.bind(request,{customConnection:true});
       // No retry, including stale keep-alive sockets. The next scheduled check
       // may create a new proxied connection; it never falls back to direct.
       request.once('socket',()=>{this.poolStats.requests++;if(request.reusedSocket)this.poolStats.reused++;});
-      request.once('error',reject);request.end();
-    });
+      request.once('error',error=>reject(life.signal.aborted?life.signal.reason:error));request.end();
+    });}finally{life.finish();this.pendingRequests.delete(life);if(fresh)agent.destroy();}
   }
   async verify(urls = ['https://api.ipify.org?format=json', 'https://checkip.amazonaws.com/']) {
     if (this.verifying) return this.verifying;
@@ -395,7 +405,7 @@ export class ProxyGateway extends EventEmitter {
       if (invalid()) break;
       try {
         const started=performance.now();
-        const body = (await this.readText(url)).trim();
+        const body = (await this.readText(url,{fresh:true})).trim();
         let ip; try { ip = JSON.parse(body).ip; } catch { ip = body; }
         if (!net.isIP(ip)) throw proxyError('INVALID_PROBE_RESPONSE');
         if (invalid()) break;
@@ -408,7 +418,7 @@ export class ProxyGateway extends EventEmitter {
           try { await this.onVerified(ip); } catch { this.quarantined = true; this.block('固定出口记录保存失败，已禁止转发'); break; }
         }
         if (invalid()) break;
-        this.update({ state: 'ready', verificationState:'verified', probeFailures:[], ip, checkedAt: new Date().toISOString(), recovering: false, reason: '固定出口核验成功；应用代理就绪', probeSource: new URL(url).hostname,latencyMs:Math.round(performance.now()-started) });
+        this.update({ state: 'ready', verificationState:'verified', probeFailures:[], ip, checkedAt: new Date().toISOString(), recovering: false, reason: '固定出口核验成功；应用代理就绪', probeSource: new URL(url).hostname,verificationConnection:'fresh',latencyMs:Math.round(performance.now()-started) });
         return this.status;
       } catch (error) {
         if (invalid()) break;

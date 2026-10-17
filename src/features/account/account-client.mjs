@@ -1,3 +1,4 @@
+import {RequestLifecycle} from '../proxy/request-lifecycle.mjs';
 import {defaultAccountAvatar} from './account-avatar.mjs';
 import {encodeChatPayload,decodeChatPayload} from '../chat/chat-object-store.mjs';
 import http from 'node:http';
@@ -13,19 +14,21 @@ export function accountServerURL(value) {
   return url.origin;
 }
 // Explicit agents do not inherit HTTP_PROXY/HTTPS_PROXY or the app gateway.
-export async function directRequest(url,{method='GET',body,token,signal,agent:pooledAgent}={}) {
+export async function directRequest(url,{method='GET',body,token,signal,agent:pooledAgent,timeouts}={}) {
   const target=new URL(url),client=target.protocol==='https:'?https:http;
   if(!['https:','http:'].includes(target.protocol))throw new Error('不支持的账号接口');
   const agent=pooledAgent || (target.protocol==='https:'?new https.Agent({keepAlive:false}):new http.Agent({keepAlive:false}));
+  const life=new RequestLifecycle({signal,timeouts});
   try{return await new Promise((resolve,reject)=>{
+    life.rejectOnAbort(reject);
     const data=body===undefined?undefined:Buffer.from(JSON.stringify(body));
     const headers={'user-agent':'FixedEgressWorkspace/0.1','accept':'application/json'};
     if(data){headers['content-type']='application/json';headers['content-length']=data.length;}if(token)headers.authorization='Bearer '+token;
-    const req=client.request(target,{method,headers,agent,signal},res=>{
+    const req=client.request(target,{method,headers,agent,signal:life.signal},res=>{
       const chunks=[];let size=0;res.on('data',chunk=>{size+=chunk.length;if(size>2*1024*1024)req.destroy(new Error('账号响应过大'));else chunks.push(chunk);});
       res.on('error',reject);res.on('end',()=>resolve({status:res.statusCode,type:res.headers['content-type'] || '',data:Buffer.concat(chunks)}));
-    });req.setTimeout(15000,()=>req.destroy(new Error('账号服务连接超时')));req.on('error',reject);req.end(data);
-  });}finally{if(!pooledAgent)agent.destroy();}
+    });life.bind(req);req.on('error',error=>reject(life.signal.aborted?life.signal.reason:error));req.end(data);
+  });}finally{life.finish();if(!pooledAgent)agent.destroy();}
 }
 export class AccountClient extends EventEmitter {
   constructor({serverURL,sessionFile,storage,openExternal,directIP,returnURL,environment=()=>null}){super();this.serverURL=accountServerURL(serverURL);this.sessionFile=sessionFile;this.storage=storage;this.openExternal=openExternal;this.returnURL=returnURL;this.directIP=directIP;this.token=null;this.user=null;this.status='signed-out';this.controller=null;this.avatar=null;this.version=0;this.environment=environment;this.agents=new Map();this.pendingRequests=new Set();}

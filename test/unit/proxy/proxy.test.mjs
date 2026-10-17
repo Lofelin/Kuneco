@@ -14,9 +14,9 @@ async function listen(server) { await new Promise(resolve => server.listen(0, '1
 async function close(server) { server.closeAllConnections?.(); await new Promise(resolve => server.close(resolve)); }
 async function fixture(options = {}) {
   let hits = 0, exitIp = '203.0.113.8', rejectProxy = false, rejectTargetOnce = false, offlineProxy = false, auth, forwardedAuth;
-  const remotePorts = new Set(), targetPorts = [];
+  const remotePorts = new Set(), targetPorts = [],exitBySocket=new WeakMap();
   const sockets = new Set();
-  const target = http.createServer((req, res) => { hits++; targetPorts.push(req.socket.remotePort); forwardedAuth = req.headers['proxy-authorization']; if (req.url === '/bad-probe') { res.writeHead(503); res.end(); return; } if(req.url.startsWith('/localized-region')){const chinese=new URL(req.url,'http://fixture.invalid').searchParams.get('lang')==='zh-CN';res.end(JSON.stringify({ip:exitIp,country:'US',city:chinese?'华盛顿':'Washington',region:chinese?'哥伦比亚特区':'District of Columbia'}));return;} if(req.url.startsWith('/region')){res.end(`ip=${req.url==='/region-wrong'?'203.0.113.99':exitIp}\nloc=US\n`);return;}res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ ip: exitIp })); });
+  const target = http.createServer((req, res) => { hits++;if(!exitBySocket.has(req.socket))exitBySocket.set(req.socket,exitIp);const visibleIp=options.stickyExit?exitBySocket.get(req.socket):exitIp; targetPorts.push(req.socket.remotePort); forwardedAuth = req.headers['proxy-authorization']; if (req.url === '/bad-probe') { res.writeHead(503); res.end(); return; } if(req.url.startsWith('/localized-region')){const chinese=new URL(req.url,'http://fixture.invalid').searchParams.get('lang')==='zh-CN';res.end(JSON.stringify({ip:visibleIp,country:'US',city:chinese?'华盛顿':'Washington',region:chinese?'哥伦比亚特区':'District of Columbia'}));return;} if(req.url.startsWith('/region')){res.end(`ip=${req.url==='/region-wrong'?'203.0.113.99':visibleIp}\nloc=US\n`);return;}res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ ip: visibleIp })); });
   const targetPort = await listen(target);
   const upstream = http.createServer();
   upstream.on('connection', socket => { sockets.add(socket); socket.on('error', () => {}); socket.once('close', () => sockets.delete(socket)); });
@@ -169,7 +169,7 @@ test('SOCKS5 上游认证及域名解析在代理端完成', async () => {
     await gateway.readText(`http://test-target.invalid:${targetPort}/`);
     assert.equal((await gateway.verify(`http://test-target.invalid:${targetPort}/`)).state, 'ready');
     assert.equal((await request(gateway, `http://test-target.invalid:${targetPort}/`)).code, 200);
-    assert.equal(destinations.length, 2);
+    assert.equal(destinations.length, 3);
   } finally { await gateway.stop(); for (const s of sockets) s.destroy(); await close(proxy); await close(target); }
 });
 
@@ -314,7 +314,7 @@ test('service latency uses proxy HEAD responses without requiring API credential
     await f.gateway.verify(f.url);
     const before=f.tunnels;
     await f.gateway.checkServiceLatencies({claude:f.url,openai:f.url.replace('/exit','/bad-probe')});
-    assert.equal(f.tunnels-before,1);
+    assert.equal(f.tunnels-before,2);
     assert.equal(f.gateway.status.serviceLatencies.claude.statusCode,200);
     assert.equal(f.gateway.status.serviceLatencies.openai.statusCode,503);
     assert.ok(f.gateway.status.serviceLatencies.claude.latencyMs>=0);
@@ -466,8 +466,8 @@ test('GOST stable verified recovery resets the crash budget',gostTest,async()=>{
 for(const engine of ['native','gost'])test(engine+': probe pools reuse origins, survive probe failures and retire on quarantine/stop',{skip:engine==='gost'&&!existsSync(gostBinary)},async()=>{
  const f=await fixture(engine==='gost'?{gostBinary}:{}),other=await fixture();
  try{
-  await f.gateway.verify(f.url);const tunnels=f.tunnels;
-  await f.gateway.verify(f.url);await f.gateway.checkServiceLatencies({service:f.url});
+  await f.gateway.verify(f.url);await f.gateway.readText(f.url);const tunnels=f.tunnels;
+  await f.gateway.readText(f.url);await f.gateway.checkServiceLatencies({service:f.url});
   assert.equal(f.tunnels,tunnels,'same origin shares established tunnel across GET/HEAD');
   const agent=f.gateway.requestAgents.get(new URL(f.url).origin);
   await f.gateway.verify(f.url.replace('/exit','/bad-probe'));
@@ -480,4 +480,15 @@ for(const engine of ['native','gost'])test(engine+': probe pools reuse origins, 
   const hits=f.hits;await assert.rejects(f.gateway.readText(f.url));assert.equal(f.hits,hits);
   await other.gateway.stop();assert.equal(other.gateway.requestAgents.size,0);await assert.rejects(other.gateway.readText(f.url));
  }finally{await f.cleanup();await other.cleanup();}
+});
+
+for(const engine of ['native','gost'])test(engine+': fresh exit checks detect a changed new route while the old pool still reports the pin',{skip:engine==='gost'&&!existsSync(gostBinary)},async()=>{
+ const f=await fixture({stickyExit:true,...(engine==='gost'?{gostBinary}:{})});
+ try{
+  await f.gateway.verify(f.url);await f.gateway.readText(f.url);const warm=f.tunnels;
+  f.rejectTarget();await f.gateway.verify(f.url);assert.equal(f.gateway.status.state,'ready');assert.equal(f.gateway.status.verificationState,'unavailable');
+  assert.equal(JSON.parse(await f.gateway.readText(f.url)).ip,'203.0.113.8');assert.equal(f.tunnels,warm+1,'failed fresh check does not dismantle old pool');
+  f.changeIp();assert.equal(JSON.parse(await f.gateway.readText(f.url)).ip,'203.0.113.8');
+  await f.gateway.verify(f.url);assert.equal(f.gateway.status.state,'blocked');assert.equal(f.gateway.quarantined,true);assert.equal(f.gateway.requestAgents.size,0);
+ }finally{await f.cleanup();}
 });

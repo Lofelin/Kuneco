@@ -128,6 +128,11 @@ export class DockerEnvironments {
    const item={id:randomUUID(),name:name.trim(),icon:environmentIcon(icon),createdAt:new Date().toISOString(),registry:null,proxy:null,external:source};data.environments.push(item);await this.save(owner,data);return item.id;
   }catch(error){if(claimed)await releaseExternal(this,owner,source);throw error;}
  }
+ async syncDeepSeekSource(owner,id){
+  const runtime=await readFile(path.join(this.sourceRoot,'src/features/runtimes/deepseek-runtime.mjs'),'utf8');
+  const lifecycle=await readFile(path.join(this.sourceRoot,'src/features/proxy/request-lifecycle.mjs'),'utf8');
+  await this.exec(owner,id,['node','-e',"const fs=require('fs'),base='/home/node/.local/lib';let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>{const files=JSON.parse(s);for(const [file,value] of Object.entries(files)){const p=base+'/'+file;fs.mkdirSync(require('path').dirname(p),{recursive:true});fs.writeFileSync(p,value,{mode:0o600});}});"],{input:JSON.stringify({'dingtu/deepseek.mjs':runtime,'proxy/request-lifecycle.mjs':lifecycle})});
+ }
  async detectCommands(execute){const runtimes=[];for(const [id,command] of CLI_RUNTIMES.map(id=>[id,RUNTIME_CATALOG[id].command]))try{const version=await execute([command,'--version']);runtimes.push({id,name:RUNTIME_CATALOG[id].name,version});}catch{}try{const item=JSON.parse(await execute(['node','/home/node/.local/lib/dingtu/deepseek.mjs','info']));if(item.id==='deepseek')runtimes.push(item);}catch{}return {runtimes,checkedAt:new Date().toISOString()};}
  async workingDirectory(owner,id){const {item}=await this.get(owner,id);return item.external?.workingDirectory || '/workspace';}
  async update(owner,id,patch){const {data,item}=await this.get(owner,id);Object.assign(item,patch);await this.save(owner,data);}
@@ -264,8 +269,7 @@ export class DockerEnvironments {
   if(configuration.description!==undefined){if(typeof configuration.description!=='string' || configuration.description.length>500)throw new Error('运行时描述最多500个字符');metadata.description=configuration.description.trim();}
   const saveMetadata=async()=>{const {item}=await this.get(owner,id);const previous=item.runtimeMetadata?.[engine];const existing=item.registry?.runtimes?.find(runtime=>runtime.id===engine);const addedAt=previous?.addedAt || existing?.addedAt || (previous || existing?undefined:new Date().toISOString());await this.update(owner,id,{runtimeMetadata:{...item.runtimeMetadata,[engine]:{...previous,...metadata,...(addedAt?{addedAt}:{})}}});return this.runtimeInfo(owner,id,true);};
   const {item}=await this.get(owner,id);if(item.registry?.runtimes?.some(runtime=>runtime.id===engine))throw new Error('当前环境已添加此运行时，无需重复添加');if(item.external)throw new Error('请在原容器中安装运行时，安装完成后点击重新检测');if(engine==='deepseek'){
-  const source=await readFile(path.join(this.sourceRoot,'src/features/runtimes/deepseek-runtime.mjs'),'utf8');
-  await this.exec(owner,id,['node','-e',"const fs=require('fs');const p='/home/node/.local/lib/dingtu';fs.mkdirSync(p,{recursive:true});let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>fs.writeFileSync(p+'/deepseek.mjs',s,{mode:0o600}));"],{input:source});
+  await this.syncDeepSeekSource(owner,id);
   await this.runRuntimeInstaller(owner,id,['node','/home/node/.local/lib/dingtu/deepseek.mjs','configure-install'],{input:JSON.stringify({apiKey:configuration.apiKey,model:configuration.model}),timeout:150000});
   return saveMetadata();
  }if(!RUNTIME_INSTALL_COMMANDS[engine])throw new Error('未知运行时');await this.runRuntimeInstaller(owner,id,['bash','-o','pipefail','-c',RUNTIME_INSTALL_COMMANDS[engine]]);await this.exec(owner,id,[RUNTIME_CATALOG[engine].command,'--version']);return saveMetadata();}

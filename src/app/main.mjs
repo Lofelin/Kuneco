@@ -1018,8 +1018,7 @@ ipcMain.handle('workspace:cc', guarded(async prompt => {
   const auth=activeContainerId?await containerAuth(selectedEngine):await detectAIAuth({engine:selectedEngine,executable:selectedEngine==='cc'?claudePath:codexPath,gateway});
   if(auth.state!=='signed-in')throw new Error(auth.state==='signed-out'?'当前环境运行时未登录，请先在官方CLI完成登录后重新检测。':'无法确认本机工具登录态，请重新检测。');
   if(activeContainerId && selectedEngine==='deepseek'){
-   const source=await readFile(path.join(here,'features/runtimes/deepseek-runtime.mjs'),'utf8');
-   await dockerEnvs.exec(dockerOwner(),activeContainerId,['node','-e',"let source='';process.stdin.on('data',chunk=>source+=chunk);process.stdin.on('end',()=>require('fs').writeFileSync('/home/node/.local/lib/dingtu/deepseek.mjs',source,{mode:0o600}));"],{input:source});
+   await dockerEnvs.syncDeepSeekSource(dockerOwner(),activeContainerId);
   }
   const containerSpawn=activeContainerId?await (requiresProxy?dockerEnvs.spawner(dockerOwner(),activeContainerId):dockerEnvs.directChatSpawner(dockerOwner(),activeContainerId)):null;
   const workingDirectory=activeContainerId?(project || await dockerEnvs.workingDirectory(dockerOwner(),activeContainerId)):project || path.join(app.getPath('userData'),'chat-workspaces',activeAISessionId || 'default');
