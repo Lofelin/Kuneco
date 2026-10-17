@@ -1,3 +1,4 @@
+import {BoundedRequests} from '../proxy/request-admission.mjs';
 import {RequestLifecycle} from '../proxy/request-lifecycle.mjs';
 import {defaultAccountAvatar} from './account-avatar.mjs';
 import {encodeChatPayload,decodeChatPayload} from '../chat/chat-object-store.mjs';
@@ -31,22 +32,33 @@ export async function directRequest(url,{method='GET',body,token,signal,agent:po
   });}finally{life.finish();if(!pooledAgent)agent.destroy();}
 }
 export class AccountClient extends EventEmitter {
-  constructor({serverURL,sessionFile,storage,openExternal,directIP,returnURL,environment=()=>null}){super();this.serverURL=accountServerURL(serverURL);this.sessionFile=sessionFile;this.storage=storage;this.openExternal=openExternal;this.returnURL=returnURL;this.directIP=directIP;this.token=null;this.user=null;this.status='signed-out';this.controller=null;this.avatar=null;this.version=0;this.environment=environment;this.agents=new Map();this.pendingRequests=new Set();}
+  constructor({serverURL,sessionFile,storage,openExternal,directIP,returnURL,environment=()=>null}){super();this.serverURL=accountServerURL(serverURL);this.sessionFile=sessionFile;this.storage=storage;this.openExternal=openExternal;this.returnURL=returnURL;this.directIP=directIP;this.token=null;this.user=null;this.status='signed-out';this.controller=null;this.avatar=null;this.version=0;this.environment=environment;this.agents=new Map();this.pendingRequests=new Set();this.admission=new BoundedRequests();this.originActive=new Map();}
   state(){return {user:this.user,avatarFallback:defaultAccountAvatar(this.user,this.serverURL),avatar:this.avatar || defaultAccountAvatar(this.user,this.serverURL),status:this.status,serverURL:this.serverURL};}
   changed(){this.emit('change',this.state());}
-  closeConnections(){for(const controller of this.pendingRequests)controller.abort();this.pendingRequests.clear();for(const agent of this.agents.values())agent.destroy();this.agents.clear();this.poolScope=null;}
+  closeConnections(){this.admission.close();this.admission=new BoundedRequests();this.originActive=new Map();for(const controller of this.pendingRequests)controller.abort();this.pendingRequests.clear();for(const agent of this.agents.values())agent.destroy();this.agents.clear();this.poolScope=null;}
   async transport(url,options={}){
     const scope=JSON.stringify([this.user?.id || null,this.environment(),this.token,this.version]);
     if(scope!==this.poolScope){this.closeConnections();this.poolScope=scope;}
-    const target=new URL(url);let agent=this.agents.get(target.origin);
-    if(!agent){const Client=target.protocol==='https:'?https:http;agent=new Client.Agent({keepAlive:true,maxSockets:4,maxFreeSockets:2,timeout:30000});this.agents.set(target.origin,agent);}
-    // Account/control-plane traffic remains explicitly direct; it is never a
-    // fallback for an environment-proxied request. Node does not replay requests.
+    const target=new URL(url),admission=this.admission,originActive=this.originActive;
     const controller=new AbortController();this.pendingRequests.add(controller);
     const signal=options.signal?AbortSignal.any([options.signal,controller.signal]):controller.signal;
-    try{return await directRequest(url,{...options,signal,token:target.origin===this.serverURL?(options.token ?? this.token):undefined,agent});}
-    finally{this.pendingRequests.delete(controller);}
+    let release,agent;
+    try{
+      release=await admission.acquire(signal,options.timeouts?.queue ?? 15000);signal.throwIfAborted();
+      agent=this.agents.get(target.origin);
+      if(!agent){
+        if(this.agents.size>=32){const idle=[...this.agents].find(([origin])=>!originActive.get(origin));if(!idle)throw Object.assign(new Error('连接池已满'),{code:'POOL_LIMIT'});idle[1].destroy();this.agents.delete(idle[0]);}
+        const Client=target.protocol==='https:'?https:http;agent=new Client.Agent({keepAlive:true,maxSockets:4,maxTotalSockets:4,maxFreeSockets:2,timeout:30000});this.agents.set(target.origin,agent);
+      }
+      originActive.set(target.origin,(originActive.get(target.origin)||0)+1);
+      // Account/control-plane routing is explicitly direct, never proxy fallback.
+      return await directRequest(url,{...options,signal,token:target.origin===this.serverURL?(options.token ?? this.token):undefined,agent});
+    }finally{
+      if(agent){const count=(originActive.get(target.origin)||1)-1;if(count)originActive.set(target.origin,count);else originActive.delete(target.origin);}
+      release?.();this.pendingRequests.delete(controller);
+    }
   }
+
   async request(route,options={}) {
     let res;try{res=await this.transport(this.serverURL+route,options);}catch(error){if(error.name==='AbortError')throw error;throw new Error('账号服务暂不可用，请确认 Go 服务已启动');}
     let data;try{data=JSON.parse(res.data.toString());}catch{throw new Error('账号服务响应格式错误');}

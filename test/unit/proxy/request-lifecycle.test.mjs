@@ -62,3 +62,32 @@ test('phase statistics keep a bounded window and record completion exactly once'
  const snapshot=stats.snapshot();assert.equal(snapshot['probe.cold.success'].count,300);assert.equal(snapshot['probe.cold.success'].windowSamples,128);assert.equal(snapshot['probe.cold.error'],undefined);
  assert.ok(snapshot['probe.cold.success'].phases.total.p95Ms>=0);
 });
+
+test('transport, queue and explicit cancellation errors have consistent outcomes',async()=>{
+ const {requestOutcome,RequestLifecycle,PerformanceStats}=await import('../../../src/features/proxy/request-lifecycle.mjs');
+ const {EventEmitter}=await import('node:events');
+ const cases=[...['REQUEST_TIMEOUT','PROXY_TIMEOUT','PROXY_QUEUE_TIMEOUT','ETIMEDOUT'].map(code=>[{code},'timeout']),...['ABORT_ERR','CLIENT_CANCELLED'].map(code=>[{code},'cancelled']),[{name:'AbortError'},'cancelled'],[{code:'ECONNRESET'},'error'],[{code:'GATEWAY_BLOCKED'},'error']];
+ for(const [fields,outcome] of cases){
+  const error=Object.assign(new Error('fixture failure'),fields);assert.equal(requestOutcome(error),outcome);
+  for(const source of ['request','response','abort']){
+   const stats=new PerformanceStats(),life=new RequestLifecycle({timings:stats.start('probe')}),request=new EventEmitter();life.bind(request);
+   if(source==='abort')life.abort(error);
+   else if(source==='request')request.emit('error',error);
+   else{const response=new EventEmitter();response.statusCode=200;request.emit('response',response);response.emit('error',error);}
+   assert.equal(stats.snapshot()[`probe.unassigned.${outcome}`].count,1);assert.equal(life.cleanups.length,0);
+  }
+ }
+});
+
+test('completed lifecycle cannot later abort a reusable connection or install listeners',async()=>{
+ const {RequestLifecycle,PerformanceStats}=await import('../../../src/features/proxy/request-lifecycle.mjs');
+ const {EventEmitter,getEventListeners}=await import('node:events');
+ const external=new AbortController(),stats=new PerformanceStats(),life=new RequestLifecycle({signal:external.signal,timings:stats.start('probe')});
+ const request=new EventEmitter();let notified=0;
+ life.bind(request);const count=request.listenerCount('finish');life.bind(request);assert.equal(request.listenerCount('finish'),count);
+ life.rejectOnAbort(()=>notified++);life.rejectOnAbort(()=>notified++);assert.equal(getEventListeners(life.signal,'abort').length,1);
+ life.finish('success');life.abort(Object.assign(new Error('late cancel'),{code:'CLIENT_CANCELLED'}));external.abort();
+ life.bind(new EventEmitter());life.rejectOnAbort(()=>notified++);
+ assert.equal(life.signal.aborted,false);assert.equal(notified,0);assert.equal(getEventListeners(life.signal,'abort').length,0);assert.equal(getEventListeners(external.signal,'abort').length,0);assert.equal(request.eventNames().length,0);assert.equal(life.cleanups.length,0);
+ assert.equal(stats.snapshot()['probe.unassigned.success'].count,1);assert.equal(Object.keys(stats.snapshot()).length,1);
+});

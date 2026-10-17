@@ -92,3 +92,29 @@ test('retiring an account pool cancels active and queued requests',async()=>{
   assert.ok((await results).every(r=>r.status==='rejected'));assert.equal(client.pendingRequests.size,0);
  }finally{client.closeConnections();server.closeAllConnections();await new Promise(r=>server.close(r));}
 });
+
+test('account admission bounds active and queued work and never dispatches cancelled or expired mutations',async()=>{
+ let hits=0;const server=http.createServer(()=>hits++);await new Promise(r=>server.listen(0,'127.0.0.1',r));
+ const client=new AccountClient({serverURL:'http://127.0.0.1:'+server.address().port});const controller=new AbortController();
+ const results=[];const start=(options={})=>{const p=client.transport(client.serverURL+'/mutation',{method:'POST',body:{mutation:true},...options}).then(()=>({ok:true}),error=>({code:error.code,name:error.name,phase:error.phase}));results.push(p);return p;};
+ try{
+  for(let i=0;i<4;i++)start();
+  start({signal:controller.signal});for(let i=0;i<15;i++)start({timeouts:{queue:70}});
+  assert.equal((await start()).code,'REQUEST_BUSY');controller.abort();
+  await new Promise(r=>setTimeout(r,110));
+  assert.equal(hits,4);assert.equal(client.admission.active,4);assert.equal(client.admission.queue.length,0);
+  assert.ok((await Promise.all(results.slice(5,20))).every(r=>r.code==='REQUEST_TIMEOUT'&&r.phase==='queue'));
+  client.closeConnections();assert.ok((await Promise.all(results)).every(r=>!r.ok));assert.equal(client.pendingRequests.size,0);
+ }finally{client.closeConnections();server.closeAllConnections();await new Promise(r=>server.close(r));}
+});
+
+test('account origins evict idle pools without exceeding their bound',async()=>{
+ const server=http.createServer((_req,res)=>res.end('{}'));await new Promise(r=>server.listen(0,'127.0.0.1',r));
+ const client=new AccountClient({serverURL:'http://127.0.0.1:'+server.address().port});let destroyed=0;
+ try{
+  // Establish scope, then represent obsolete, inactive origins without network calls.
+  await client.request('/');client.agents.get(client.serverURL).destroy();client.agents.clear();
+  for(let i=0;i<32;i++)client.agents.set('https://obsolete-'+i+'.invalid',{destroy(){destroyed++;}});
+  await client.request('/');assert.equal(client.agents.size,32);assert.equal(destroyed,1);
+ }finally{client.closeConnections();server.closeAllConnections();await new Promise(r=>server.close(r));}
+});

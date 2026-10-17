@@ -41,7 +41,7 @@ async function fixture(options = {}) {
 }
 async function request(gateway, url, authenticate = true, method='GET') {
   return new Promise((resolve, reject) => {
-    const req = http.request({ host: '127.0.0.1', port: gateway.port, path: url, method, headers: authenticate ? { 'Proxy-Authorization': `Basic ${Buffer.from(`workspace:${gateway.token}`).toString('base64')}` } : {} }, res => {
+    const req = http.request({ host: '127.0.0.1', port: gateway.port, path: url, method, agent:false, headers: authenticate ? { 'Proxy-Authorization': `Basic ${Buffer.from(`workspace:${gateway.token}`).toString('base64')}` } : {} }, res => {
       let body = ''; res.on('data', chunk => body += chunk); res.on('end', () => resolve({ code: res.statusCode, body }));
     });
     req.on('error', reject); req.setTimeout(2000, () => req.destroy(new Error('test timeout'))); req.end();
@@ -569,7 +569,7 @@ for(const engine of ['native','gost'])test(`${engine}: slow upload and downstrea
   const metrics=f.gateway.status.performance;
   assert.ok(metrics['http.cold.success'].phases.upload.p95Ms>150);
   assert.ok(metrics['http.cold.success'].phases.downstream.p95Ms>0);
-  assert.equal(metrics['http.cold.timeout'].count,1);assert.ok(metrics['probe.reused.success'].count>=1);assert.ok(f.gateway.status.performanceReuse.probe.reuseRate>0);assert.equal(f.gateway.status.performanceReuse.verification.reuseRate,0);
+  assert.equal((metrics['http.cold.timeout']?.count||0)+(metrics['http.reused.timeout']?.count||0),1);assert.ok(metrics['probe.reused.success'].count>=1);assert.ok(f.gateway.status.performanceReuse.probe.reuseRate>0);assert.equal(f.gateway.status.performanceReuse.verification.reuseRate,0);
   assert.equal(f.gateway.status.capacity.forwarding.responseTimeouts.upload,1);assert.equal(f.gateway.status.capacity.forwarding.responseTimeouts.body,0);
   assert.equal(f.gateway.status.state,'ready');assert.equal(f.gateway.status.capacity.forwarding.active,0);
   // A receiver that never resumes is bounded by the downstream deadline, not body idle.
@@ -691,4 +691,54 @@ test('CONNECT target accounting preserves explicit port 80 and normalizes host s
   assert.deepEqual(observed.slice(0,2).map(x=>x.keys),[[JSON.stringify(['example.invalid',80])],[JSON.stringify(['example.invalid',443])]]);
   assert.equal(g.forwarding.targets.size,0);
  }finally{await g.stop();}
+});
+
+for(const engine of ['native','gost'])test(`${engine}: HTTP pools reuse only their target and discard failed or quarantined sockets`,engine==='gost'?gostTest:{},async()=>{
+ const f=await fixture({...(engine==='gost'?{gostBinary}:{}),respond(req,res){if(req.url==='/reset'){req.socket.destroy();return true;}}});
+ try{
+  await f.gateway.verify(f.url);const initial=f.tunnels;
+  assert.equal((await request(f.gateway,f.url)).code,200);assert.equal((await request(f.gateway,f.url)).code,200);assert.equal(f.tunnels,initial+1);
+  const alias=new URL(f.url);alias.hostname='proxy-target.invalid';assert.equal((await request(f.gateway,alias.href)).code,200);assert.equal(f.tunnels,initial+2);
+  await assert.rejects(f.gateway.readText(new URL('/bad-probe',f.url).href));const before=f.tunnels;assert.equal((await request(f.gateway,f.url)).code,200);assert.equal(f.tunnels,before,'failed probe must not close business pool');
+  const hits=f.hits;assert.equal((await request(f.gateway,new URL('/reset',f.url).href,true,'POST')).code,502);assert.equal(f.hits,hits+1);
+  assert.equal((await request(f.gateway,f.url)).code,200);assert.equal(f.tunnels,before+1,'next request may reconnect, failed POST is never replayed');
+  for(const a of f.gateway.forwardAgents.values())for(const list of Object.values(a.freeSockets))for(const socket of list)socket.destroy();
+  await new Promise(r=>setTimeout(r,10));assert.equal((await request(f.gateway,f.url)).code,200);assert.equal(f.tunnels,before+2);
+  assert.ok(f.gateway.status.performanceReuse.http.reused>=2);assert.equal(f.gateway.status.state,'ready');
+  f.changeIp();await f.gateway.verify(f.url);assert.equal(f.gateway.status.state,'blocked');assert.equal(f.gateway.forwardAgents.size,0);assert.equal((await request(f.gateway,f.url)).code,502);
+ }finally{await f.cleanup();}
+});
+
+test('idle origin pools are evicted, busy handshakes retained and aggregate pools bounded',async()=>{
+ const g=new ProxyGateway({protocol:'http',host:'127.0.0.1',port:9});
+ try{
+  const first=g.requestAgent(new URL('http://origin-0.invalid'));first.pendingCreates=1;
+  for(let i=1;i<80;i++)g.requestAgent(new URL(`http://origin-${i}.invalid`));
+  assert.equal(g.requestAgents.size,32);assert.equal(g.requestAgents.get('http://origin-0.invalid'),first);
+  for(const a of g.requestAgents.values())a.pendingCreates=1;
+  const overflow=g.requestAgent(new URL('http://overflow.invalid'));assert.equal(overflow.ephemeral,true);assert.equal(g.requestAgents.size,32);assert.ok(g.transientAgents.has(overflow));
+  g.clearRequestPools();assert.equal(g.requestAgents.size,0);assert.equal(g.transientAgents.size,0);
+ }finally{await g.stop();}
+});
+
+test('forward CONNECT timeout has tunnel phase and timeout outcome without quarantining',async()=>{
+ const sockets=new Set(),server=net.createServer(s=>{sockets.add(s);s.on('error',()=>{});s.on('close',()=>sockets.delete(s));s.resume();});
+ const port=await listen(server),g=await new ProxyGateway({protocol:'http',host:'127.0.0.1',port},{timeout:40}).start();g.update({state:'ready',ip:'203.0.113.8'});
+ try{
+  await new Promise((resolve,reject)=>{const r=http.request({host:'127.0.0.1',port:g.port,method:'CONNECT',path:'example.invalid:443',headers:{'proxy-authorization':`Basic ${Buffer.from(`workspace:${g.token}`).toString('base64')}`}});r.on('connect',(res,s)=>{s.destroy();assert.equal(res.statusCode,502);resolve();});r.on('error',reject);r.end();});
+  assert.equal(g.status.performance['connect.cold.timeout'].count,1);assert.equal(g.status.lastFailure.phase,'tunnel');assert.equal(g.status.state,'ready');
+ }finally{await g.stop();for(const s of sockets)s.destroy();await close(server);}
+});
+
+
+test('canonical loopback targets stay blocked before opening any upstream socket',async()=>{
+ const g=await new ProxyGateway({protocol:'http',host:'127.0.0.1',port:9}).start();g.update({state:'ready'});
+ try{for(const host of ['localhost.','x.localhost.','0:0:0:0:0:0:0:1','::ffff:127.0.0.1','::'])await assert.rejects(g.tunnel(host,80),{code:'TARGET_BLOCKED'});assert.equal(g.sockets.size,0);}finally{await g.stop();}
+});
+
+test('successful CONNECT headers do not count coalesced target payload against header limit',async()=>{
+ const payload=Buffer.alloc(70000,97),sockets=new Set();
+ const server=net.createServer(s=>{sockets.add(s);s.on('error',()=>{});s.once('data',()=>s.end(Buffer.concat([Buffer.from('HTTP/1.1 201 Connected\r\n\r\n'),payload])));});
+ const port=await listen(server),g=await new ProxyGateway({protocol:'http',host:'127.0.0.1',port}).start();
+ try{const socket=await g.tunnel('example.invalid',443);const received=[];await new Promise((resolve,reject)=>{socket.on('data',b=>received.push(b));socket.on('end',resolve);socket.on('error',reject);socket.resume();});assert.deepEqual(Buffer.concat(received),payload);}finally{await g.stop();for(const s of sockets)s.destroy();await close(server);}
 });

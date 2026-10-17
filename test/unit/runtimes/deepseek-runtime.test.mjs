@@ -166,3 +166,29 @@ test('DeepSeek installation without a model keeps every available model for per-
   assert.deepEqual((await runDeepSeekCLI('info',{}, {directory})).models,info.models);
  }finally{await rm(directory,{recursive:true,force:true});}
 });
+
+test('DeepSeek admission bounds asynchronous CONNECT handshakes and queued mutations',async()=>{
+ const http=await import('node:http');const {requestDeepSeek,closeDeepSeekConnections}=await import('../../../src/features/runtimes/deepseek-runtime.mjs');
+ const proxy=http.createServer(),sockets=new Set();let connects=0;
+ proxy.on('connect',(_req,socket)=>{connects++;sockets.add(socket);socket.resume();socket.on('end',()=>socket.destroy());socket.on('error',()=>{});socket.on('close',()=>sockets.delete(socket));});
+ await new Promise(r=>proxy.listen(0,'127.0.0.1',r));const url='http://127.0.0.1:'+proxy.address().port;
+ const results=[];const controller=new AbortController();
+ const start=(options={})=>{const p=requestDeepSeek(url,'fixture-key','/chat/completions',{mutation:true},{timeouts:{tunnel:5000,...options.timeouts},...options}).then(()=>({ok:true}),e=>({code:e.code,name:e.name,phase:e.phase}));results.push(p);return p;};
+ try{
+  for(let i=0;i<4;i++)start();start({signal:controller.signal});for(let i=0;i<15;i++)start({timeouts:{queue:80,tunnel:5000}});
+  assert.equal((await start()).code,'REQUEST_BUSY');controller.abort();
+  await new Promise(r=>setTimeout(r,130));assert.equal(connects,4,'handshakes must be bounded before async Agent callback');
+  assert.ok((await Promise.all(results.slice(5,20))).every(r=>r.code==='REQUEST_TIMEOUT'&&r.phase==='queue'));
+  closeDeepSeekConnections();assert.ok((await Promise.all(results)).every(r=>!r.ok));
+  await new Promise(r=>setTimeout(r,30));assert.equal(sockets.size,0);assert.equal(connects,4,'cancelled and expired POSTs must never dispatch or retry');
+ }finally{closeDeepSeekConnections();for(const socket of sockets)socket.destroy();await new Promise(r=>proxy.close(r));}
+});
+
+test('DeepSeek worker sync includes the shared request admission dependency',async()=>{
+ const {DockerEnvironments}=await import('../../../src/features/environments/docker-environments.mjs');
+ const manager=new DockerEnvironments({directory:'/unused',sourceRoot:path.resolve('.')});let files;
+ manager.exec=async(_owner,_id,_args,options)=>{files=JSON.parse(options.input);};
+ await manager.syncDeepSeekSource('fixture-owner','fixture-environment');
+ assert.ok(files['dingtu/deepseek.mjs'].includes("../proxy/request-admission.mjs"));
+ assert.ok(files['proxy/request-admission.mjs'].includes('export class BoundedRequests'));
+});

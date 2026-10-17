@@ -10,6 +10,11 @@ export class PhaseTimings {
   advance(phase){if(this.done||phase===this.phase)return;const now=performance.now();this.phases[this.phase]=(this.phases[this.phase]||0)+now-this.changed;this.changed=now;this.phase=phase;if(phase==='connect')this.mode='cold';}
   finish(outcome){if(this.done)return;const now=performance.now();this.phases[this.phase]=(this.phases[this.phase]||0)+now-this.changed;this.phases.total=now-this.started;this.done=true;this.record({mode:this.mode,outcome,phases:this.phases});}
 }
+export function requestOutcome(error) {
+  if(['REQUEST_TIMEOUT','PROXY_TIMEOUT','PROXY_QUEUE_TIMEOUT','ETIMEDOUT'].includes(error?.code))return 'timeout';
+  if(['ABORT_ERR','CLIENT_CANCELLED'].includes(error?.code)||error?.name==='AbortError')return 'cancelled';
+  return 'error';
+}
 export function requestTimeout(phase) {return Object.assign(new Error(`请求超时（${phase}）`),{code:'REQUEST_TIMEOUT',phase});}
 export class RequestLifecycle {
   constructor({signal,timeouts={},stream=false,timings}={}) {
@@ -20,17 +25,18 @@ export class RequestLifecycle {
     if(!this.done&&this.timeouts.total>0)this.totalTimer=setTimeout(()=>this.abort(requestTimeout('total')),this.timeouts.total);
     this.advance(timings?.phase || 'queue');
   }
-  rejectOnAbort(reject){if(this.signal.aborted){reject(this.signal.reason);return;}this.abortNotification=()=>reject(this.signal.reason);this.signal.addEventListener('abort',this.abortNotification,{once:true});}
+  rejectOnAbort(reject){this.signal.removeEventListener('abort',this.abortNotification);if(this.signal.aborted){reject(this.signal.reason);return;}if(this.done)return;this.abortNotification=()=>reject(this.signal.reason);this.signal.addEventListener('abort',this.abortNotification,{once:true});}
   advance(phase){if(this.done||this.signal.aborted)return;this.phase=phase;this.timings?.advance(phase);clearTimeout(this.timer);if(this.timeouts[phase]>0)this.timer=setTimeout(()=>this.abort(requestTimeout(phase)),this.timeouts[phase]);}
-  abort(error){if(!this.signal.aborted)this.controller.abort(error);this.finish(error?.code==='REQUEST_TIMEOUT'?'timeout':'cancelled');}
+  abort(error){if(this.done)return;if(!this.signal.aborted)this.controller.abort(error);this.finish(requestOutcome(this.signal.reason));}
   finish(outcome='error'){
     if(this.done)return;this.done=true;clearTimeout(this.timer);clearTimeout(this.totalTimer);this.external?.removeEventListener('abort',this.cancel);this.signal.removeEventListener('abort',this.abortNotification);
     for(const clean of this.cleanups)clean();this.cleanups=[];
-    this.timings?.finish(this.signal.aborted?(this.signal.reason?.code==='REQUEST_TIMEOUT'?'timeout':'cancelled'):outcome);
+    this.timings?.finish(this.signal.aborted?requestOutcome(this.signal.reason):typeof outcome==='string'?outcome:requestOutcome(outcome));
   }
   bind(request,{customConnection=false,uploadSource,downstream}={}){
+    if(this.done||this.bound)return;this.bound=true;
     let responseSeen=false,ready=false;
-    const watch=(emitter,event,fn)=>{emitter.on(event,fn);this.cleanups.push(()=>emitter.off(event,fn));};
+    const watch=(emitter,event,fn)=>{if(this.done)return;emitter.on(event,fn);this.cleanups.push(()=>emitter.off(event,fn));};
     const sent=()=>{if(ready&&!responseSeen)this.advance(request.writableFinished?'headers':'upload');};
     watch(request,'finish',sent);
     if(uploadSource)watch(uploadSource,'data',()=>{if(this.phase==='upload')this.advance('upload');});
@@ -51,12 +57,12 @@ export class RequestLifecycle {
         watch(downstream,'finish',()=>this.finish(this.responseOutcome));watch(downstream,'close',()=>this.finish(downstream.writableFinished?this.responseOutcome:'cancelled'));
       }
       watch(response,'end',()=>{if(downstream&&!downstream.writableFinished)this.advance('downstream');else this.finish(this.responseOutcome);});
-      watch(response,'error',()=>this.finish());
+      watch(response,'error',error=>this.finish(requestOutcome(error)));
     });
     // Progress through a backed-up local socket must not count as upstream idle.
     if(uploadSource||downstream){let written=request.socket?.bytesWritten||0,delivered=downstream?.socket?.bytesWritten||0;
       const interval=setInterval(()=>{const next=request.socket?.bytesWritten||0,out=downstream?.socket?.bytesWritten||0;if(this.phase==='upload'&&next>written)this.advance('upload');if(this.phase==='downstream'&&out>delivered)this.advance('downstream');written=next;delivered=out;},Math.max(10,Math.min(1000,this.timeouts.upload/4,this.timeouts.downstream/4)));this.cleanups.push(()=>clearInterval(interval));
     }
-    watch(request,'close',()=>{if(!responseSeen||!downstream||downstream.writableFinished)this.finish(downstream?.writableFinished?this.responseOutcome:'error');});watch(request,'error',()=>this.finish());
+    watch(request,'close',()=>{if(!responseSeen||!downstream||downstream.writableFinished)this.finish(downstream?.writableFinished?this.responseOutcome:'error');});watch(request,'error',error=>this.finish(requestOutcome(error)));
   }
 }

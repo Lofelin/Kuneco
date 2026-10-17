@@ -1,3 +1,4 @@
+import {BoundedRequests} from '../proxy/request-admission.mjs';
 import {RequestLifecycle} from '../proxy/request-lifecycle.mjs';
 // Installed inside the current container; credentials and histories stay in its home volume.
 import http from 'node:http';
@@ -45,17 +46,16 @@ export function normalizeDeepSeekInput(value){
 let requestPool;
 export function closeDeepSeekConnections(){
  const old=requestPool;requestPool=null;
- if(old){old.closed=true;for(const life of old.lifecycles)life.abort(Object.assign(new Error('请求作用域已关闭'),{name:'AbortError'}));old.lifecycles.clear();old.agent.destroy();for(const pending of old.pending)pending.destroy();}
+ if(old){old.closed=true;old.admission.close();for(const life of old.lifecycles)life.abort(Object.assign(new Error('请求作用域已关闭'),{name:'AbortError'}));old.lifecycles.clear();old.agent.destroy();for(const pending of old.pending)pending.destroy();}
 }
-export function requestDeepSeek(proxyURL,key,route,body,{installation=false,direct:chatDirect=false,onText,onReasoning,rawBody,contentType,signal,timeouts}={}){
- return new Promise((resolve,reject)=>{
+export async function requestDeepSeek(proxyURL,key,route,body,{installation=false,direct:chatDirect=false,onText,onReasoning,rawBody,contentType,signal,timeouts}={}){
   const direct=chatDirect || installation && route==='/models' && body===undefined;
-  let proxy;if(!direct){try{proxy=new URL(proxyURL);}catch{return reject(new Error('请先连接当前环境的代理'));}}
-  if(!direct && proxy.protocol!=='http:')return reject(new Error('DeepSeek 需要当前环境的 HTTP 代理网关'));
+  let proxy;if(!direct){try{proxy=new URL(proxyURL);}catch{throw new Error('请先连接当前环境的代理');}}
+  if(!direct && proxy.protocol!=='http:')throw new Error('DeepSeek 需要当前环境的 HTTP 代理网关');
   const scope=JSON.stringify([proxyURL,key,direct]);
   if(requestPool?.scope!==scope)closeDeepSeekConnections();
   const fresh=!requestPool;
-  if(fresh)requestPool={scope,agent:new https.Agent({keepAlive:true,maxSockets:4,maxFreeSockets:2,timeout:30000,maxCachedSessions:0}),pending:new Set(),lifecycles:new Set(),closed:false};
+  if(fresh)requestPool={scope,agent:new https.Agent({keepAlive:true,maxSockets:4,maxFreeSockets:2,timeout:30000,maxCachedSessions:0}),pending:new Set(),lifecycles:new Set(),admission:new BoundedRequests(),closed:false};
   const pool=requestPool,agent=pool.agent;
   if(fresh && !direct)agent.createConnection=(_options,done)=>{
    const connectionLife=_options.requestLifecycle;connectionLife?.advance('connect');
@@ -77,9 +77,13 @@ export function requestDeepSeek(proxyURL,key,route,body,{installation=false,dire
     secure.once('secureConnect',()=>{secure.setTimeout(0);pool.pending.delete(secure);callback(null,secure);});
    });tunnel.end();
   };
-  const payload=rawBody || (body?JSON.stringify(body):null);
   const life=new RequestLifecycle({signal,stream:Boolean(body?.stream),timeouts:{headers:120000,body:120000,...timeouts}});
   pool.lifecycles.add(life);
+  let release;
+  try{
+   release=await pool.admission.acquire(life.signal,timeouts?.queue ?? 15000);life.signal.throwIfAborted();
+   const payload=rawBody || (body?JSON.stringify(body):null);
+   return await new Promise((resolve,reject)=>{
   life.rejectOnAbort(reject);
   const request=https.request({requestLifecycle:life,signal:life.signal,hostname:'api.deepseek.com',port:443,path:route,method:route.startsWith('/files/') && body===null?'DELETE':payload?'POST':'GET',agent,headers:{Authorization:'Bearer '+key,'Content-Type':contentType || 'application/json',...(payload?{'Content-Length':Buffer.byteLength(payload)}:{})}},response=>{
    if(response.statusCode===200 && body?.stream){readDeepSeekStream(response,onText,onReasoning).then(resolve,reject).catch(()=>{});return;}
@@ -88,6 +92,7 @@ export function requestDeepSeek(proxyURL,key,route,body,{installation=false,dire
    response.on('end',()=>{if(response.statusCode!==200){reject(new Error(response.statusCode===401?'API Key 无效':response.statusCode===402?'DeepSeek 账户余额不足':response.statusCode===429?'DeepSeek 请求过于频繁，请稍后重试':response.statusCode===400?'DeepSeek 请求参数或上下文超限，请检查模型与图片':'DeepSeek 请求失败（HTTP '+response.statusCode+'）'));return;}try{resolve(JSON.parse(data));}catch{reject(new Error('DeepSeek 响应无效'));}});
   });life.bind(request,{customConnection:!direct});pool.pending.add(request);request.once('close',()=>{pool.pending.delete(request);pool.lifecycles.delete(life);});request.once('error',()=>{reject(life.signal.aborted?life.signal.reason:new Error(direct?'DeepSeek API Key 校验失败，请检查网络连接':'DeepSeek 请求中断，请检查代理连接'));});request.end(payload);
  });
+  }finally{release?.();life.finish();pool.lifecycles.delete(life);}
 }
 export async function configureDeepSeek(directory,input,request){
  if(typeof input.apiKey!=='string' || !/^[\x21-\x7e]{8,512}$/.test(input.apiKey))throw new Error('请输入有效的 API Key');
