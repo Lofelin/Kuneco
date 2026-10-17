@@ -100,11 +100,26 @@ test('Runtime installer has direct download network, scoped volume and cleanup o
  assert.ok(!args.some(a=>a.includes('docker.sock') || a==='--privileged'));
  for(const key of ['HTTP_PROXY','HTTPS_PROXY','ALL_PROXY','http_proxy','https_proxy','all_proxy'])assert.ok(args.includes(key+'='));
  assert.equal(args.at(-1),'npm install -g @anthropic-ai/claude-code');assert.equal(RUNTIME_INSTALL_COMMANDS.codex,'npm install -g @openai/codex');
- const manager=new DockerEnvironments({directory:'/unused',sourceRoot:path.resolve('.')});const calls=[];
- manager.get=async()=>({item:{imageName:'fixture-image'},prefix:'fixture'});
- manager.command=async(args)=>{calls.push(args);if(args[0]==='run')throw new Error('fixture download failed');};
- await assert.rejects(manager.runRuntimeInstaller('owner','id',['npm','--version']),/download failed/);
- assert.deepEqual(calls[1],['rm','-f',calls[0][calls[0].indexOf('--name')+1]]);
+ for(const created of [false,true]){
+  const manager=new DockerEnvironments({directory:'/unused',sourceRoot:path.resolve('.')});const calls=[];
+  const failure=new Error('fixture download failed');let present=created,name;
+  manager.get=async()=>({item:{imageName:'fixture-image'},prefix:'fixture'});
+  manager.command=async args=>{
+   calls.push(args);
+   if(args[0]==='run'){name=args[args.indexOf('--name')+1];throw failure;}
+   if(args[0]==='inspect'){if(!present)throw new Error('No such container');return JSON.stringify({Id:'fixture-installer-id',Config:{Labels:{app:'dingtu-installer','io.kuneco.environment':'fixture'}}});}
+   if(args[0]==='ps')return present?(args.includes('{{.Names}}')?name:'fixture-installer-id'):'';
+   if(args[0]==='stop')return '';
+   if(args[0]==='rm'){present=false;return 'fixture-installer-id';}
+   throw new Error('Unexpected Docker command: '+args.join(' '));
+  };
+  await assert.rejects(manager.runRuntimeInstaller('owner','id',['npm','--version']),error=>error===failure);
+  assert.equal(manager.directTasks.size,0);
+  assert.ok(calls[0].includes('io.kuneco.environment=fixture'));
+  const mutations=calls.filter(args=>['stop','rm'].includes(args[0]));
+  assert.deepEqual(mutations,created?[['stop','-t','3','fixture-installer-id'],['rm','-f','fixture-installer-id']]:[]);
+  assert.ok(!calls.flat().includes('-v'));
+ }
  await assert.rejects(requestDeepSeek('', 'fixture-key','/chat/completions',{messages:[]},{installation:true}),/代理/);
 });
 
