@@ -38,9 +38,9 @@ async function fixture(options = {}) {
   const url = `http://127.0.0.1:${targetPort}/exit`;
   return { gateway, url, get hits() { return hits; }, get tunnels() { return tunnels; }, get auth() { return auth; }, get forwardedAuth() { return forwardedAuth; }, get routeVerified() { return targetPorts.every(p => remotePorts.has(p)); }, changeIp() { exitIp = '203.0.113.9'; }, reject() { rejectProxy = true; }, rejectTarget() { rejectTargetOnce = true; }, offline() { offlineProxy = true; for (const socket of sockets) socket.destroy(); }, online() { offlineProxy = false; }, async cleanup() { await gateway.stop(); for (const s of sockets) s.destroy(); await close(upstream); await close(target); } };
 }
-async function request(gateway, url, authenticate = true) {
+async function request(gateway, url, authenticate = true, method='GET') {
   return new Promise((resolve, reject) => {
-    const req = http.request({ host: '127.0.0.1', port: gateway.port, path: url, headers: authenticate ? { 'Proxy-Authorization': `Basic ${Buffer.from(`workspace:${gateway.token}`).toString('base64')}` } : {} }, res => {
+    const req = http.request({ host: '127.0.0.1', port: gateway.port, path: url, method, headers: authenticate ? { 'Proxy-Authorization': `Basic ${Buffer.from(`workspace:${gateway.token}`).toString('base64')}` } : {} }, res => {
       let body = ''; res.on('data', chunk => body += chunk); res.on('end', () => resolve({ code: res.statusCode, body }));
     });
     req.on('error', reject); req.setTimeout(2000, () => req.destroy(new Error('test timeout'))); req.end();
@@ -491,4 +491,36 @@ for(const engine of ['native','gost'])test(engine+': fresh exit checks detect a 
   f.changeIp();assert.equal(JSON.parse(await f.gateway.readText(f.url)).ip,'203.0.113.8');
   await f.gateway.verify(f.url);assert.equal(f.gateway.status.state,'blocked');assert.equal(f.gateway.quarantined,true);assert.equal(f.gateway.requestAgents.size,0);
  }finally{await f.cleanup();}
+});
+
+for(const engine of ['native','gost'])test(`${engine}: forwarding capacity, queued cancellation and reserved fresh verification`,engine==='gost'?gostTest:{},async()=>{
+ const f=await fixture({forwardingLimit:1,forwardingQueueLimit:1,queueTimeout:150,...(engine==='gost'?{gostBinary}: {})});
+ const clients=[];
+ const connect=()=>{const req=http.request({host:'127.0.0.1',port:f.gateway.port,method:'CONNECT',path:new URL(f.url).host,headers:{'Proxy-Authorization':'Basic '+Buffer.from('workspace:'+f.gateway.token).toString('base64')}});req.on('error',()=>{});clients.push(req);return req;};
+ const until=async predicate=>{for(let i=0;i<100&&!predicate();i++)await new Promise(r=>setTimeout(r,5));assert.ok(predicate());};
+ try{
+  await f.gateway.verify(f.url);
+  const first=connect(),opened=new Promise(r=>first.once('connect',(_res,s)=>{clients.push(s);r(s);}));first.end();const stream=await opened;
+  const queued=connect();queued.end();await until(()=>f.gateway.forwarding.queue.length===1);
+  const before=f.tunnels;
+  assert.equal((await request(f.gateway,f.url)).code,503);assert.equal(f.tunnels,before);
+  queued.destroy();await until(()=>f.gateway.forwarding.queue.length===0);assert.equal(f.tunnels,before);
+  assert.equal((await f.gateway.verify(f.url)).state,'ready');assert.equal(stream.destroyed,false);assert.equal(f.gateway.forwarding.active,1);
+  assert.equal((await request(f.gateway,f.url,true,'POST')).code,503); // queue deadline, mutation never sent upstream
+  assert.equal(f.tunnels,before+1);
+  stream.destroy();await until(()=>f.gateway.forwarding.active===0);
+  assert.equal((await request(f.gateway,f.url)).code,200);
+  await until(()=>f.gateway.forwarding.active===0);assert.equal(f.gateway.status.state,'ready');
+ }finally{for(const c of clients)c.destroy();await f.cleanup();}
+});
+
+test('client cancellation during upstream CONNECT releases admission and socket before handshake timeout',async()=>{
+ const sockets=new Set();const server=http.createServer();server.on('connect',(_req,s)=>{sockets.add(s);s.on('error',()=>{});s.once('close',()=>sockets.delete(s));s.once('end',()=>s.destroy());s.resume();});
+ const port=await listen(server),g=await new ProxyGateway({protocol:'http',host:'127.0.0.1',port},{timeout:5000,forwardingLimit:1}).start();g.update({state:'ready',ip:'203.0.113.8'});
+ const auth={'Proxy-Authorization':'Basic '+Buffer.from('workspace:'+g.token).toString('base64')};
+ const until=async predicate=>{for(let i=0;i<100&&!predicate();i++)await new Promise(r=>setTimeout(r,5));assert.ok(predicate());};
+ try{for(const connect of [true,false]){
+  const req=http.request({host:'127.0.0.1',port:g.port,method:connect?'CONNECT':'POST',path:connect?'example.com:443':'http://example.com/mutate',headers:auth});req.on('error',()=>{});req.end(connect?undefined:'mutation');
+  await until(()=>sockets.size===1);req.destroy();await until(()=>g.forwarding.active===0&&sockets.size===0);assert.equal(g.status.state,'ready');assert.equal(g.forwardControllers.size,0);
+ }}finally{await g.stop();for(const s of sockets)s.destroy();await close(server);}
 });
