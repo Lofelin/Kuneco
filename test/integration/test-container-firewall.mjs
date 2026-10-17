@@ -37,7 +37,16 @@ try{
   if(i===50)throw Error('isolated installer did not start');await new Promise(r=>setTimeout(r,100));
  }
  m.load=async()=>({environments:[{id:environmentId}],localEnabled:true});
+ const command=m.command.bind(m);let injectListingFailure=true;
+ m.command=async(args,options)=>{
+  if(injectListingFailure&&args[0]==='ps'&&args.includes('label=app=dingtu-direct')){injectListingFailure=false;throw Error('fixture cleanup listing failure');}
+  return command(args,options);
+ };
+ await assert.rejects(m.stopOtherEnvironments('firewall-fixture',null),/fixture cleanup listing failure/);
+ assert.throws(()=>launch({command:'node',args:[]}),/清理未完成/);
+ await assert.rejects(m.directChatSpawner('fixture','fixture'),/清理未完成/);
  await m.stopOtherEnvironments('firewall-fixture',null);await switchExit;await installationStopped;
+ m.command=command;
  assert.throws(()=>launch({command:'node',args:[]}),/停止或切换/);
  assert.equal(await m.command(['ps','-aq','--filter','label=io.kuneco.environment='+prefix]),'');
  // Unexpected Docker client death must not leave its daemon-side task alive.
@@ -59,7 +68,7 @@ try{
  await m.command(['exec',worker,'iptables','-t','raw','-D','OUTPUT','1']);
  await assert.rejects(validateWorkerFirewall(m,worker,await inspect(worker)),/规则/);
  assert.match(before,/--dport 53 -j DROP/);
- console.log(JSON.stringify({proxyGatewayAllowed:true,directPeerBlocked:true,otherGatewayPortBlocked:true,directTaskConnected:true,dockerDNSHighPortBlocked:true,dnsBeforeDNATBlocked:true,ipv6DNSBlocked:true,unprivilegedRulesImmutable:true,missingRuleRejected:true,switchCleanup:true,installerSwitchCleanup:true,staleLauncherRejected:true,dockerClientCrashCleaned:true,directEarlyCancelCleaned:true,productionUntouched:true}));
+ console.log(JSON.stringify({proxyGatewayAllowed:true,directPeerBlocked:true,otherGatewayPortBlocked:true,directTaskConnected:true,dockerDNSHighPortBlocked:true,dnsBeforeDNATBlocked:true,ipv6DNSBlocked:true,unprivilegedRulesImmutable:true,missingRuleRejected:true,switchCleanup:true,installerSwitchCleanup:true,cleanupFailureBlocksLaunch:true,cleanupRetryRecovers:true,staleLauncherRejected:true,dockerClientCrashCleaned:true,directEarlyCancelCleaned:true,productionUntouched:true}));
 }finally{
  await m.stopDirectTasks(prefix).catch(()=>{});
  for(const name of [worker,gateway,peer,direct])await m.command(['rm','-f',name]).catch(()=>{});

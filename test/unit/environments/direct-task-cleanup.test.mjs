@@ -57,3 +57,35 @@ test('installer cleanup failures are visible and retained for retry',async()=>{
  await assert.rejects(m.runRuntimeInstaller('owner','id',['node','--version']),/cleanup unavailable/);assert.equal(m.directTasks.size,1);
  fail=false;await m.stopDirectTasks(prefix);assert.equal(m.directTasks.size,0);
 });
+test('failed cancellation waits for other tasks and keeps launches blocked until successful retry',async()=>{
+ const m=manager();let release,fail=true,finished=false;
+ const slow=new Promise(r=>release=r);
+ m.directTasks=new Map([
+  ['failed',{prefix,cancel:async()=>{if(fail)throw Error('first cleanup failed');}}],
+  ['slow',{prefix,cancel:()=>slow}]
+ ]);
+ const stopping=m.stopDirectTasks(prefix);const rejected=assert.rejects(stopping,/first cleanup failed/);
+ void stopping.then(()=>{finished=true;},()=>{finished=true;});
+ await new Promise(r=>setImmediate(r));assert.equal(finished,false);assert.equal(m.directStops.has(prefix),true);
+ await assert.rejects(m.directChatSpawner('owner','id'),/停止或切换/);
+ release();await rejected;assert.equal(m.directTasks.has('slow'),false);assert.equal(m.directTasks.has('failed'),true);
+ await assert.rejects(m.directChatSpawner('owner','id'),/清理未完成/);
+ await assert.rejects(m.spawner('owner','id'),/清理未完成/);
+ await assert.rejects(m.runRuntimeInstaller('owner','id',['node','--version']),/清理未完成/);
+ fail=false;await m.stopDirectTasks(prefix);assert.equal(m.directTasks.size,0);
+ assert.doesNotThrow(()=>m.taskLaunchGuard()(prefix));
+});
+test('one owned container cleanup failure does not skip other containers or installer reconciliation',async()=>{
+ const m=manager(),seen=[];let fail=true;
+ m.command=async a=>{
+  if(a[0]==='ps'&&a.includes('label=app=dingtu-direct'))return 'bad\ngood';
+  if(a[0]==='ps'&&a.includes('label=app=dingtu-installer'))return 'installer';
+  if(a[0]==='inspect')return JSON.stringify({Id:a.at(-1),Config:{Labels:{app:a.at(-1)==='installer'?'dingtu-installer':'dingtu-direct','io.kuneco.environment':prefix}}});
+  if(a[0]==='stop'){seen.push(a.at(-1));if(a.at(-1)==='bad'&&fail)throw Error('bad stop');}
+  if(a[0]==='ps')return a.includes('id=bad')&&fail?'bad':'';
+  return '';
+ };
+ await assert.rejects(m.stopDirectTasks(prefix),/bad stop/);assert.deepEqual(seen,['bad','good','installer']);
+ assert.throws(()=>m.taskLaunchGuard()(prefix),/清理未完成/);
+ fail=false;await m.stopDirectTasks(prefix);assert.doesNotThrow(()=>m.taskLaunchGuard()(prefix));
+});

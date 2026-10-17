@@ -263,18 +263,25 @@ export class DockerEnvironments {
   const invalidate=()=>this.directGenerations.set(prefix,(this.directGenerations.get(prefix)||0)+1);
   invalidate();
   const pending=Promise.resolve().then(async()=>{
-   await Promise.all([...(this.directTasks?.entries() || [])].filter(([,task])=>task.prefix===prefix).map(async([id,task])=>{await task.cancel();this.directTasks.delete(id);}));
+   const settled=await Promise.allSettled([...(this.directTasks?.entries() || [])].filter(([,task])=>task.prefix===prefix).map(async([id,task])=>{await task.cancel();this.directTasks.delete(id);}));
+   const errors=settled.filter(result=>result.status==='rejected').map(result=>result.reason);
    for(const app of ['dingtu-direct','dingtu-installer']){
-    const names=(await this.command(['ps','-a','--format','{{.Names}}','--filter','label=app='+app,'--filter','label=io.kuneco.environment='+prefix])).split('\n').filter(Boolean);
-    for(const name of names)await cleanupDirectTask(this,name,prefix,app);
+    try{
+     const names=(await this.command(['ps','-a','--format','{{.Names}}','--filter','label=app='+app,'--filter','label=io.kuneco.environment='+prefix])).split('\n').filter(Boolean);
+     for(const name of names)try{await cleanupDirectTask(this,name,prefix,app);}catch(error){errors.push(error);}
+    }catch(error){errors.push(error);}
    }
+   if(errors.length)throw new AggregateError(errors,'环境任务清理未完成：'+errors.map(error=>error.message).join('；'));
   });
   this.directStops.set(prefix,pending);
-  try{await pending;}finally{invalidate();this.directStops.delete(prefix);}
+  this.directStopFailures ||= new Set();
+  try{await pending;this.directStopFailures.delete(prefix);}
+  catch(error){this.directStopFailures.add(prefix);throw error;}
+  finally{invalidate();this.directStops.delete(prefix);}
  }
  taskLaunchGuard(){
   const generations=new Map(this.directGenerations);
-  return prefix=>{if(this.directStops?.has(prefix)||(generations.get(prefix)||0)!==(this.directGenerations?.get(prefix)||0))throw new Error('环境已停止或切换，不能启动旧任务');};
+  return prefix=>{if(this.directStopFailures?.has(prefix))throw new Error('环境任务清理未完成，请重试停止或切换环境');if(this.directStops?.has(prefix)||(generations.get(prefix)||0)!==(this.directGenerations?.get(prefix)||0))throw new Error('环境已停止或切换，不能启动旧任务');};
  }
 
  async stop(owner,id){const {prefix,item}=await this.get(owner,id);if(item.external){await this.command(['stop','-t','3',item.external.id],{endpoint:item.external.endpoint});return this.state(owner);}await this.stopDirectTasks(prefix);const names=new Set((await this.command(['ps','-a','--format','{{.Names}}'])).split('\n'));for(const suffix of ['worker','gateway']){const name=prefix+'-'+suffix;if(!names.has(name))continue;await this.command(['stop','-t','5',name]);if((await this.command(['inspect','--format','{{.State.Running}}',name]))!=='false')throw new Error('容器未能停止，请重试');}return this.state(owner);}
