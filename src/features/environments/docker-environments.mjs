@@ -1,3 +1,5 @@
+import {TaskCapacity} from './task-capacity.mjs';
+import {accountMutation} from './account-mutation.mjs';
 import {cleanupDirectTask,waitForTaskCleanup} from './direct-task-cleanup.mjs';
 import {trackProxyTask} from './proxy-task-cleanup.mjs';
 import {verifyExternalTaskCapabilities,externalTaskArguments,externalTaskCancellation} from './external-task.mjs';
@@ -10,7 +12,7 @@ import {RUNTIME_INSTALL_COMMANDS,RUNTIME_CATALOG,CLI_RUNTIMES} from '../runtimes
 import {imageConfiguration,ImageDownloadProgress} from './container-image-config.mjs';
 import {listExternalContainers,inspectExternal,claimExternal,releaseExternal} from './external-containers.mjs';
 import {execFile,spawn} from 'node:child_process';
-import {access,mkdir,readFile,writeFile,rename} from 'node:fs/promises';
+import {access,mkdir,readFile,writeFile,rename,rm} from 'node:fs/promises';
 import {homedir} from 'node:os';
 import path from 'node:path';
 import {randomUUID,createHash} from 'node:crypto';
@@ -74,7 +76,7 @@ export class DockerEnvironments {
    onProgress({stage:4,complete:true,message:'容器环境配置完成'});
   }finally{this.busy=false;}
  }
- async configureImage(owner,options){if(this.busy)throw new Error('正在配置容器，请稍候');const configuration=imageConfiguration(options),data=await this.load(owner);data.imageConfig={version:configuration.version,repository:configuration.repository};await this.save(owner,data);return data.imageConfig;}
+ async configureImage(owner,options){return accountMutation(this,owner,async()=>{if(this.busy)throw new Error('正在配置容器，请稍候');const configuration=imageConfiguration(options),data=await this.load(owner);data.imageConfig={version:configuration.version,repository:configuration.repository};await this.save(owner,data);return data.imageConfig;});}
  async pullBaseImage(configuration,onProgress){
   const progress=new ImageDownloadProgress();
   return new Promise((resolve,reject)=>{
@@ -99,9 +101,9 @@ export class DockerEnvironments {
  }
  file(owner){if(!owner)throw new Error('请先登录再创建 Docker 环境');return path.join(this.directory,createHash('sha256').update(owner).digest('hex')+'.bin');}
  async load(owner){if(!owner)return {activeId:null,environments:[]};try{return JSON.parse(this.decrypt(await readFile(this.file(owner))));}catch(error){if(error.code==='ENOENT')return{activeId:null,localEnabled:this.defaultLocalEnabled,environments:[]};throw new Error('环境配置无法读取，已停止切换');}}
- async save(owner,value){await mkdir(this.directory,{recursive:true,mode:0o700});const file=this.file(owner);await writeFile(file+'.tmp',this.encrypt(JSON.stringify(value)),{mode:0o600});await rename(file+'.tmp',file);}
+ async save(owner,value){await mkdir(this.directory,{recursive:true,mode:0o700});const file=this.file(owner),temporary=file+'.'+randomUUID()+'.tmp';try{await writeFile(temporary,this.encrypt(JSON.stringify(value)),{mode:0o600,flag:'wx'});await rename(temporary,file);}finally{await rm(temporary,{force:true});}}
  async get(owner,id){const data=await this.load(owner);const item=data.environments.find(item=>item.id===id);if(!item)throw new Error('当前账号下不存在该环境');return {data,item,prefix:resourcePrefix(owner,id)};}
- async create(owner,name,icon){if(typeof name!=='string'||!name.trim()||name.length>40)throw new Error('环境名称需为1至40个字符');const data=await this.load(owner);if(data.environments.length>=10)throw new Error('最多创建10个环境');const item={id:randomUUID(),name:name.trim(),icon:environmentIcon(icon),createdAt:new Date().toISOString(),imageName:imageConfiguration(data.imageConfig).imageName,baseImage:imageConfiguration(data.imageConfig).baseImage,registry:null,proxy:null};data.environments.push(item);await this.save(owner,data);return item.id;}
+ async create(owner,name,icon){return accountMutation(this,owner,async()=>{if(typeof name!=='string'||!name.trim()||name.length>40)throw new Error('环境名称需为1至40个字符');const data=await this.load(owner);if(data.environments.length>=10)throw new Error('最多创建10个环境');const item={id:randomUUID(),name:name.trim(),icon:environmentIcon(icon),createdAt:new Date().toISOString(),imageName:imageConfiguration(data.imageConfig).imageName,baseImage:imageConfiguration(data.imageConfig).baseImage,registry:null,proxy:null};data.environments.push(item);await this.save(owner,data);return item.id;});}
  async verifyImageTools(image){
   try{await this.command(['run','--rm','--network','none','--read-only','--user','1000:1000','--cap-drop','ALL','--security-opt','no-new-privileges','--entrypoint','sh',image,'-c','node --version && npm --version && curl --version'],{timeout:30000});}
   catch{throw new Error('基础镜像缺少可用的 Node.js、npm 或 curl，请重新准备基础镜像后再创建环境');}
@@ -128,7 +130,7 @@ export class DockerEnvironments {
   return containers.map(container=>({...container,environmentNames:data.environments.filter(item=>item.external?item.external.id===container.id:container.name===resourcePrefix(owner,item.id)+'-worker').map(item=>item.name)}));
  }
  async previewExisting(owner,key){const item=await inspectExternal(this,owner,key);if(!item.running)return {runtimes:[],stopped:true};return this.detectCommands(args=>this.command(['exec',item.id,...args],{endpoint:item.endpoint}));}
- async attach(owner,name,key,icon){
+ async attach(owner,name,key,icon){return accountMutation(this,owner,async()=>{
   if(typeof name!=='string'||!name.trim()||name.trim().length>40)throw new Error('环境名称需为1至40个字符');
   const data=await this.load(owner),source=await inspectExternal(this,owner,key);
   const duplicate=data.environments.find(item=>item.external?.id===source.id || resourcePrefix(owner,item.id)+'-worker'===source.name);
@@ -138,7 +140,7 @@ export class DockerEnvironments {
   try{if(!source.running)await this.command(['start',source.id],{endpoint:source.endpoint});
    const item={id:randomUUID(),name:name.trim(),icon:environmentIcon(icon),createdAt:new Date().toISOString(),registry:null,proxy:null,external:source};data.environments.push(item);await this.save(owner,data);return item.id;
   }catch(error){if(claimed)await releaseExternal(this,owner,source);throw error;}
- }
+ });}
  async syncDeepSeekSource(owner,id){
   const runtime=await readFile(path.join(this.sourceRoot,'src/features/runtimes/deepseek-runtime.mjs'),'utf8');
   const compaction=await readFile(path.join(this.sourceRoot,'src/features/runtimes/history-compaction.mjs'),'utf8');
@@ -151,8 +153,8 @@ export class DockerEnvironments {
  }
  async detectCommands(execute){const runtimes=[];for(const [id,command] of CLI_RUNTIMES.map(id=>[id,RUNTIME_CATALOG[id].command]))try{const version=await execute([command,'--version']);runtimes.push({id,name:RUNTIME_CATALOG[id].name,version});}catch{}try{const item=JSON.parse(await execute(['node','/home/node/.local/lib/dingtu/deepseek.mjs','info']));if(item.id==='deepseek')runtimes.push(item);}catch{}return {runtimes,checkedAt:new Date().toISOString()};}
  async workingDirectory(owner,id){const {item}=await this.get(owner,id);return item.external?.workingDirectory || '/workspace';}
- async update(owner,id,patch){const {data,item}=await this.get(owner,id);Object.assign(item,patch);await this.save(owner,data);}
- async select(owner,id){const data=await this.load(owner);if(id?!data.environments.some(item=>item.id===id):data.localEnabled===false)throw new Error('环境不存在');data.activeId=id;await this.save(owner,data);}
+ async update(owner,id,patch){return accountMutation(this,owner,async()=>{const {data,item}=await this.get(owner,id);Object.assign(item,typeof patch==='function'?patch(item):patch);await this.save(owner,data);});}
+ async select(owner,id){return accountMutation(this,owner,async()=>{const data=await this.load(owner);if(id?!data.environments.some(item=>item.id===id):data.localEnabled===false)throw new Error('环境不存在');data.activeId=id;await this.save(owner,data);});}
  // Stop only containers registered to this account; never touch unrelated Docker workloads.
  async stopOtherEnvironments(owner,id){
   const data=await this.load(owner);
@@ -182,24 +184,24 @@ export class DockerEnvironments {
   }
   await this.select(owner,id);
  }
- async changeEnvironmentIcon(owner,id,icon){
+ async changeEnvironmentIcon(owner,id,icon){return accountMutation(this,owner,async()=>{
   if(!owner)throw new Error('请先登录');
   if(!ENVIRONMENT_ICONS.includes(icon))throw new Error('请选择有效的环境图标');
   const data=await this.load(owner);
   if(id===null){if(data.localEnabled===false)throw new Error('环境不存在');data.localIcon=icon;}
   else{const item=data.environments.find(item=>item.id===id);if(!item)throw new Error('当前账号下不存在该环境');item.icon=icon;}
   await this.save(owner,data);
- }
- async renameEnvironment(owner,id,name){
+ });}
+ async renameEnvironment(owner,id,name){return accountMutation(this,owner,async()=>{
   if(!owner)throw new Error('请先登录');
   if(typeof name!=='string' || !name.trim() || name.trim().length>40)throw new Error('环境名称需为1至40个字符');
   const data=await this.load(owner),value=name.trim();
   if(id===null){if(data.localEnabled===false)throw new Error('环境不存在');data.localName=value;}
   else{const item=data.environments.find(item=>item.id===id);if(!item)throw new Error('当前账号下不存在该环境');item.name=value;}
   await this.save(owner,data);
- }
- async createLocal(owner,name='本机环境',icon){const data=await this.load(owner);if(data.localEnabled!==false)throw new Error('本机环境已存在');if(typeof name!=='string'||!name.trim()||name.length>40)throw new Error('环境名称需为1至40个字符');data.localEnabled=true;data.localName=name.trim();data.localIcon=environmentIcon(icon,"monitor");await this.save(owner,data);}
- async forgetLocal(owner,name){const data=await this.load(owner);if(data.localEnabled===false || name!==(data.localName || '本机环境'))throw new Error('请输入完整且一致的环境名称');data.localEnabled=false;if(!data.activeId)data.activeId=data.environments[0]?.id || null;await this.save(owner,data);}
+ });}
+ async createLocal(owner,name='本机环境',icon){return accountMutation(this,owner,async()=>{const data=await this.load(owner);if(data.localEnabled!==false)throw new Error('本机环境已存在');if(typeof name!=='string'||!name.trim()||name.length>40)throw new Error('环境名称需为1至40个字符');data.localEnabled=true;data.localName=name.trim();data.localIcon=environmentIcon(icon,"monitor");await this.save(owner,data);});}
+ async forgetLocal(owner,name){return accountMutation(this,owner,async()=>{const data=await this.load(owner);if(data.localEnabled===false || name!==(data.localName || '本机环境'))throw new Error('请输入完整且一致的环境名称');data.localEnabled=false;if(!data.activeId)data.activeId=data.environments[0]?.id || null;await this.save(owner,data);});}
  async deleteResources(owner,id,name){
   const {item,prefix}=await this.get(owner,id);if(name!==item.name)throw new Error('请输入完整且一致的环境名称');if(item.external)return;
   await this.stopDirectTasks(prefix);
@@ -209,7 +211,7 @@ export class DockerEnvironments {
    for(const name of names)if(existing.has(name))await this.command([kind,'rm',...(kind==='container'?['-f']:[]),name]);
   }
  }
- async forget(owner,id,name){const {data,item}=await this.get(owner,id);if(name!==item.name)throw new Error('请输入完整且一致的环境名称');const ordered=[...(data.localEnabled!==false?[null]:[]),...data.environments.map(item=>item.id)],index=ordered.indexOf(id);const remaining=ordered.filter(value=>value!==id);data.environments=data.environments.filter(item=>item.id!==id);if(data.activeId===id)data.activeId=remaining[index] ?? remaining[0] ?? null;await this.save(owner,data);if(item.external)await releaseExternal(this,owner,item.external);}
+ async forget(owner,id,name){return accountMutation(this,owner,async()=>{const {data,item}=await this.get(owner,id);if(name!==item.name)throw new Error('请输入完整且一致的环境名称');const ordered=[...(data.localEnabled!==false?[null]:[]),...data.environments.map(item=>item.id)],index=ordered.indexOf(id);const remaining=ordered.filter(value=>value!==id);data.environments=data.environments.filter(item=>item.id!==id);if(data.activeId===id)data.activeId=remaining[index] ?? remaining[0] ?? null;await this.save(owner,data);if(item.external)await releaseExternal(this,owner,item.external);});}
  async state(owner){
   const data=await this.load(owner),engine=await this.engineStatus(data.imageConfig);
   const environments=await Promise.all(data.environments.map(async item=>{
@@ -262,6 +264,17 @@ export class DockerEnvironments {
  }
  async rpc(owner,id,action,value){const {prefix}=await this.get(owner,id);const raw=await this.command(['exec','-i',prefix+'-gateway','node','/opt/dingtu/control.mjs'],{input:JSON.stringify({action,value})});return JSON.parse(raw);}
  async start(owner,id){return this.withEnvironmentPreparation(resourcePrefix(owner,id),async assertCurrent=>{const {item}=await this.get(owner,id);assertCurrent();if(item.external){await this.command(['start',item.external.id],{endpoint:item.external.endpoint});assertCurrent();return this.state(owner);}const adapter=await this.connect(owner,id,{protocol:'http',host:'192.0.2.1',port:1,username:'',password:''},null);assertCurrent();await adapter.startWorker();assertCurrent();return this.state(owner);});}
+ async shutdownTasks(){
+  this.shuttingDown=true;
+  // Preparations see the shutdown guard before publishing or launching work.
+  await Promise.allSettled([...(this.environmentPreparations?.values() || [])].flatMap(set=>[...set]));
+  const prefixes=new Set([...(this.directTasks?.values() || [])].map(task=>task.prefix));
+  for(const prefix of this.directStopFailures || [])prefixes.add(prefix);
+  const results=await Promise.allSettled([...prefixes].map(prefix=>this.stopDirectTasks(prefix,{reconcileManagedContainers:false})));
+  const errors=results.filter(result=>result.status==='rejected').map(result=>result.reason);
+  if(errors.length)throw new AggregateError(errors,'退出清理未完成，请重试退出');
+ }
+ reserveTask(){this.taskCapacity ||= new TaskCapacity();return this.taskCapacity.reserve();}
  async stopDirectTasks(prefix,{reconcileManagedContainers=true}={}){
   this.directStops ||= new Map();
   if(this.directStops.has(prefix))return this.directStops.get(prefix);
@@ -287,7 +300,7 @@ export class DockerEnvironments {
  }
  taskLaunchGuard(){
   const generations=new Map(this.directGenerations);
-  return prefix=>{if(this.environmentStopFailures?.has(prefix)||this.directStopFailures?.has(prefix))throw new Error('环境任务清理未完成，请重试停止或切换环境');if(this.environmentStops?.has(prefix)||this.directStops?.has(prefix)||(generations.get(prefix)||0)!==(this.directGenerations?.get(prefix)||0))throw new Error('环境已停止或切换，不能启动旧任务');};
+  return prefix=>{if(this.shuttingDown)throw new Error('应用正在退出，不能启动新任务');if(this.environmentStopFailures?.has(prefix)||this.directStopFailures?.has(prefix))throw new Error('环境任务清理未完成，请重试停止或切换环境');if(this.environmentStops?.has(prefix)||this.directStops?.has(prefix)||(generations.get(prefix)||0)!==(this.directGenerations?.get(prefix)||0))throw new Error('环境已停止或切换，不能启动旧任务');};
  }
 
  async stopEnvironmentResources(prefix,item){
@@ -357,10 +370,10 @@ export class DockerEnvironments {
   const {item,prefix}=await this.get(owner,id);
   if(item.external)throw new Error('请在原容器中安装运行时，安装完成后点击重新检测');
   assertCurrent(prefix);
-  const name=prefix+'-installer-'+randomUUID();let closed=false,cancelling;
+  const name=prefix+'-installer-'+randomUUID();const release=this.reserveTask();let closed=false,cancelling;
   const cancel=()=>{
    if(cancelling)return cancelling;
-   const pending=waitForTaskCleanup(this,name,prefix,()=>closed,'dingtu-installer');
+   const pending=waitForTaskCleanup(this,name,prefix,()=>closed,'dingtu-installer').then(release);
    cancelling=pending;void pending.catch(()=>{if(cancelling===pending)cancelling=null;});return pending;
   };
   this.directTasks ||= new Map();this.directTasks.set(name,{prefix,cancel});
@@ -381,13 +394,13 @@ export class DockerEnvironments {
   }
   const registry=await this.runtimeInfo(owner,id,true);
   if(registry.runtimes.some(runtime=>runtime.id===engine))throw new Error('仍检测到此运行时，可能有其他安装副本，请检查安装位置');
-  const latest=(await this.get(owner,id)).item;const metadata={...latest.runtimeMetadata};delete metadata[engine];await this.update(owner,id,{runtimeMetadata:metadata});return registry;
+  await this.update(owner,id,item=>{const metadata={...item.runtimeMetadata};delete metadata[engine];return {runtimeMetadata:metadata};});return registry;
  }
  async installRuntime(owner,id,engine,configuration={}){
   if(typeof engine!=='string' || !Object.hasOwn(RUNTIME_CATALOG,engine))throw new Error('未知运行时');
   const metadata={};if(configuration.name!==undefined){if(typeof configuration.name!=='string' || !configuration.name.trim() || configuration.name.length>40)throw new Error('运行时名称需为1至40个字符');metadata.name=configuration.name.trim();}
   if(configuration.description!==undefined){if(typeof configuration.description!=='string' || configuration.description.length>500)throw new Error('运行时描述最多500个字符');metadata.description=configuration.description.trim();}
-  const saveMetadata=async()=>{const {item}=await this.get(owner,id);const previous=item.runtimeMetadata?.[engine];const existing=item.registry?.runtimes?.find(runtime=>runtime.id===engine);const addedAt=previous?.addedAt || existing?.addedAt || (previous || existing?undefined:new Date().toISOString());await this.update(owner,id,{runtimeMetadata:{...item.runtimeMetadata,[engine]:{...previous,...metadata,...(addedAt?{addedAt}:{})}}});return this.runtimeInfo(owner,id,true);};
+  const saveMetadata=async()=>{await this.update(owner,id,item=>{const previous=item.runtimeMetadata?.[engine];const existing=item.registry?.runtimes?.find(runtime=>runtime.id===engine);const addedAt=previous?.addedAt || existing?.addedAt || (previous || existing?undefined:new Date().toISOString());return {runtimeMetadata:{...item.runtimeMetadata,[engine]:{...previous,...metadata,...(addedAt?{addedAt}:{})}}};});return this.runtimeInfo(owner,id,true);};
   const {item}=await this.get(owner,id);if(item.registry?.runtimes?.some(runtime=>runtime.id===engine))throw new Error('当前环境已添加此运行时，无需重复添加');if(item.external)throw new Error('请在原容器中安装运行时，安装完成后点击重新检测');if(engine==='deepseek'){
   await this.syncDeepSeekSource(owner,id);
   await this.runRuntimeInstaller(owner,id,['node','/home/node/.local/lib/dingtu/deepseek.mjs','configure-install'],{input:JSON.stringify({apiKey:configuration.apiKey,model:configuration.model}),timeout:150000});
@@ -402,11 +415,12 @@ export class DockerEnvironments {
    assertCurrent();if(signal?.aborted)throw new Error('请求已取消');const task=randomUUID();
    const worker=prefix+'-direct-'+task;
    const run=directTaskArguments({prefix,name:worker,image,projectMounts:item.projectMounts || [],task,command,args});
-   const child=spawn(binary,['--host',this.endpoint,...run],{stdio:['pipe','pipe','pipe'],env:{...process.env,DOCKER_HOST:'',DOCKER_CONTEXT:this.context}});
+   const release=this.reserveTask();let child;
+   try{child=spawn(binary,['--host',this.endpoint,...run],{stdio:['pipe','pipe','pipe'],env:{...process.env,DOCKER_HOST:'',DOCKER_CONTEXT:this.context}});}catch(error){release();throw error;}
    const kill=child.kill.bind(child);let closed=false,cancelling;
    const cancel=()=>{
     if(cancelling)return cancelling;
-    const pending=waitForTaskCleanup(this,worker,prefix,()=>closed);
+    const pending=waitForTaskCleanup(this,worker,prefix,()=>closed).then(release);
     cancelling=pending;void pending.catch(()=>{if(cancelling===pending)cancelling=null;});return pending;
    };
    this.directTasks ||= new Map();this.directTasks.set(task,{prefix,cancel});
@@ -475,9 +489,17 @@ export class ContainerGateway extends EventEmitter{
   // Do not let a status RPC overtake the control operation it is observing.
   this.blocking=Promise.resolve(this.blocking).then(()=>{if(this.current(generation))return this.manager.rpc(this.owner,this.id,'block',{reason,options});}).then(()=>{if(this.current(generation))this.blockFailed=false;}).catch(()=>{if(this.current(generation)){this.blockFailed=true;this.status={...this.status,controlState:'unavailable'};this.emit('status',this.status);}});
  }
- stop(){
-  if(this.stopping)return this.stopping;
-  this.closed=true;this.generation++;clearInterval(this.poll);this.poll=null;this.status={...this.status,state:'blocked',reason:'代理已停止'};
-  this.stopping=Promise.resolve(this.blocking).then(()=>this.manager.rpc(this.owner,this.id,'stop')).catch(()=>{});return this.stopping;
+ stop({strict=false}={}){
+  if(!this.stopping){
+   this.closed=true;this.generation++;clearInterval(this.poll);this.poll=null;this.status={...this.status,state:'blocked',reason:'代理已停止'};
+   const pending=Promise.resolve(this.blocking).then(()=>this.manager.rpc(this.owner,this.id,'stop'));
+   this.stopping=pending;void pending.catch(()=>{if(this.stopping===pending)this.stopping=null;});
+  }
+  if(!strict)return this.stopping.catch(()=>{});
+  return this.stopping.catch(async error=>{
+   const container=await inspectContainer(this.manager,resourcePrefix(this.owner,this.id)+'-gateway');
+   if(!container || (container.State?.Running===false && container.State?.Restarting!==true))return;
+   throw error;
+  });
  }
 }

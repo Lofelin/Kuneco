@@ -1,3 +1,4 @@
+import {createShutdownBarrier} from './shutdown.mjs';
 import {createChatPopouts} from '../features/chat/chat-popout-main.mjs';
 import {normalizeDocuments,documentPrompt} from '../features/chat/document-attachments.mjs';
 import {createToolApprovalBroker} from '../features/runtimes/tool-approval.mjs';
@@ -35,7 +36,7 @@ import {totalUsageTokens} from '../features/chat/token-usage.mjs';
 import {hostname} from 'node:os';
 import {DockerEnvironments,resourcePrefix} from '../features/environments/docker-environments.mjs';
 import {validateSessionOptions} from '../features/chat/session-options.mjs';
-import { app, protocol, Menu, Notification, BrowserWindow, WebContentsView, ipcMain, safeStorage, clipboard, powerMonitor, session, shell, nativeImage } from 'electron';
+import { app, protocol, Menu, Notification, BrowserWindow, WebContentsView, ipcMain, safeStorage, clipboard, powerMonitor, session, shell, nativeImage, dialog } from 'electron';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { readFile, writeFile, mkdir, access, rm, stat, rename, readdir } from 'node:fs/promises';
@@ -181,6 +182,7 @@ async function requireEnvironment() {
 function guarded(handler) {
   return async (event, ...args) => {
     if (event.sender !== window?.webContents || !event.senderFrame?.url.startsWith('file://')) throw new Error('非法调用来源');
+    if(shutdown.requested)throw new Error('应用正在退出，请等待清理完成或重试退出');
     return handler(...args);
   };
 }
@@ -477,6 +479,7 @@ async function connect(config, remember, {environmentSwitch=false}={}) {
     emit('network', { state: 'checking', reason: '正在通过指定代理核验出口' });
     const externalContainer=activeContainerId && (await dockerEnvs.get(dockerOwner(),activeContainerId)).item.external;
     const next = activeContainerId && !externalContainer?await dockerEnvs.connect(dockerOwner(),activeContainerId,validated,egressPins[proxyIdentity(validated)] || null,ip=>saveEgressPin(validated,ip)):await new ProxyGateway(validated, { gostBinary:process.env.KUNECO_PROXY_ENGINE==='gost'?path.join(here,'..','vendor','gost',process.platform+'_'+(process.arch==='x64'?'amd64':process.arch),'gost'):null, healthInterval:60000,jitter:0.2, expectedIp: egressPins[proxyIdentity(validated)] || null, onVerified: ip => saveEgressPin(validated, ip) }).start();
+    if(shutdown.requested){await next.stop({strict:true});throw new Error('应用正在退出');}
     gateway = next;
     next.on('requestFailure', failure => { if (gateway === next) emit('requestFailure', failure); });
     next.on('status', status => {
@@ -507,7 +510,8 @@ async function createWindow() {
   window.webContents.on('will-navigate', event => event.preventDefault());
   window.webContents.on('will-frame-navigate', event => {if(!event.isMainFrame&&!event.url.startsWith('kuneco-artifact://preview/'))event.preventDefault();});
   createBrowserTab();
-  window.on('closed', () => { browserVisible = false; void stopGateway(); window = null; for (const tab of browserTabs.values()) { if (tab.wc && !tab.wc.isDestroyed()) tab.wc.close(); } browserTabs.clear(); });
+  window.on('close', event=>{if(!shutdown.complete){event.preventDefault();app.quit();}});
+  window.on('closed', () => { browserVisible = false; window = null; for (const tab of browserTabs.values()) { if (tab.wc && !tab.wc.isDestroyed()) tab.wc.close(); } browserTabs.clear(); });
   await window.loadFile(path.join(here, 'index.html'));
 }
 app.on('login', (event, contents, _request, authInfo, callback) => {
@@ -1256,5 +1260,21 @@ app.whenReady().then(async () => {
     }, 1500);
   }
 });
-app.on('before-quit', () => { learningAutomations?.stop(); closeConsole(); void directBrowserTransport?.close(); desktopReturn?.close(); containerLogin?.kill(); account?.cancel(); account?.closeConnections(); clearInterval(environmentTimer); abortRun(); clearInterval(healthTimer); if (gateway) { gateway.block('应用退出'); void gateway.stop(); } });
+const shutdown=createShutdownBarrier([
+ ()=>{learningAutomations?.stop();closeConsole();desktopReturn?.close();containerLogin?.kill();account?.cancel();account?.closeConnections();clearInterval(environmentTimer);clearInterval(healthTimer);gateway?.block('应用退出');stopBrowserTabs();},
+ ()=>dockerEnvs?.shutdownTasks(),
+ ()=>runs.abortWhere(),
+ async()=>{await dockerEnvs?.shutdownTasks();if(gateway){gateway.block('应用退出');await gateway.stop({strict:true});}},
+ async()=>{const transport=directBrowserTransport || await directBrowserTransportPromise;await transport?.close();}
+]);
+let quitAttempt;
+app.on('before-quit',event=>{
+ if(shutdown.complete)return;
+ event.preventDefault();
+ if(quitAttempt)return;
+ quitAttempt=shutdown.run().then(()=>app.quit(),async()=>{
+  const result=await dialog.showMessageBox({type:'error',title:'退出清理尚未完成',message:'任务或网络资源清理失败，应用尚未退出。',detail:'请检查容器服务后重试。账号数据会保留；不会跳过清理强制退出。',buttons:['重试退出','暂不退出'],defaultId:0,cancelId:1});
+  return result.response===0;
+ }).then(retry=>{quitAttempt=null;if(retry)app.quit();},error=>{quitAttempt=null;console.error('退出清理提示失败',error);});
+});
 app.on('window-all-closed', () => app.quit());

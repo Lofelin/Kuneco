@@ -95,3 +95,17 @@ test('stop follows an already dispatched block and cancels a not-yet-dispatched 
  pending.resolve();await stopped;assert.deepEqual(f.calls,['block','stop']);
  const next=fixture();next.gateway.block('pause');await next.gateway.stop();assert.deepEqual(next.calls,['stop']);
 });
+test('strict stop reports live-container RPC failure, retries, and accepts confirmed stopped container',async()=>{
+ let stops=0;
+ const f=fixture(action=>{if(action==='stop' && ++stops===1)throw new Error('stop RPC unavailable');});
+ f.manager.command=async()=>JSON.stringify({State:{Running:true,Restarting:false}});
+ await assert.rejects(f.gateway.stop({strict:true}),/stop RPC unavailable/);
+ await f.gateway.stop({strict:true});assert.equal(stops,2);
+ await f.gateway.stop({strict:true});assert.equal(stops,2,'successful stop is retained');
+ const stopped=fixture(action=>{if(action==='stop')throw new Error('control socket closed');});
+ stopped.manager.command=async()=>JSON.stringify({State:{Running:false,Restarting:false}});
+ await stopped.gateway.stop({strict:true});
+ const restarting=fixture(action=>{if(action==='stop')throw new Error('still restarting');});
+ restarting.manager.command=async()=>JSON.stringify({State:{Running:false,Restarting:true}});
+ await assert.rejects(restarting.gateway.stop({strict:true}),/still restarting/);
+});

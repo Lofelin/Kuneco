@@ -25,6 +25,7 @@ Kuneco 采用单仓库、按能力组织的目录。参考字节公开项目 [Fl
 | `backend/cmd/`, `backend/internal/` | 账号服务 Go 入口与内部包；保持 Go 标准结构 |
 | `scripts/build/` | 前端、预加载、策略数据和引擎打包 |
 | `scripts/setup/` | 开发依赖安装工具 |
+| `scripts/maintenance/` | 显式执行、默认预览的本地运维工具 |
 | `scripts/benchmarks/` | 性能及持续运行评测工具 |
 | `test/unit/<能力>/` | 自动发现的单元及契约测试 |
 | `test/e2e/` | Electron 界面及端到端验收 |
