@@ -10,7 +10,7 @@ function fixture(){
  manager.load=async()=>structuredClone(data);manager.save=async(_,value)=>{data=value;};
  manager.command=async args=>{
   calls.push(args);
-  if(args[0]==='ps')return [...running].map((name,i)=>'c'+i+' '+name).join('\n');
+  if(args[0]==='ps'){if(args.includes('--filter'))return '';return args.includes('{{.Names}}')?[...running].join('\n'):[...running].map((name,i)=>'c'+i+' '+name).join('\n');}
   if(args[0]==='stop'){running.delete(args.at(-1));return '';}
   if(args[0]==='inspect')return String(running.has(args.at(-1)));
   throw new Error('unexpected command');
@@ -29,7 +29,7 @@ test('local selection stops all registered containers without starting any',asyn
  assert.equal((await manager.load()).activeId,null);assert.deepEqual([...running],['unrelated-container']);assert.ok(!calls.some(c=>c[0]==='start'));
 });
 test('stop failure prevents target startup and selection',async()=>{
- const {manager,calls}=fixture();manager.command=async args=>{calls.push(args);if(args[0]==='ps')return '123 '+resourcePrefix('owner',a)+'-worker';throw new Error('stop failed');};
+ const {manager,calls}=fixture();manager.command=async args=>{calls.push(args);if(args[0]==='ps')return args.includes('--filter')?'':resourcePrefix('owner',a)+'-worker';throw new Error('stop failed');};
  await assert.rejects(manager.activate('owner',b),/stop failed/);assert.equal((await manager.load()).activeId,a);assert.ok(!calls.some(c=>c[0]==='start'));
 });
 test('invalid selection leaves running environments untouched',async()=>{
