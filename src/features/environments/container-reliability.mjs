@@ -40,7 +40,7 @@ async function replaceWorker(manager,{name,image,spec,args,assertCurrent}){
  const validate=async()=>{
   assertCurrent();const state=JSON.parse(await manager.command(['inspect','--format','{{json .State}}',name]));assertCurrent();
   if(!state.Running)throw new Error(containerStatus(state).statusText);
-  await manager.command(['exec',name,'test','-f','/tmp/kuneco-worker-ready']);assertCurrent();
+  await manager.command(['exec',name,'/usr/bin/test','-f','/tmp/kuneco-worker-ready']);assertCurrent();
   const current=await inspectContainer(manager,name);assertCurrent();
   validateContainerNetworks(current,args[args.indexOf('--network')+1],{direct:true});await validateWorkerFirewall(manager,name,current);assertCurrent();
  };
@@ -114,7 +114,7 @@ export async function validateWorkerFirewall(manager,name,container){
  if(container?.NetworkSettings?.Networks?.bridge)throw new Error('代理工作容器不能连接直连网络，请重新启动环境以升级隔离配置');
  const gatewayIP=container.Config?.Env?.find(value=>value.startsWith('DINGTU_GATEWAY_IP='))?.slice('DINGTU_GATEWAY_IP='.length);
  if(!gatewayIP)throw new Error('缺少代理网关隔离地址');
- const values=await Promise.all([['iptables','filter'],['ip6tables','filter'],['iptables','raw'],['ip6tables','raw']].map(([binary,table])=>manager.command(['exec','--user','0',name,binary,'-t',table,'-S','OUTPUT'],{timeout:5000})));
+ const values=await Promise.all([['iptables','filter'],['ip6tables','filter'],['iptables','raw'],['ip6tables','raw']].map(([binary,table])=>manager.command(['exec','--user','0',name,'/usr/sbin/'+binary,'-t',table,'-S','OUTPUT'],{timeout:5000})));
  validateWorkerFirewallRules(...values,gatewayIP);
 }
 

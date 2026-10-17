@@ -9,7 +9,7 @@ const args=['run','-d','--network','private','--name',name,'--mount','type=volum
 function fixture({same=false,running=true,failRun=false,cancelAt,extraMount=false}={}){
  let current=true,ready=0,replacement=null;const calls=[];
  const old={NetworkSettings:{Networks:{private:{}}},Config:{Env:['DINGTU_GATEWAY_IP=172.20.0.2'],Image:same?image:'old',Labels:{app:'dingtu',[SPEC_LABEL]:same?spec:'old'}},State:{Running:running},Mounts:[{Type:'volume',Name:extraMount?'owned-worker-home-old':'owned-worker-home',Destination:'/home/node',RW:true}]};
- const manager={command:async a=>{calls.push(a);if(a[0]==='run'){const label=a.find(v=>v.startsWith(ATTEMPT_LABEL+'='));replacement={...old,Id:'attempt-id',Config:{...old.Config,Labels:{[ATTEMPT_LABEL]:label.slice(ATTEMPT_LABEL.length+1)}}};}if(a[0]===cancelAt)current=false;if(a.includes('{{json .}}'))return JSON.stringify(replacement || old);if(a.includes('{{json .State}}'))return JSON.stringify({Running:true});if(a[0]==='exec'&&a.includes('test')&&++ready===1)throw Error('not ready yet');if(a.includes('-S'))return a.includes('raw')?(a.includes('ip6tables')?raw:raw.replace('-P OUTPUT ACCEPT','-P OUTPUT ACCEPT\n-A OUTPUT -d 127.0.0.11/32 -j DROP')):a.includes('ip6tables')?v6:v4;if(a[0]==='run'&&failRun)throw Error('run failed');return '';}};
+ const manager={command:async a=>{calls.push(a);if(a[0]==='run'){const label=a.find(v=>v.startsWith(ATTEMPT_LABEL+'='));replacement={...old,Id:'attempt-id',Config:{...old.Config,Labels:{[ATTEMPT_LABEL]:label.slice(ATTEMPT_LABEL.length+1)}}};}if(a[0]===cancelAt)current=false;if(a.includes('{{json .}}'))return JSON.stringify(replacement || old);if(a.includes('{{json .State}}'))return JSON.stringify({Running:true});if(a[0]==='exec'&&a.includes('/usr/bin/test')&&++ready===1)throw Error('not ready yet');if(a.includes('-S'))return a.includes('raw')?(a.includes('/usr/sbin/ip6tables')?raw:raw.replace('-P OUTPUT ACCEPT','-P OUTPUT ACCEPT\n-A OUTPUT -d 127.0.0.11/32 -j DROP')):a.includes('/usr/sbin/ip6tables')?v6:v4;if(a[0]==='run'&&failRun)throw Error('run failed');return '';}};
  return {manager,calls,options:{name,image,spec,args,assertCurrent:()=>{if(!current)throw Error('cancelled');}}};
 }
 test('worker upgrade retains exact volumes and removes backup only after readiness',async()=>{
@@ -21,7 +21,7 @@ test('same-spec reconnect keeps running worker and never recreates it',async()=>
  const f=fixture({same:true});await ensureWorker(f.manager,f.options);assert.ok(!f.calls.some(a=>['run','stop','rm','start'].includes(a[0])));
 });
 test('same-spec stopped worker waits for firewall initialization after start',async()=>{
- const f=fixture({same:true,running:false});await ensureWorker(f.manager,f.options);assert.equal(f.calls.filter(a=>a[0]==='start').length,1);assert.equal(f.calls.filter(a=>a[0]==='exec'&&a.includes('test')).length,2);
+ const f=fixture({same:true,running:false});await ensureWorker(f.manager,f.options);assert.equal(f.calls.filter(a=>a[0]==='start').length,1);assert.equal(f.calls.filter(a=>a[0]==='exec'&&a.includes('/usr/bin/test')).length,2);
 });
 test('failed replacement restores previous container without deleting any volume',async()=>{
  const f=fixture({failRun:true});await assert.rejects(ensureWorker(f.manager,f.options),/run failed/);

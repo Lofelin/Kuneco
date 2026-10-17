@@ -14,9 +14,12 @@ try{
  await manager.command(['network','create','--internal','--label','app=dingtu','--subnet','172.30.250.0/24',network]);
  await manager.command(workerArguments({name,network,gatewayIP,proxyURL:'http://fixture',image:base}));
  await manager.command(['exec','--user','1000:1000',name,'sh','-c','printf retained > /home/node/reliability-sentinel; printf work > /workspace/reliability-sentinel']);
+ // The shared home is task-writable; privileged bootstrap and checks must ignore it.
+ await manager.command(['exec','--user','1000:1000',name,'/usr/local/bin/node','-e',"const fs=require('fs'),p='/home/node/.local/bin/';fs.mkdirSync(p,{recursive:true});for(const tool of ['iptables','ip6tables','setpriv','touch','test'])fs.writeFileSync(p+tool,'#!/bin/sh\\necho shadowed > /home/node/shadow-executed\\nexit 93\\n',{mode:0o755});"]);
  await ensurePrivateNetwork(manager,network);
  const before=await inspect();
  await ensureWorker(manager,{name,image,spec:'integration-v1',args,assertCurrent:noCancel});
+ await manager.command(['exec',name,'/usr/bin/test','!','-e','/home/node/shadow-executed']);
  const after=await inspect();assert.notEqual(after.Id,before.Id);assert.equal(after.HostConfig.Init,true);assert.equal(after.HostConfig.LogConfig.Type,'local');assert.equal(after.HostConfig.ReadonlyRootfs,true);
  assert.deepEqual(after.Mounts.map(m=>m.Name).sort(),before.Mounts.map(m=>m.Name).sort());
  assert.equal(await manager.command(['exec',name,'cat','/home/node/reliability-sentinel']),'retained');
@@ -32,8 +35,8 @@ try{
  await manager.command(['exec','--user','1000:1000',name,'node','-e',"require('child_process').spawn('sh',['-c','sleep .1'],{detached:true,stdio:'ignore'}).unref()"]);
  await new Promise(r=>setTimeout(r,300));
  const ps=await manager.command(['exec',name,'ps','-eo','stat']);assert.ok(!ps.split('\n').some(s=>s.trim().startsWith('Z')));
- assert.match(await manager.command(['exec',name,'sh','-c','iptables -S OUTPUT']),/-P OUTPUT DROP/);
- console.log(JSON.stringify({extraNetworkRejected:true,upgrade:true,rollback:true,volumesPreserved:true,reconnectRetainsContainer:true,init:true,zombies:0,readonly:true,logs:after.HostConfig.LogConfig,networkPolicy:'OUTPUT DROP'}));
+ assert.match(await manager.command(['exec',name,'sh','-c','/usr/sbin/iptables -S OUTPUT']),/-P OUTPUT DROP/);
+ console.log(JSON.stringify({trustedPrivilegedTools:true,extraNetworkRejected:true,upgrade:true,rollback:true,volumesPreserved:true,reconnectRetainsContainer:true,init:true,zombies:0,readonly:true,logs:after.HostConfig.LogConfig,networkPolicy:'OUTPUT DROP'}));
 }finally{
  const names=(await manager.command(['ps','-a','--format','{{.Names}}'])).split('\n').filter(n=>n===name||n.startsWith(name+'-upgrade-'));
  for(const n of names)await manager.command(['rm','-f',n]);

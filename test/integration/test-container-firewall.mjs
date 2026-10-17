@@ -58,12 +58,15 @@ try{
  for(let i=0;;i++){try{await validateWorkerFirewall(m,worker,await inspect(worker));break;}catch(e){if(i===20)throw e;await new Promise(r=>setTimeout(r,100));}}
  // A killed attached CLI is not proof that a proxy task stopped in the worker.
  await m.command(['exec','--user','1000:1000',worker,'node','-e',"require('fs').writeFileSync('/tmp/dingtu-chat-proxy','http://fixture')"]);
+ await m.command(['exec','--user','1000:1000',worker,'/usr/local/bin/node','-e',"const fs=require('fs');fs.mkdirSync('/home/node/.local/bin',{recursive:true});fs.writeFileSync('/home/node/.local/bin/node','#!/bin/sh\\necho shadowed > /home/node/node-shadow-executed\\nexit 93\\n',{mode:0o755});"]);
  const proxyLaunch=await m.spawner('fixture','fixture');
- const proxyChild=proxyLaunch({command:'node',args:longArgs});const proxyExit=once(proxyChild,'close');await waitReady(proxyChild);
+ const proxyChild=proxyLaunch({command:'/usr/local/bin/node',args:longArgs});const proxyExit=once(proxyChild,'close');await waitReady(proxyChild);
  const proxyTask=proxyChild.spawnargs[proxyChild.spawnargs.indexOf('/opt/dingtu/exec.mjs')+1];
  process.kill(proxyChild.pid,'SIGKILL');await proxyExit;
  for(let i=0;m.directTasks.has(proxyTask);i++){if(i===100)throw Error('proxy task cleanup did not finish');await new Promise(r=>setTimeout(r,100));}
- await m.command(['exec','--user','1000:1000',worker,'node','-e',`const fs=require('fs');for(const p of ['/tmp/dingtu-${proxyTask}','/tmp/dingtu-${proxyTask}.cancel'])if(fs.existsSync(p))throw Error('residual proxy task');`]);
+ await m.command(['exec','--user','1000:1000',worker,'/usr/local/bin/node','-e',`const fs=require('fs');for(const p of ['/tmp/dingtu-${proxyTask}','/tmp/dingtu-${proxyTask}.cancel'])if(fs.existsSync(p))throw Error('residual proxy task');`]);
+ await m.command(directTaskArguments({prefix,name:direct,image,task:randomUUID(),command:'/usr/local/bin/node',args:['-e','process.stdout.write("trusted wrapper")']}));
+ await m.command(['exec','--user','1000:1000',worker,'/usr/local/bin/node','-e',"const fs=require('fs');if(fs.existsSync('/home/node/node-shadow-executed'))throw Error('untrusted node executed');fs.unlinkSync('/home/node/.local/bin/node');"]);
  // Raw-chain drops must precede Docker's embedded DNS translation (including IPv6 loopback).
  await m.command(['exec','--user','1000:1000',worker,'node','-e',`for(const [family,host] of [['udp4','127.0.0.1'],['udp6','::1']]){const s=require('dgram').createSocket(family);s.on('error',()=>{});s.send(Buffer.from('fixture'),53,host,()=>s.close());}`]);
  await m.command(['exec','--user','1000:1000',worker,'node','-e',`const s=require('dgram').createSocket('udp4');s.send(Buffer.from('fixture'),45678,'127.0.0.11',()=>s.close());`]);
@@ -76,7 +79,7 @@ try{
  await m.command(['exec',worker,'iptables','-t','raw','-D','OUTPUT','1']);
  await assert.rejects(validateWorkerFirewall(m,worker,await inspect(worker)),/规则/);
  assert.match(before,/--dport 53 -j DROP/);
- console.log(JSON.stringify({proxyGatewayAllowed:true,directPeerBlocked:true,otherGatewayPortBlocked:true,directTaskConnected:true,dockerDNSHighPortBlocked:true,dnsBeforeDNATBlocked:true,ipv6DNSBlocked:true,unprivilegedRulesImmutable:true,missingRuleRejected:true,switchCleanup:true,installerSwitchCleanup:true,cleanupFailureBlocksLaunch:true,cleanupRetryRecovers:true,staleLauncherRejected:true,dockerClientCrashCleaned:true,proxyClientCrashCleaned:true,directEarlyCancelCleaned:true,productionUntouched:true}));
+ console.log(JSON.stringify({trustedTaskInterpreter:true,proxyGatewayAllowed:true,directPeerBlocked:true,otherGatewayPortBlocked:true,directTaskConnected:true,dockerDNSHighPortBlocked:true,dnsBeforeDNATBlocked:true,ipv6DNSBlocked:true,unprivilegedRulesImmutable:true,missingRuleRejected:true,switchCleanup:true,installerSwitchCleanup:true,cleanupFailureBlocksLaunch:true,cleanupRetryRecovers:true,staleLauncherRejected:true,dockerClientCrashCleaned:true,proxyClientCrashCleaned:true,directEarlyCancelCleaned:true,productionUntouched:true}));
 }finally{
  await m.stopDirectTasks(prefix).catch(()=>{});
  for(const name of [worker,gateway,peer,direct])await m.command(['rm','-f',name]).catch(()=>{});

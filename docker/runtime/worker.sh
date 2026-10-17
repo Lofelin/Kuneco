@@ -1,5 +1,8 @@
 #!/bin/sh
 set -eu
+# Privileged bootstrap must never resolve tools from the writable user home.
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
 # Only the environment's proxy is reachable. Block Docker DNS before loopback.
 # Reject original DNS destinations before Docker's resolver DNAT changes ports.
 iptables -t raw -A OUTPUT -d 127.0.0.11 -j DROP

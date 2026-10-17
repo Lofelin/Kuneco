@@ -28,7 +28,7 @@ export function runtimeInstallerArguments({name,prefix,image=IMAGE,args,input=fa
 }
 // Direct tasks have their own network, PID and /tmp namespaces; never attach bridge to the proxy worker.
 export function directTaskArguments({prefix,name,image,projectMounts=[],task,command,args=[]}){
- const run=runtimeInstallerArguments({name,prefix,image,input:true,network:prefix+'-direct-egress',args:['node','/opt/dingtu/exec.mjs',task,command,...args]});
+ const run=runtimeInstallerArguments({name,prefix,image,input:true,network:prefix+'-direct-egress',args:['/usr/local/bin/node','/opt/dingtu/exec.mjs',task,command,...args]});
  run[run.indexOf('app=dingtu-installer')]='app=dingtu-direct';
  run.splice(run.indexOf('--entrypoint'),0,'--label','io.kuneco.environment='+prefix,'--workdir','/workspace','--mount',`type=volume,src=${prefix}-worker-work,dst=/workspace`,...projectMounts.flatMap(m=>['--mount',`type=bind,src=${m.source},dst=${m.target}`]),'-e','NO_PROXY=*','-e','no_proxy=*','-e','LANG=C.UTF-8','-e','LC_ALL=C.UTF-8');
  return run;
@@ -338,7 +338,7 @@ export class DockerEnvironments {
    const assertCurrent=()=>{assertEnvironmentCurrent();if(!adapter.current(generation)||!isCurrent())throw Object.assign(new Error('代理操作已取消'),{name:'AbortError'});};
    assertCurrent();
    await this.prepareWorker({prefix,item,network,gatewayIP,token:info.token,assertCurrent});assertCurrent();
-   await this.exec(owner,id,['node','-e',"let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>require('fs').writeFileSync('/tmp/dingtu-chat-proxy',s,{mode:0o600}));"],{input:`http://workspace:${info.token}@${gatewayIP}:8080`});
+   await this.exec(owner,id,['/usr/local/bin/node','-e',"let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>require('fs').writeFileSync('/tmp/dingtu-chat-proxy',s,{mode:0o600}));"],{input:`http://workspace:${info.token}@${gatewayIP}:8080`});
   });
   return adapter;
   });
@@ -417,9 +417,9 @@ export class DockerEnvironments {
   };
  }
 
- async spawner(owner,id){const assertCurrent=this.taskLaunchGuard();const {prefix,item}=await this.get(owner,id);if(item.external)throw new Error('已有容器无法保证全程代理隔离，请使用Kuneco创建的容器进行代理对话，或新建直连对话');assertCurrent(prefix);const binary=await this.binary('docker');const proxy=await this.exec(owner,id,['node','-e',"try{process.stdout.write(require('fs').readFileSync('/tmp/dingtu-chat-proxy','utf8'))}catch{}"]);assertCurrent(prefix);if(!proxy)throw new Error('当前环境代理尚未就绪，无法启动代理任务');const containerId=(await this.command(['inspect','--format','{{.Id}}',prefix+'-worker'])).trim();assertCurrent(prefix);if(!/^[a-f0-9]{64}$/.test(containerId))throw new Error('工作容器标识不可确认');const proxyEnvironment=proxy?['HTTP_PROXY','HTTPS_PROXY','ALL_PROXY','http_proxy','https_proxy','all_proxy'].flatMap(key=>['-e',key+'='+proxy]):[];return ({command,args,signal,cwd='/workspace'})=>{
+ async spawner(owner,id){const assertCurrent=this.taskLaunchGuard();const {prefix,item}=await this.get(owner,id);if(item.external)throw new Error('已有容器无法保证全程代理隔离，请使用Kuneco创建的容器进行代理对话，或新建直连对话');assertCurrent(prefix);const binary=await this.binary('docker');const proxy=await this.exec(owner,id,['/usr/local/bin/node','-e',"try{process.stdout.write(require('fs').readFileSync('/tmp/dingtu-chat-proxy','utf8'))}catch{}"]);assertCurrent(prefix);if(!proxy)throw new Error('当前环境代理尚未就绪，无法启动代理任务');const containerId=(await this.command(['inspect','--format','{{.Id}}',prefix+'-worker'])).trim();assertCurrent(prefix);if(!/^[a-f0-9]{64}$/.test(containerId))throw new Error('工作容器标识不可确认');const proxyEnvironment=proxy?['HTTP_PROXY','HTTPS_PROXY','ALL_PROXY','http_proxy','https_proxy','all_proxy'].flatMap(key=>['-e',key+'='+proxy]):[];return ({command,args,signal,cwd='/workspace'})=>{
   assertCurrent(prefix);if(signal?.aborted)throw new Error('请求已取消');const task=randomUUID();
-  const child=spawn(binary,['--host',this.endpoint,'exec','-i','--user','1000:1000','--workdir','/workspace','-e','LANG=C.UTF-8','-e','LC_ALL=C.UTF-8',...proxyEnvironment,containerId,'node','/opt/dingtu/exec.mjs',task,command,...args],{stdio:['pipe','pipe','pipe'],env:{...process.env,DOCKER_HOST:'',DOCKER_CONTEXT:this.context}});
+  const child=spawn(binary,['--host',this.endpoint,'exec','-i','--user','1000:1000','--workdir','/workspace','-e','LANG=C.UTF-8','-e','LC_ALL=C.UTF-8',...proxyEnvironment,containerId,'/usr/local/bin/node','/opt/dingtu/exec.mjs',task,command,...args],{stdio:['pipe','pipe','pipe'],env:{...process.env,DOCKER_HOST:'',DOCKER_CONTEXT:this.context}});
   trackProxyTask(this,owner,id,prefix,task,child,undefined,{containerId,endpoint:this.endpoint});
   const abort=()=>child.kill();signal?.addEventListener('abort',abort,{once:true});child.once('close',()=>signal?.removeEventListener('abort',abort));return child;
  };}

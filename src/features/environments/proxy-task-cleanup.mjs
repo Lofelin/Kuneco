@@ -19,7 +19,7 @@ export function trackProxyTask(manager,owner,id,prefix,task,child,externalCancel
  const kill=child.kill.bind(child);let closed=false,cancelling;
  const cancel=(mark=true)=>{
   if(cancelling)return cancelling;
-  const args=['node','-e',cancelProxyTaskSource,task,mark?'1':'0'];
+  const args=['/usr/local/bin/node','-e',cancelProxyTaskSource,task,mark?'1':'0'];
   const pending=cancelWithContainerFallback(manager,execution,()=>externalCancel?externalCancel():execution?manager.command(['exec','--user','1000:1000',execution.containerId,...args],{endpoint:execution.endpoint,timeout:10000}):manager.exec(owner,id,args,{timeout:10000}));
   cancelling=pending;void pending.catch(()=>{if(cancelling===pending)cancelling=null;});return pending;
  };
