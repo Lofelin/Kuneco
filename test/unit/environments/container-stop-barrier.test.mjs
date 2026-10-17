@@ -99,3 +99,18 @@ test('reactivating an external environment reconciles its tracked tasks without 
  m.directTasks=new Map([['tracked',{prefix,cancel:async()=>seen.push('cancel') }]]);
  await m.activate(owner,id);assert.deepEqual(seen,['cancel','start','select']);assert.equal(m.directTasks.size,0);
 });
+
+test('external removal during stop or post-stop inspection is confirmed on its own endpoint',async()=>{
+ for(const phase of ['stop','inspect']){
+  const {m}=fixture(),external={id:'d'.repeat(64),endpoint:'unix:///external-only.sock'};let listings=0;
+  m.get=async()=>({prefix,item:{external}});
+  m.command=async(a,o)=>{assert.equal(o.endpoint,external.endpoint);if(a[0]==='ps'){assert.ok(a.includes('--no-trunc'));return ++listings===1?external.id:'';}if(a[0]===phase)throw Error('No such container');return '';};
+  await m.stop(owner,id);assert.equal(listings,2);assert.doesNotThrow(()=>m.taskLaunchGuard()(prefix));
+ }
+});
+test('failed disappearance confirmation never clears the stop failure barrier',async()=>{
+ const {m}=fixture(),external={id:'e'.repeat(64),endpoint:'unix:///external-only.sock'};let listings=0;
+ m.get=async()=>({prefix,item:{external}});
+ m.command=async a=>{if(a[0]==='ps'&&++listings===1)return external.id;throw Error('daemon offline');};
+ await assert.rejects(m.stop(owner,id),/daemon offline/);assert.throws(()=>m.taskLaunchGuard()(prefix),/清理未完成/);
+});

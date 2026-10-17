@@ -307,7 +307,14 @@ export class DockerEnvironments {
    for(const target of targets){
     if(!names.has(target))continue;
     try{await this.command(['stop','-t','5',target],{endpoint});if((await this.command(['inspect','--format','{{.State.Running}}',target],{endpoint})).trim()!=='false')throw new Error('容器未能停止，请重试');}
-    catch(error){errors.push(error);}
+    catch(error){
+     // Removal may race the initial listing or post-stop inspect. Only a fresh,
+     // successful listing on the same daemon can confirm the target is gone.
+     try{
+      const remaining=(await this.command(['ps','-a',...(item.external?['--no-trunc']:[]),'--format',item.external?'{{.ID}}':'{{.Names}}'],{endpoint})).split('\n');
+      if(remaining.includes(target))errors.push(error);
+     }catch{errors.push(error);}
+    }
    }
    if(errors.length)throw new AggregateError(errors,'环境停止未完成：'+errors.map(error=>error.message).join('；'));
   });

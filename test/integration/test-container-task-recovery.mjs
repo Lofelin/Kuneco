@@ -18,7 +18,13 @@ try{
  // An external daemon remains usable even if the managed-daemon path is unavailable.
  m.command=(args,options)=>{if(!options?.endpoint)throw Error('managed daemon offline');return command(args,options);};
  await m.stop(owner,id);assert.doesNotThrow(()=>m.taskLaunchGuard()(prefix));
- await command(['rm',containerId]);
+ let removedDuringStop=false;
+ m.command=async(args,options)=>{
+  if(!options?.endpoint)throw Error('managed daemon offline');
+  if(args[0]==='stop'&&!removedDuringStop){await command(['rm',containerId]);removedDuringStop=true;}
+  return command(args,options);
+ };
+ await m.stop(owner,id);assert.equal(removedDuringStop,true);
  await m.stop(owner,id);assert.doesNotThrow(()=>m.taskLaunchGuard()(prefix));
- console.log(JSON.stringify({stoppedExecCleanupRecovers:true,externalWithoutManagedDaemon:true,deletedExternalStop:true,volumesUsed:false}));
+ console.log(JSON.stringify({stoppedExecCleanupRecovers:true,externalWithoutManagedDaemon:true,deletedExternalStop:true,deletedDuringStop:true,volumesUsed:false}));
 }finally{if(containerId)await command(['rm','-f',containerId]).catch(()=>{});}
