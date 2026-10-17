@@ -104,7 +104,7 @@
 </app-dialog>
 <app-dialog id="projectModeDialog" label="选择打开方式">
 <p id="projectModeNote" class="muted"></p>
-<wa-radio-group id="projectMode" class="browser-connection-options project-mode-options" aria-label="打开方式" value="container">
+<wa-radio-group id="projectMode" class="project-mode-options" aria-label="打开方式" value="container">
 <wa-radio value="container"><span class="connection-option-copy"><strong>选择容器文件夹</strong><span>直接使用当前环境工作区中的项目。</span></span></wa-radio>
 <wa-radio value="import"><span class="connection-option-copy"><strong>导入环境</strong><span>复制文件夹到环境，保留普通仓库的 .git，不修改本机原文件。</span><span>不支持指向目录外的链接或 Git worktree。</span></span></wa-radio>
 <wa-radio value="mount"><span class="connection-option-copy"><strong>直接修改本机项目</strong><span id="projectMountDescription">将本机目录挂载到当前环境，修改会同步影响本机文件。</span><span id="projectMountDetail">仅挂载所选目录。首次接入新路径需要重启容器引擎，请先停止其他运行中的环境，完成后重新连接代理。</span></span></wa-radio>

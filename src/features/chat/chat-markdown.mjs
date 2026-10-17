@@ -1,3 +1,4 @@
+import {adoptChatDiagrams} from './diagrams.mjs';
 import {adoptCodeBlocks,captureCodeSelection,restoreCodeSelection} from './code-blocks.mjs';
 import {adoptAppTables} from '../../shared/ui/app-table.mjs';
 import {marked} from 'marked';
@@ -10,6 +11,6 @@ export function updateChatMessage(node,text){
  const selection=captureCodeSelection(node),previous=[...node.querySelectorAll('.chat-code-block')];
  const fragment=node.ownerDocument.createElement('div');fragment.innerHTML=renderChatMarkdown(text);
  adoptCodeBlocks(fragment,{previous});
- node.dataset.rawText=text;node.classList.add('markdown-body');node.replaceChildren(...fragment.childNodes);adoptAppTables(node);restoreCodeSelection(selection);
+ node.dataset.rawText=text;node.classList.add('markdown-body');node.replaceChildren(...fragment.childNodes);adoptAppTables(node);void adoptChatDiagrams(node);restoreCodeSelection(selection);
  for(const link of node.querySelectorAll('a')){link.target='_blank';link.rel='noopener noreferrer';}
 }

@@ -1,0 +1,17 @@
+.turn-changes-bar{display:flex;justify-content:center;flex:none;padding:6px 0 10px;min-width:0}
+.turn-changes-bar[hidden],.no-session .turn-changes-bar{display:none}
+.turn-changes-bar app-button{max-width:100%;font-size:12px;--wa-border-radius-m:999px}
+.turn-changes-list{border-bottom:1px solid var(--line);padding-bottom:12px;margin-bottom:12px}
+.turn-changes-list>p{color:var(--muted);font-size:12px}
+.turn-change-file{min-width:0;margin-top:8px}
+.turn-change-link{width:100%;--button-padding-inline:6px}
+.turn-change-link::part(label){display:flex;align-items:center;min-width:0;flex:1;gap:8px}
+.turn-change-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;text-align:left;white-space:nowrap}
+.turn-change-counts,.turn-change-unknown{flex:none;font-size:12px;font-variant-numeric:tabular-nums}
+.turn-change-unknown{color:var(--muted)}
+.change-additions{color:var(--success,#16803c)}
+.change-deletions{color:var(--danger,#b42318)}
+.turn-change-file .activity-file-diff{margin-top:6px}
+
+.turn-change-link::part(base){width:100%;text-align:left}
+.turn-changes-bar app-button::part(base){border-radius:999px}

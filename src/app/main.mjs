@@ -1,3 +1,5 @@
+import {createChatPopouts} from '../features/chat/chat-popout-main.mjs';
+import {normalizeDocuments,documentPrompt} from '../features/chat/document-attachments.mjs';
 import {createToolApprovalBroker} from '../features/runtimes/tool-approval.mjs';
 import {sandboxHTML,artifactCSP} from '../features/chat/artifact-sandbox.mjs';
 import {usageDetails,recordArtifacts,insightView} from '../features/chat/chat-insights.mjs';
@@ -671,7 +673,15 @@ ipcMain.handle('workspace:saveChats',guarded(async(views,owner,environmentId=nul
 ipcMain.handle('workspace:archiveSession',guarded(async(id,archived)=>{if(accountChanging || containerOperation || chatNetworkChanging)throw new Error('正在处理环境或连接方式切换，请稍候');if(runs.has(id))throw new Error('请先停止此对话的回复');const item=aiSessions.get(id);if(!item || (item.environmentId || null)!==activeContainerId)throw new Error('会话不存在');item.archived=Boolean(archived);await persistAISessions();return {...item};}));
 ipcMain.handle('workspace:accountProfileSave',guarded(async value=>account.updateProfile(value)));
 ipcMain.handle('workspace:avatarPick',guarded(async()=>{const {dialog}=await import('electron');const result=await dialog.showOpenDialog(window,{properties:['openFile'],filters:[{name:'头像',extensions:['png','jpg','jpeg']}]});if(result.canceled)return null;const file=result.filePaths[0];if((await stat(file)).size>1024*1024)throw new Error('头像不能超过 1 MB');const data=await readFile(file);if(data.length>1024*1024)throw new Error('头像不能超过 1 MB');return 'data:image/'+(path.extname(file).toLowerCase()==='.png'?'png':'jpeg')+';base64,'+data.toString('base64');}));
-async function currentCodexModels(){return RUNTIME_CATALOG.codex.models.map(item=>({...item}));}
+let codexCapabilitiesCache;
+async function currentCodexModels(){
+ const owner=dockerOwner(),environmentId=activeContainerId,key=JSON.stringify([owner,environmentId]);
+ if(codexCapabilitiesCache?.key===key && Date.now()-codexCapabilitiesCache.at<30000)return codexCapabilitiesCache.models;
+ const spawnProcess=environmentId?await dockerEnvs.spawner(owner,environmentId):undefined;
+ const models=await listCodexModels(environmentId?'codex':await findExecutable('codex'),gateway,spawnProcess);
+ if(owner!==dockerOwner() || environmentId!==activeContainerId)throw new Error('模型查询期间环境已变化');
+ codexCapabilitiesCache={key,at:Date.now(),models};return models;
+}
 
 async function repairSessionModel(item){
  if(item.engine==='deepseek' && !item.model){
@@ -682,7 +692,7 @@ async function repairSessionModel(item){
   if(!runtime?.model)throw new Error('无法读取 DeepSeek 默认模型，请重新检测运行时');
   item.model=runtime.model;if(item.id===activeAISessionId)codexModel=item.model;await persistAISessions();return;
  }
- if(item.engine!=='codex' || !item.model)return;
+ if(item.engine!=='codex')return;
  const owner=dockerOwner(),environmentId=activeContainerId;
  const models=await currentCodexModels();if(owner!==dockerOwner() || environmentId!==activeContainerId || aiSessions.get(item.id)!==item)throw new Error('会话环境已变化');if(!models.length)throw new Error('无法读取当前账号可用模型，请连接代理后重试');
  if(models.some(model=>model.model===item.model))return;
@@ -698,7 +708,7 @@ async function runtimeView(registry,{refresh=true,engine=null}={}){
  const runtimes=await Promise.all(registry.runtimes.map(async item=>{
   const cached=previous.runtimes?.find(row=>row.id===item.id);
   if(!refresh || engine && item.id!==engine){
-   const models=item.id==='codex'?RUNTIME_CATALOG.codex.models:item.models || cached?.models;
+   const models=item.id==='codex'?(cached?.models?.some(m=>Array.isArray(m.supportedReasoningEfforts))?cached.models:await currentCodexModels().catch(()=>[])):item.models || cached?.models;
    return {...cached,...item,auth:item.auth || cached?.auth || {state:'unknown'},models:models || [],modelsError:item.id==='codex' && models===null?'模型列表读取失败，请重试':null,busy:[...runs.values()].some(task=>task.engine===item.id)};
   }
   const executable=id?null:item.id==='cc'?await findClaude():await findExecutable(RUNTIME_CATALOG[item.id]?.command || '');
@@ -960,13 +970,21 @@ ipcMain.handle('workspace:learningAutomation',guarded(async(action='list',value=
 }));
 
 ipcMain.handle('workspace:cancel', guarded(async (id=activeAISessionId) => { if(!aiSessions.has(id))throw new Error('会话不存在');abortRun(task=>task.chatId===id); return true; }));
+ipcMain.handle('workspace:sessionEffort',guarded(async value=>{
+ const item=insightSession(value);if(runs.has(item.id))throw new Error('请先等待当前回复完成');
+ if(item.engine!=='codex')throw new Error('当前运行时未提供可验证的推理强度选项');
+ await repairSessionModel(item);const models=await currentCodexModels();insightSession(value);
+ const model=models.find(m=>m.model===item.model);
+ if(value.effort!==null && !model?.supportedReasoningEfforts?.some(v=>v.reasoningEffort===value.effort))throw new Error('当前模型不支持此推理强度');
+ item.reasoningEffort=value.effort;await persistAISessions();return {reasoningEffort:item.reasoningEffort};
+}));
 ipcMain.handle('workspace:sessionModel',guarded(async(id,model)=>{
  if(accountChanging || containerOperation || chatNetworkChanging)throw new Error('正在切换对话或环境，请稍后');
  const item=aiSessions.get(id);
  if(!item || id!==activeAISessionId || (item.environmentId || null)!==activeContainerId || runtimeOwner!==(account?.user?.id || null))throw new Error('对话账号或环境已变化');
  const runtime=registeredRuntimes?.runtimes.find(entry=>entry.id===item.engine);
  if(!runtime || !runtime.models?.some(entry=>entry.model===model))throw new Error('当前运行时不支持此模型，请刷新模型列表');
- item.model=model;codexModel=model;await persistAISessions();
+ item.model=model;item.reasoningEffort=null;codexModel=model;await persistAISessions();
  return {id,model};
 }));
 ipcMain.handle('workspace:sessionNetwork',guarded(async(id,mode)=>{
@@ -989,16 +1007,18 @@ ipcMain.handle('workspace:newSession',guarded(async(options)=>{
  requireActiveEnvironment();const choice=validateSessionOptions(options);
  if(accountChanging || runtimeOwner!==(account?.user?.id || null) || !registeredRuntimes?.runtimes.some(item=>item.id===choice.engine))throw new Error('请先前往运行时手动检测本机运行时');
  if(activeContainerId && !(await dockerEnvs.state(dockerOwner())).environments.find(item=>item.id===activeContainerId)?.running)throw new Error('请先启动当前容器环境');await requireEnvironment();if(accountChanging || generation!==chatGeneration)throw new Error('对话账号或环境已变化');storeCurrentSession();
- const item={id:randomUUID(),environmentId:activeContainerId,engine:choice.engine,model:choice.model,networkMode:choice.networkMode,project:'',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),sessionId:undefined,codexSessionId:undefined};aiSessions.set(item.id,item);if(item.engine==='deepseek')await repairSessionModel(item);activateAISession(item,{viewed:true});
+ const item={id:randomUUID(),environmentId:activeContainerId,engine:choice.engine,model:choice.model,networkMode:choice.networkMode,project:'',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),sessionId:undefined,codexSessionId:undefined};aiSessions.set(item.id,item);if(['deepseek','codex'].includes(item.engine))await repairSessionModel(item);activateAISession(item,{viewed:true});
  const executable=item.engine==='cc'?await findClaude():await findExecutable('codex');
- return {...item,...(item.id==='codex'?{models:await currentCodexModels().catch(()=>[])}:{}),auth:activeContainerId?await containerAuth(item.engine):await detectAIAuth({engine:item.engine,executable,gateway})};
+ return {...item,...(item.engine==='codex'?{models:await currentCodexModels().catch(()=>[])}:{}),auth:activeContainerId?await containerAuth(item.engine):await detectAIAuth({engine:item.engine,executable,gateway})};
 }));
 function insightSession(value){
  const item=aiSessions.get(value?.chatId);
  if(!item||value.owner!==account?.user?.id||value.environmentId!==activeContainerId||(item.environmentId||null)!==activeContainerId||accountChanging||containerOperation)throw new Error('对话账号或环境已变化');
  return item;
 }
-ipcMain.handle('workspace:chatInsights',guarded(async value=>{const item=insightSession(value);return {...insightView(item,chatViews),running:runs.has(item.id)};}));
+const chatPopouts=createChatPopouts({BrowserWindow,ipcMain,parent:()=>window,scope:()=>({owner:chatOwner,environmentId:activeContainerId}),basePath:here});
+ipcMain.handle('workspace:chatPopout',guarded(async(action,value)=>{chatPopouts.closeInvalid();if(action==='sync'){if(value?.scope?.owner!==chatOwner || value.scope.environmentId!==activeContainerId)return;insightSession(value.scope);chatPopouts.publish(value);return true;}if(action==='open'){insightSession(value);return chatPopouts.open(value);}if(action==='closeInvalid'){chatPopouts.closeInvalid();return true;}throw new Error('未知窗口操作');}));
+ipcMain.handle('workspace:chatInsights',guarded(async value=>{const item=insightSession(value);return {...insightView(item,chatViews,{owner:account?.user?.id,environmentId:activeContainerId,chatId:item.id}),running:runs.has(item.id)};}));
 ipcMain.handle('workspace:chatArtifact',guarded(async value=>{
  const item=insightSession(value),owner=dockerOwner(),environment=activeContainerId;
  const artifact=insightView(item,chatViews).artifacts.find(a=>a.id===value.id);if(!artifact)throw new Error('没有此真实产物记录');
@@ -1049,7 +1069,7 @@ ipcMain.handle('workspace:chatContext',guarded(async(value={})=>{
  if(owner!==dockerOwner()||environmentId!==activeContainerId||project!==(aiSessions.get(value.chatId)?.project))throw new Error('查询期间环境或项目已变化');
  return {...result,engine:item.engine,environmentId,chatId:item.id};
 }));
-ipcMain.handle('workspace:selectSession',guarded(async(id,options={})=>{const generation=chatGeneration;if(accountChanging || containerOperation || chatNetworkChanging)throw new Error('正在处理环境或连接方式切换，请稍候');const item=aiSessions.get(id);if(!item || (item.environmentId || null)!==activeContainerId)throw new Error('会话不存在');storeCurrentSession();if(!options.deferAuth)await repairSessionModel(item);if(accountChanging || generation!==chatGeneration || aiSessions.get(id)!==item)throw new Error('对话账号或环境已变化');activateAISession(item,{viewed:options.viewed ?? !options.deferAuth});if(options.deferAuth)return {...item,auth:{state:'checking'}};const executable=item.engine==='cc'?await findClaude():await findExecutable('codex');return {...item,...(item.id==='codex'?{models:await currentCodexModels().catch(()=>[])}:{}),auth:activeContainerId?await containerAuth(item.engine):await detectAIAuth({engine:item.engine,executable,gateway})};}));
+ipcMain.handle('workspace:selectSession',guarded(async(id,options={})=>{const generation=chatGeneration;if(accountChanging || containerOperation || chatNetworkChanging)throw new Error('正在处理环境或连接方式切换，请稍候');const item=aiSessions.get(id);if(!item || (item.environmentId || null)!==activeContainerId)throw new Error('会话不存在');storeCurrentSession();if(!options.deferAuth)await repairSessionModel(item);if(accountChanging || generation!==chatGeneration || aiSessions.get(id)!==item)throw new Error('对话账号或环境已变化');activateAISession(item,{viewed:options.viewed ?? !options.deferAuth});if(options.deferAuth)return {...item,auth:{state:'checking'}};const executable=item.engine==='cc'?await findClaude():await findExecutable('codex');return {...item,...(item.engine==='codex'?{models:await currentCodexModels().catch(()=>[])}:{}),auth:activeContainerId?await containerAuth(item.engine):await detectAIAuth({engine:item.engine,executable,gateway})};}));
 ipcMain.handle('workspace:readChatImage',guarded(async value=>{
  const owner=account?.user?.id || null,environment=activeContainerId;
  if(value?.owner!==owner || value.environmentId!==environment || accountChanging || containerOperation)throw new Error('图片所属环境已变化');
@@ -1077,16 +1097,19 @@ ipcMain.handle('workspace:cc', guarded(async (prompt,rewind,chatId=activeAISessi
   if(!preparedChat || (preparedChat.environmentId || null)!==environmentId)throw new Error('对话不存在');
   const engine=preparedChat.engine;
   const controller=runs.begin(chatId,{engine,requestId,networkMode:chatRequestRoute(preparedChat,gateway?.status)});
-  const emitChat=(type,data)=>{if(type==='ccActivity')recordArtifacts(preparedChat,data);emit(type,data,{chatId,requestId,owner:requestOwner,environmentId});};
+  const fileChangeTurn={id:randomUUID(),owner:requestOwner,environmentId,chatId};
+  preparedChat.fileChangeTurn=fileChangeTurn;
+  const emitChat=(type,data)=>{if(type==='ccActivity')recordArtifacts(preparedChat,data,fileChangeTurn.id);emit(type,data,{chatId,requestId,owner:requestOwner,environmentId});};
   const valid=()=>!controller.signal.aborted && generation===chatGeneration && requestOwner===(account?.user?.id || null) && environmentId===activeContainerId && aiSessions.get(chatId)===preparedChat;
   try {
-  if(['deepseek','codex'].includes(engine)){prompt=engine==='codex'?normalizeCodexInput(prompt):normalizeDeepSeekInput(prompt);for(const image of prompt.images){if(!image.dataURL)continue;const decoded=nativeImage.createFromDataURL(image.dataURL),size=decoded.getSize();const limit=prompt.images.length>=15?4096:8192;if(decoded.isEmpty() || size.width>limit || size.height>limit)throw new Error('图片无效或尺寸超过 '+limit+' 像素');}}
+  if(['deepseek','codex'].includes(engine)){if(prompt && typeof prompt==='object')prompt={...prompt,text:documentPrompt(prompt.text,normalizeDocuments(prompt.documents||[]))};prompt=engine==='codex'?normalizeCodexInput(prompt):normalizeDeepSeekInput(prompt);for(const image of prompt.images){if(!image.dataURL)continue;const decoded=nativeImage.createFromDataURL(image.dataURL),size=decoded.getSize();const limit=prompt.images.length>=15?4096:8192;if(decoded.isEmpty() || size.width>limit || size.height>limit)throw new Error('图片无效或尺寸超过 '+limit+' 像素');}}
   if(accountChanging || containerOperation || chatNetworkChanging)throw new Error('正在处理环境或连接方式切换，请稍候');
   await requireEnvironment();requireActiveEnvironment();
   if(!chatId || runtimeOwner!==(account?.user?.id || null) || !registeredRuntimes?.runtimes.some(item=>item.id===engine))throw new Error('请先手动检测运行时并新建对话');
   await repairSessionModel(preparedChat);
   if(accountChanging || !valid())throw new Error('对话账号或环境已变化，请重新发送');
   const model=preparedChat.model,requestProject=preparedChat.project;
+  if(engine==='codex' && preparedChat.reasoningEffort){const capability=(await currentCodexModels()).find(m=>m.model===model);if(!capability?.supportedReasoningEfforts?.some(v=>v.reasoningEffort===preparedChat.reasoningEffort))throw new Error('模型推理强度已不可用，请重新选择');}
   const preparedMode=chatNetworkMode(preparedChat);
   const requiresProxy=chatRequestRoute(preparedChat,gateway?.status)==='proxy';
   if (requiresProxy && gateway?.status.state !== 'ready') throw new Error('出口未通过验证，CC 请求已禁止');
@@ -1129,7 +1152,7 @@ ipcMain.handle('workspace:cc', guarded(async (prompt,rewind,chatId=activeAISessi
         delete currentChat.contextPrefix;emitChat('ccResult',{error:false});return;
       }
       if(engine==='codex') {
-        await runCodex({useLocalModel:!activeContainerId,spawnProcess:launch || undefined,executable:activeContainerId?'codex':codexPath,project:workingDirectory,model:model,images:[...(!nativeCodexId?currentChat.contextPrefix?.flatMap(m=>m.images || []) || []:[]),...prompt.images],prompt:!nativeCodexId?replayPrompt(currentChat.contextPrefix,prompt.text):prompt.text,sessionId:nativeCodexId,gateway:owner,signal:controller.signal,canStart:canContinue,onEvent:(type,value)=>{if(type==='session'){currentChat.codexSessionId=value;if(activeAISessionId===currentChat.id)codexSessionId=value;}else if(type==='usage'){latestUsage=totalUsageTokens('codex',value);latestUsageDetails=usageDetails('codex',value);}else emitChat({text:'ccText',tool:'ccTool',process:'ccProcess',activity:'ccActivity',error:'ccError'}[type],type==='tool'?{name:value}:value);}});
+        await runCodex({useLocalModel:!activeContainerId,spawnProcess:launch || undefined,executable:activeContainerId?'codex':codexPath,project:workingDirectory,model:model,reasoningEffort:preparedChat.reasoningEffort,images:[...(!nativeCodexId?currentChat.contextPrefix?.flatMap(m=>m.images || []) || []:[]),...prompt.images],prompt:!nativeCodexId?replayPrompt(currentChat.contextPrefix,prompt.text):prompt.text,sessionId:nativeCodexId,gateway:owner,signal:controller.signal,canStart:canContinue,onEvent:(type,value)=>{if(type==='session'){currentChat.codexSessionId=value;if(activeAISessionId===currentChat.id)codexSessionId=value;}else if(type==='usage'){latestUsage=totalUsageTokens('codex',value);latestUsageDetails=usageDetails('codex',value);}else emitChat({text:'ccText',tool:'ccTool',process:'ccProcess',activity:'ccActivity',error:'ccError'}[type],type==='tool'?{name:value}:value);}});
         delete currentChat.contextPrefix;emitChat('ccResult',{sessionId:currentChat.codexSessionId,error:false});return;
       }
       const snapshotOwner=dockerOwner(),snapshotEnvironment=activeContainerId;
@@ -1176,7 +1199,7 @@ ipcMain.handle('workspace:cc', guarded(async (prompt,rewind,chatId=activeAISessi
     }
   })();
   return {chatId,requestId};
-  } catch(error){runs.finish(controller);throw error;}
+  } catch(error){runs.finish(controller);void persistAISessions();throw error;}
 }));
 // Only read the installed CLI version; never automatically log in or send model requests.
 ipcMain.handle('workspace:claudeInfo', guarded(async () => {

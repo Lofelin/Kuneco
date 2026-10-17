@@ -1,5 +1,5 @@
 import {build} from 'esbuild';
-import {readFile} from 'node:fs/promises';
+import {readFile,copyFile,cp} from 'node:fs/promises';
 await build({entryPoints:['src/shared/ui/ui-components.mjs'],outfile:'src/vendor/ui.js',bundle:true,format:'esm',target:'chrome140',minify:true,legalComments:'eof'});
 await build({entryPoints:['src/shared/ui/ui-theme.css'],outfile:'src/vendor/ui.css',bundle:true,minify:true,loader:{'.woff2':'file'},assetNames:'fonts/[name]-[hash]'});
 
@@ -18,3 +18,8 @@ await build({entryPoints:['src/features/terminal/console-ui.mjs'],outfile:'src/v
 await build({entryPoints:['src/features/chat/chat-markdown.mjs'],outfile:'src/vendor/chat-markdown.js',bundle:true,format:'esm',target:'chrome140',minify:true});
 
 await build({entryPoints:['src/shared/ui/generated-avatar.mjs'],outfile:'src/vendor/generated-avatar.js',bundle:true,format:'esm',target:'chrome140',minify:true});
+
+await copyFile('node_modules/pdfjs-dist/build/pdf.mjs','src/vendor/pdf.mjs');
+await copyFile('node_modules/pdfjs-dist/build/pdf.worker.mjs','src/vendor/pdf.worker.mjs');
+
+for(const [source,target] of [['cmaps','pdf-cmaps'],['standard_fonts','pdf-fonts'],['wasm','pdf-wasm']])await cp('node_modules/pdfjs-dist/'+source,'src/vendor/'+target,{recursive:true});

@@ -36,3 +36,14 @@ test('Codex exposes returned process summaries, commentary and search activity s
  await runCodex({executable:'fixture',project:process.cwd(),prompt:'看图',gateway,useLocalModel:false,onEvent:(...e)=>events.push(e),spawnProcess:()=>spawn(process.execPath,['-e',`process.stdin.resume();for(const event of ${JSON.stringify(fixture)})console.log(JSON.stringify(event));`],{stdio:['pipe','pipe','pipe']})});
  assert.deepEqual(events.filter(e=>e[0]==='process').map(e=>e[1].text),['检查用户附加图片','我查看一下图片。']);assert.deepEqual(events.filter(e=>e[0]==='text'),[['text','这是最终回答。\n']]);
 });
+
+test('explicit reasoning effort reaches execution args without changing runtime default when absent',async()=>{
+ assert.ok(!codexArguments({project:'/tmp'}).some(arg=>arg.startsWith('model_reasoning_effort=')));
+ assert.throws(()=>codexArguments({project:'/tmp',reasoningEffort:'high"\nother=true'}),/无效推理强度/);
+ let actual;
+ await runCodex({executable:'fixture',project:process.cwd(),prompt:'test',gateway,useLocalModel:false,reasoningEffort:'high',onEvent:()=>{},spawnProcess:options=>{
+  actual=options.args;
+  return spawn(process.execPath,['-e',`process.stdin.resume();console.log(JSON.stringify({type:'turn.completed'}));`],{stdio:['pipe','pipe','pipe']});
+ }});
+ const index=actual.indexOf('model_reasoning_effort="high"');assert.ok(index>0);assert.equal(actual[index-1],'-c');
+});

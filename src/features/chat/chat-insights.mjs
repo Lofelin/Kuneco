@@ -1,4 +1,5 @@
 import path from 'node:path';
+import {summarizeTurnChanges} from './turn-changes.mjs';
 // Usage totals and context occupancy deliberately have separate meanings.
 const number=value=>Number.isSafeInteger(value)&&value>=0?value:null;
 export function usageDetails(engine,value){
@@ -7,14 +8,14 @@ export function usageDetails(engine,value){
  const rows=Object.values(value?.modelUsage||{});const sum=key=>rows.length&&rows.every(r=>number(r[key])!==null)?rows.reduce((n,r)=>n+r[key],0):null;
  return {input:sum('inputTokens'),output:sum('outputTokens'),cacheRead:sum('cacheReadInputTokens'),cacheWrite:sum('cacheCreationInputTokens'),contextTokens:null,contextLimit:null,contextLabel:'运行时未提供当前上下文'};
 }
-export function recordArtifacts(item,activity){
+export function recordArtifacts(item,activity,turnId){
  if(activity?.status!=='completed')return;
  for(const raw of activity.changes||[]){const change={...raw,path:typeof raw.path==='string'&&!path.isAbsolute(raw.path)&&item.project?path.resolve(item.project,raw.path):raw.path};if(typeof change.path!=='string'||!change.path)continue;
-  const entries=item.artifacts||=[];const id=activity.id+':'+change.path;if(entries.some(x=>x.id===id))continue;
-  entries.push({id,path:change.path,at:new Date().toISOString(),activityId:activity.id,provider:activity.provider,version:entries.filter(x=>x.path===change.path).length+1,...(typeof change.before==='string'&&typeof change.after==='string'?{before:change.before,after:change.after}:{}),...(change.diff?{diff:change.diff}:{}),...(change.unavailable?{unavailable:change.unavailable}:{})});
+  const entries=item.artifacts||=[];const id=(turnId?turnId+':':'')+activity.id+':'+change.path;if(entries.some(x=>x.id===id || (!turnId&&x.activityId===activity.id&&x.path===change.path)))continue;
+  entries.push({id,...(turnId?{turnId}:{}),path:change.path,at:new Date().toISOString(),activityId:activity.id,provider:activity.provider,version:entries.filter(x=>x.path===change.path).length+1,...(typeof change.before==='string'&&typeof change.after==='string'?{before:change.before,after:change.after}:{}),...(change.diff?{diff:change.diff}:{}),...(change.unavailable?{unavailable:change.unavailable}:{})});
  }
 }
-export function insightView(item,views=[]){
+export function insightView(item,views=[],scope){
  for(const message of views.find(v=>v.id===item.id)?.messages||[])for(const activity of message.reasoning?.activities||[])recordArtifacts(item,activity);
- const seenMaintenance=new Set();const records=(item.tokenUsage||[]).filter(r=>{if(r.purpose!=='compaction')return true;const key=r.at+':'+r.totalTokens;if(seenMaintenance.has(key))return false;seenMaintenance.add(key);return true;});item.tokenUsage=records;return {chatId:item.id,engine:item.engine,model:item.model,artifacts:item.artifacts||[],usage:records.filter(r=>r.purpose!=='compaction').at(-1)||null,totalTokens:records.length?records.reduce((n,r)=>n+(r.totalTokens||0),0):null,compression:item.compression||null};
+ const seenMaintenance=new Set();const records=(item.tokenUsage||[]).filter(r=>{if(r.purpose!=='compaction')return true;const key=r.at+':'+r.totalTokens;if(seenMaintenance.has(key))return false;seenMaintenance.add(key);return true;});item.tokenUsage=records;return {chatId:item.id,engine:item.engine,model:item.model,artifacts:item.artifacts||[],turnChanges:summarizeTurnChanges(item.artifacts,item.fileChangeTurn,scope),usage:records.filter(r=>r.purpose!=='compaction').at(-1)||null,totalTokens:records.length?records.reduce((n,r)=>n+(r.totalTokens||0),0):null,compression:item.compression||null};
 }

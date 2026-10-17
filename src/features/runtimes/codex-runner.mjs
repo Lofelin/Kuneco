@@ -10,20 +10,24 @@ import {proxyEnvironment} from '../proxy/proxy.mjs';
 export async function readCodexModel() {
   try {const config=await readFile(path.join(process.env.CODEX_HOME || path.join(homedir(),'.codex'),'config.toml'),'utf8');const top=config.split(/^\s*\[/m)[0];const value=/^\s*model\s*=\s*["']([a-zA-Z0-9._:-]+)["']/m.exec(top)?.[1];return value || null;}catch{return null;}
 }
-export function codexArguments({project,sessionId,model,images=[]}={}) {
+export function codexArguments({project,sessionId,model,images=[],reasoningEffort}={}) {
   const args=['exec','--json','--dangerously-bypass-approvals-and-sandbox','--skip-git-repo-check','-C',project,'-c','web_search="live"'];
   if(model) args.push('--model',model);
+  if(reasoningEffort!==undefined && reasoningEffort!==null){
+    if(typeof reasoningEffort!=='string' || !/^[a-z][a-z0-9_]{0,31}$/.test(reasoningEffort))throw new Error('无效推理强度');
+    args.push('-c','model_reasoning_effort='+JSON.stringify(reasoningEffort));
+  }
   if(sessionId) args.push('resume',sessionId);
   for(const image of images)args.push('--image',image);
   args.push('-');return args;
 }
-export async function runCodex({executable,project,prompt,images=[],sessionId,gateway,signal,canStart,onEvent,spawnProcess,model:chosenModel,useLocalModel=true}) {
+export async function runCodex({executable,project,prompt,images=[],sessionId,gateway,signal,canStart,onEvent,spawnProcess,model:chosenModel,useLocalModel=true,reasoningEffort}) {
   const spawnRestricted=spawnProcess || createRestrictedCCSpawner({port:gateway.port,canStart});
   const env=chatRuntimeEnvironment(gateway.status?.mode==='direct'?directChatEnvironment(process.env):proxyEnvironment(process.env,gateway.url));
   // Use existing local Codex authentication, never inherit an alternate API origin.
   delete env.OPENAI_BASE_URL;delete env.OPENAI_API_KEY;delete env.CODEX_API_KEY;
   const model=chosenModel || (useLocalModel?await readCodexModel():null);
-  const child=spawnRestricted({command:executable,args:codexArguments({project,sessionId,model,images}),cwd:project,env,signal});
+  const child=spawnRestricted({command:executable,args:codexArguments({project,sessionId,model,images,reasoningEffort}),cwd:project,env,signal});
   let completed=false, failed=false, lastError='Codex 执行失败，请检查本机登录、模型与代理。';
   const lines=createInterface({input:child.stdout});
   lines.on('line',line=>{
@@ -66,7 +70,9 @@ export async function listCodexModels(executable,gateway,spawnProcess) {
       for(const item of msg.result.data){
         const retirement=item.upgradeInfo?.retirementAt;
         if(typeof item.model!=='string' || item.hidden || retirement && Date.parse(retirement)<=Date.now())continue;
-        models.set(item.model,{model:item.model,name:item.displayName || item.model,isDefault:Boolean(item.isDefault)});
+        const supportedReasoningEfforts=Array.isArray(item.supportedReasoningEfforts)?item.supportedReasoningEfforts.filter(level=>typeof level?.reasoningEffort==='string' && /^[a-z][a-z0-9_]{0,31}$/.test(level.reasoningEffort)).map(level=>({reasoningEffort:level.reasoningEffort,description:typeof level.description==='string'?level.description:''})):[];
+        const defaultReasoningEffort=supportedReasoningEfforts.some(level=>level.reasoningEffort===item.defaultReasoningEffort)?item.defaultReasoningEffort:null;
+        models.set(item.model,{model:item.model,name:item.displayName || item.model,isDefault:Boolean(item.isDefault),supportedReasoningEfforts,defaultReasoningEffort});
       }
       const cursor=msg.result.nextCursor;
       if(cursor){if(cursors.has(cursor))return reject(new Error('Repeated model list cursor'));cursors.add(cursor);send('model/list',{includeHidden:false,limit:100,cursor});}

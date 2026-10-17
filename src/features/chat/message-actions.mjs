@@ -1,3 +1,4 @@
+import {mountCompositionGuard} from './composition-guard.mjs';
 // Keep controls separate from message text so persistence and copying never include them.
 export function mountMessageActions(block,{text,createdAt,onEdit,onCopy,canEdit=()=>true}){
  const doc=block.ownerDocument,bar=doc.createElement('div');bar.className='message-actions';
@@ -17,9 +18,10 @@ export function openMessageEditor(block,{text,onSend,onCancel=()=>{}}){
  const error=doc.createElement('div');error.className='message-editor-error';error.setAttribute('role','alert');
  const make=(label,icon)=>{const button=doc.createElement('app-button');button.type='button';button.className='content-action';const image=doc.createElement('wa-icon');image.setAttribute('slot','start');image.setAttribute('src','assets/icons/'+icon+'.svg');button.append(image,doc.createTextNode(label));return button;};
  const cancel=make('取消','x'),send=make('发送','check');send.variant='primary';send.classList.add('primary');
- const close=()=>{editor.remove();block.classList.remove('editing-message');};
+ const compositionGuard=mountCompositionGuard(input);
+ const close=()=>{compositionGuard.destroy();editor.remove();block.classList.remove('editing-message');};
  cancel.onclick=()=>{close();onCancel();};
  send.onclick=async()=>{error.textContent='';send.loading=true;send.disabled=cancel.disabled=input.disabled=true;try{await onSend(input.value);close();}catch(e){error.textContent=e.message;}finally{send.loading=false;send.disabled=cancel.disabled=input.disabled=false;}};
- input.addEventListener('keydown',event=>{if(event.key==='Escape'&&!input.disabled){event.preventDefault();cancel.click();}});
+ input.addEventListener('keydown',event=>{if(event.key==='Escape' && !compositionGuard.isComposing(event)&&!input.disabled){event.preventDefault();cancel.click();}});
  actions.append(cancel,send);editor.append(input,error,actions);block.append(editor);block.classList.add('editing-message');Promise.resolve(input.updateComplete).then(()=>{if(!editor.isConnected)return;input.focus();doc.defaultView.requestAnimationFrame?.(()=>editor.scrollIntoView?.({block:'nearest'}));});return editor;
 }

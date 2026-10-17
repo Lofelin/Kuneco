@@ -1,10 +1,12 @@
+import {mountCompositionGuard} from './composition-guard.mjs';
 export function contextTrigger(value,caret=value.length){const prefix=value.slice(0,caret),match=/(^|\s)([/@])([^\s/@]*)$/.exec(prefix);return match?{kind:match[2]==='/'?'skills':'files',query:match[3],start:prefix.length-match[2].length-match[3].length,end:caret}:null;}
 export function mountContextPicker({input,host,load,getScope}){
+ const compositionGuard=mountCompositionGuard(input);
  let version=0,timer,items=[],selected=-1,trigger=null,scope='',open=false;
  const native=()=>input.shadowRoot?.querySelector('textarea');
  const close=()=>{version++;clearTimeout(timer);open=false;host.hidden=true;items=[];selected=-1;input.setAttribute('aria-expanded','false');};
  const notice=text=>{const p=document.createElement('p');p.className='context-picker-notice';p.textContent=text;host.replaceChildren(p);};
- const choose=index=>{const item=items[index];if(!item?.enabled||scope!==getScope()||!trigger)return;const insertion=trigger.kind==='skills'?`使用技能「${item.name}」${item.path?`（技能文件：${item.path}）`:""} `:`参考文件「${item.path}」 `;const value=input.value;input.value=value.slice(0,trigger.start)+insertion+value.slice(trigger.end);const cursor=trigger.start+insertion.length;close();input.dispatchEvent(new Event('input',{bubbles:true}));input.focus();native()?.setSelectionRange(cursor,cursor);};
+ const choose=index=>{const item=items[index];if(!item?.enabled||scope!==getScope()||!trigger)return;const insertion=trigger.kind==='skills'?`使用技能「${item.name}」${item.path?`（技能文件：${item.path}）`:""} `:`引用当前环境文件路径「${item.path}」（尚未读取内容，请按需使用工具读取） `;const value=input.value;input.value=value.slice(0,trigger.start)+insertion+value.slice(trigger.end);const cursor=trigger.start+insertion.length;close();input.dispatchEvent(new Event('input',{bubbles:true}));input.focus();native()?.setSelectionRange(cursor,cursor);};
  const highlight=()=>{host.querySelectorAll('[role=option]').forEach((node,i)=>node.setAttribute('aria-selected',String(i===selected)));host.querySelector('[aria-selected=true]')?.scrollIntoView({block:'nearest'});};
  async function refresh(){
   const caret=native()?.selectionStart??input.value.length;trigger=contextTrigger(input.value,caret);if(!trigger||input.disabled){close();return;}
@@ -19,7 +21,7 @@ export function mountContextPicker({input,host,load,getScope}){
  }
  input.setAttribute('aria-controls',host.id);input.setAttribute('aria-expanded','false');host.setAttribute('role','listbox');
  input.addEventListener('input',()=>{scope=getScope();clearTimeout(timer);version++;items=[];selected=-1;if(open)notice('正在读取当前环境…');timer=setTimeout(refresh,180);});
- input.addEventListener('keydown',event=>{if(!open||event.isComposing)return;if(['ArrowDown','ArrowUp','Enter','Escape'].includes(event.key)){event.preventDefault();event.stopImmediatePropagation();if(event.key==='Escape'){close();return;}if(event.key==='Enter'){choose(selected);return;}const candidates=items.map((x,i)=>x.enabled?i:-1).filter(i=>i>=0);if(!candidates.length)return;const offset=event.key==='ArrowDown'?1:-1;selected=candidates[(candidates.indexOf(selected)+offset+candidates.length)%candidates.length];highlight();}},{capture:true});
+ input.addEventListener('keydown',event=>{if(!open||compositionGuard.isComposing(event))return;if(['ArrowDown','ArrowUp','Enter','Escape'].includes(event.key)){event.preventDefault();event.stopImmediatePropagation();if(event.key==='Escape'){close();return;}if(event.key==='Enter'){choose(selected);return;}const candidates=items.map((x,i)=>x.enabled?i:-1).filter(i=>i>=0);if(!candidates.length)return;const offset=event.key==='ArrowDown'?1:-1;selected=candidates[(candidates.indexOf(selected)+offset+candidates.length)%candidates.length];highlight();}},{capture:true});
  document.addEventListener('pointerdown',event=>{if(!event.composedPath().includes(input)&&!host.contains(event.target))close();});
  return {close,refresh,invalidate(){if(scope!==getScope())close();}};
 }

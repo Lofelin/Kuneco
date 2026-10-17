@@ -6,7 +6,7 @@ import {proxyEnvironment} from '../proxy/proxy.mjs';
 import {createRestrictedCCSpawner} from './cc-network-guard.mjs';
 import {readCodexModel} from './codex-runner.mjs';
 export function codexStreamArguments(){return ['app-server','--listen','stdio://','-c','web_search="live"'];}
-export async function runCodexStream({executable,project,prompt,images=[],sessionId,gateway,signal,canStart,onEvent,spawnProcess,model:chosenModel,useLocalModel=true}){
+export async function runCodexStream({executable,project,prompt,images=[],sessionId,gateway,signal,canStart,onEvent,spawnProcess,model:chosenModel,useLocalModel=true,reasoningEffort}){
  if(signal?.aborted)throw new Error('请求已取消。');
  const env=chatRuntimeEnvironment(gateway.status?.mode==='direct'?directChatEnvironment(process.env):proxyEnvironment(process.env,gateway.url));
  delete env.OPENAI_BASE_URL;delete env.OPENAI_API_KEY;delete env.CODEX_API_KEY;
@@ -35,7 +35,7 @@ export async function runCodexStream({executable,project,prompt,images=[],sessio
     request(sessionId?'thread/resume':'thread/start',{...(sessionId?{threadId:sessionId}:{}),cwd:project,model:model || undefined,modelProvider:'openai',approvalPolicy:'never',sandbox:'danger-full-access',baseInstructions:'',developerInstructions:''});
    }else if(method==='thread/start' || method==='thread/resume'){
     threadId=event.result?.thread?.id;if(!threadId){fail('Codex 未返回会话 ID。');return;}onEvent('session',threadId);
-    request('turn/start',{threadId,input:[{type:'text',text:prompt},...images.map(image=>typeof image==='string'?{type:'localImage',path:image}:{type:'image',url:image.dataURL})],model:model || undefined,approvalPolicy:'never',sandboxPolicy:{type:'dangerFullAccess'}});
+    request('turn/start',{threadId,...(reasoningEffort?{effort:reasoningEffort}:{}),input:[{type:'text',text:prompt},...images.map(image=>typeof image==='string'?{type:'localImage',path:image}:{type:'image',url:image.dataURL})],model:model || undefined,approvalPolicy:'never',sandboxPolicy:{type:'dangerFullAccess'}});
    }else if(method==='turn/start'){turnId=event.result?.turn?.id;clearTimeout(startTimer);}
    return;
   }

@@ -1,0 +1,6 @@
+.chat-diagram-preview { padding: 16px; overflow: auto; text-align: center; }
+.chat-diagram-preview img { display: block; max-width: 100%; height: auto; margin-inline: auto; }
+.chat-diagram-status { margin: 0; padding: 10px 14px; color: var(--muted); font-size: 12px; line-height: 18px; }
+.chat-diagram-status:empty { display: none; }
+.chat-diagram pre[hidden], .chat-diagram-preview[hidden] { display: none; }
+.chat-diagram .chat-code-toolbar { flex-wrap: wrap; }

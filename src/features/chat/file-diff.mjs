@@ -1,11 +1,12 @@
 export function diffLines(before,after){
- const a=before===''?[]:before.split('\n'),b=after===''?[]:after.split('\n');let start=0,end=0;
+ const lines=value=>value.match(/[^\n]*\n|[^\n]+$/g)||[];
+ const a=lines(before),b=lines(after);let start=0,end=0;
  while(start<a.length&&start<b.length&&a[start]===b[start])start++;
  while(end<a.length-start&&end<b.length-start&&a[a.length-end-1]===b[b.length-end-1])end++;
  const rows=a.slice(0,start).map(text=>({type:'context',text}));const aa=a.slice(start,a.length-end),bb=b.slice(start,b.length-end);
  if(aa.length*bb.length<=1000000){const dp=Array.from({length:aa.length+1},()=>new Uint32Array(bb.length+1));for(let i=aa.length-1;i>=0;i--)for(let j=bb.length-1;j>=0;j--)dp[i][j]=aa[i]===bb[j]?1+dp[i+1][j+1]:Math.max(dp[i+1][j],dp[i][j+1]);let i=0,j=0;while(i<aa.length||j<bb.length){if(i<aa.length&&j<bb.length&&aa[i]===bb[j]){rows.push({type:'context',text:aa[i++]});j++;}else if(i<aa.length&&(j===bb.length||dp[i+1][j]>=dp[i][j+1]))rows.push({type:'deletion',text:aa[i++]});else rows.push({type:'addition',text:bb[j++]});}}
  else {rows.push(...aa.map(text=>({type:'deletion',text})),...bb.map(text=>({type:'addition',text})));}
- rows.push(...a.slice(a.length-end).map(text=>({type:'context',text})));let old=1,next=1;return rows.map(row=>({...row,old:row.type==='addition'?null:old++,next:row.type==='deletion'?null:next++}));
+ rows.push(...a.slice(a.length-end).map(text=>({type:'context',text})));let old=1,next=1;return rows.map(row=>({...row,text:row.text.replace(/\n$/,''),old:row.type==='addition'?null:old++,next:row.type==='deletion'?null:next++}));
 }
 export function parseUnifiedDiff(diff){let old=0,next=0,active=false;const rows=[];for(const line of diff.split('\n')){const h=/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);if(h){old=+h[1];next=+h[2];active=true;rows.push({type:'hunk',text:line});continue;}if(!active||line.startsWith('\\')||![' ','+','-'].includes(line[0]))continue;const type=line[0]==='+'?'addition':line[0]==='-'?'deletion':'context';rows.push({type,text:line.slice(1),old:type==='addition'?null:old++,next:type==='deletion'?null:next++});}return rows;}
 export function renderFileDiffs(panel,activity){

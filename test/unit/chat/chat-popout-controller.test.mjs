@@ -1,0 +1,16 @@
+import test from 'node:test';import assert from 'node:assert/strict';
+import {mountChatPopoutController} from '../../../src/features/chat/chat-popout-controller.mjs';
+const flush=()=>new Promise(resolve=>setImmediate(resolve));
+function fixture({sendError}={}){
+ const previous=globalThis.window,previousInterval=globalThis.setInterval;globalThis.window={addEventListener(){}};globalThis.setInterval=()=>0;
+ let current={owner:'a',environmentId:'env',chatId:'chat'},value={text:'draft',images:[]},listener,readHook;
+ const published=[],writes=[],sends=[],errors=[];
+ const controller=mountChatPopoutController({api:{onEvent:fn=>listener=fn,chatPopout:async(action,data)=>{if(action==='sync')published.push(data);}},scope:()=>current,list:()=>[{id:'chat',title:'Chat'}],activeDraft:()=>{readHook?.();return value;},setActiveDraft:async payload=>{writes.push({scope:{...current},payload});value=payload;},messages:()=>[],running:()=>false,send:async(s,p)=>{sends.push({s,p});if(sendError)throw Error(sendError);value={...p,text:''};},stop:async()=>{},focus:async()=>{},report:e=>errors.push(e)});
+ globalThis.window=previous;globalThis.setInterval=previousInterval;
+ return {controller,published,writes,sends,errors,changeScope:s=>current=s,changeDraft:d=>value=d,onRead:fn=>readHook=fn,act:data=>listener({type:'chatPopoutAction',data}),get scope(){return {...current};}};
+}
+test('valid popout sends through parent once and updates canonical snapshot',async()=>{const f=fixture();await f.controller.open();const first=f.published.at(-1);f.act({scope:f.scope,action:'send',text:'hello',revision:first.revision});await flush();assert.equal(f.sends.length,1);assert.equal(f.published.at(-1).draft,'');f.act({scope:f.scope,action:'send',text:'hello',revision:first.revision});await flush();assert.equal(f.sends.length,1);assert.match(f.errors.at(-1).message,/已在另一窗口更新/);});
+test('stale draft and foreign account actions cannot overwrite the parent',async()=>{const f=fixture();await f.controller.open();const first=f.published.at(-1);f.changeDraft({text:'new main draft',images:[]});f.act({scope:f.scope,action:'updateDraft',text:'old',revision:first.revision});await flush();assert.equal(f.writes.length,0);f.act({scope:{...f.scope,owner:'other'},action:'send',text:'bad',revision:first.revision});await flush();assert.equal(f.sends.length,0);});
+test('scope change during asynchronous draft resolution does not write into the new account',async()=>{const f=fixture();await f.controller.open();const first=f.published.at(-1),original=f.scope;f.onRead(()=>{f.onRead(null);queueMicrotask(()=>f.changeScope({...original,owner:'other'}));});f.act({scope:original,action:'updateDraft',text:'old account',revision:first.revision});await flush();assert.equal(f.writes.length,0);assert.equal(f.sends.length,0);});
+
+test('unknown send outcome remains a draft and synchronization never resends it',async()=>{const f=fixture({sendError:'执行结果未知'});await f.controller.open();f.act({scope:f.scope,action:'send',text:'one request',revision:f.published.at(-1).revision});await flush();assert.equal(f.sends.length,1);assert.equal(f.published.at(-1).draft,'one request');assert.equal(f.published.at(-1).error,'执行结果未知');await f.controller.sync();await f.controller.sync();assert.equal(f.sends.length,1);assert.equal(f.published.at(-1).draft,'one request');});
