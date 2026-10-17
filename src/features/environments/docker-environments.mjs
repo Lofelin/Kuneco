@@ -232,11 +232,16 @@ export class DockerEnvironments {
   const ports=JSON.parse(await this.command(['inspect','--format','{{json .NetworkSettings.Ports}}',name]));const port=Number(ports['8080/tcp']?.[0]?.HostPort);if(!port)throw new Error('容器代理端口未就绪');
   const gatewayIP=await this.command(['inspect','--format',`{{(index .NetworkSettings.Networks "${network}").IPAddress}}`,name]);
   const adapter=new ContainerGateway(this,owner,id,port,info.token,onVerified);
-  adapter.startWorker=async()=>{
+  adapter.startWorker=async({isCurrent=()=>true}={})=>{
+   const generation=adapter.generation;
+   const assertCurrent=()=>{if(!adapter.current(generation)||!isCurrent())throw Object.assign(new Error('代理操作已取消'),{name:'AbortError'});};
+   assertCurrent();
    const worker=prefix+'-worker';let exists=false;try{await this.command(['inspect',worker]);exists=true;}catch{}
-   if(exists){if((await this.command(['inspect','--format','{{.State.Running}}',worker]))!=='true')await this.command(['start',worker]);}
+   assertCurrent();
+   if(exists){const running=await this.command(['inspect','--format','{{.State.Running}}',worker]);assertCurrent();if(running!=='true')await this.command(['start',worker]);}
    else await this.command(workerArguments({name:worker,network,gatewayIP,proxyURL:`http://workspace:${info.token}@${gatewayIP}:8080`,image:item.imageName || LEGACY_IMAGE,projectMounts:item.projectMounts || []}));
-   const result=await this.command(['inspect','--format','{{.State.Running}}',worker]);if(result!=='true')throw new Error('容器网络隔离初始化失败');
+   assertCurrent();
+   const result=await this.command(['inspect','--format','{{.State.Running}}',worker]);assertCurrent();if(result!=='true')throw new Error('容器网络隔离初始化失败');
    await this.exec(owner,id,['node','-e',"let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>require('fs').writeFileSync('/tmp/dingtu-chat-proxy',s,{mode:0o600}));"],{input:`http://workspace:${info.token}@${gatewayIP}:8080`});
   };
   return adapter;
@@ -309,13 +314,51 @@ export class DockerEnvironments {
 
 }
 export class ContainerGateway extends EventEmitter{
- constructor(manager,owner,id,port,token,onVerified){super();Object.assign(this,{manager,owner,id,port,token,onVerified});this.status={state:'blocked',reason:'容器出口未核验'};this.closed=false;}
+ constructor(manager,owner,id,port,token,onVerified){super();Object.assign(this,{manager,owner,id,port,token,onVerified});this.status={state:'blocked',reason:'容器出口未核验'};this.closed=false;this.generation=0;this.syncSequence=0;}
  get address(){return `http://127.0.0.1:${this.port}`;}get url(){return `http://workspace:${this.token}@127.0.0.1:${this.port}`;}
- async sync(){if(this.closed)return this.status;try{this.status=await this.manager.rpc(this.owner,this.id,'status');}catch{let running;try{running=await this.manager.command(['inspect','--format','{{.State.Running}}',resourcePrefix(this.owner,this.id)+'-gateway']);}catch{}this.status=running==='false'?{...this.status,state:'blocked',reason:'容器代理服务已停止'}:{...this.status,controlState:'unavailable',reason:'网关状态暂不可读取；不因监测故障关闭连接'};}this.emit('status',this.status);return this.status;}
- async verify(){const status=await this.manager.rpc(this.owner,this.id,'verify');if(status.state==='ready'){try{await this.onVerified?.(status.ip);await this.startWorker();}catch(error){await this.stop();throw error;}}return this.sync();}
- async checkNow(){await this.manager.rpc(this.owner,this.id,'verify');return this.sync();}
- startMonitoring(){this.poll=setInterval(()=>{if(!this.polling){this.polling=true;void this.sync().finally(()=>{this.polling=false;});}},1000);this.poll.unref?.();}
- async detectRegion(){await this.manager.rpc(this.owner,this.id,'region');return this.sync();}
- block(reason,options){this.status={...this.status,state:'blocked',reason};this.emit('status',this.status);void this.manager.rpc(this.owner,this.id,'block',{reason,options}).catch(()=>{});}
- async stop(){this.closed=true;clearInterval(this.poll);await this.manager.rpc(this.owner,this.id,'stop').catch(()=>{});}
+ current(generation){return !this.closed && generation===this.generation;}
+ async sync(){
+  if(this.closed)return this.status;
+  const generation=this.generation,sequence=++this.syncSequence,valid=()=>this.current(generation)&&sequence===this.syncSequence;
+  if(this.blocking)await this.blocking;if(!valid()||this.blockFailed)return this.status;
+  let status;
+  try{status=await this.manager.rpc(this.owner,this.id,'status');}
+  catch{
+   if(!valid())return this.status;
+   let running;try{running=await this.manager.command(['inspect','--format','{{.State.Running}}',resourcePrefix(this.owner,this.id)+'-gateway']);}catch{}
+   status=running==='false'?{...this.status,state:'blocked',reason:'容器代理服务已停止'}:{...this.status,controlState:'unavailable',reason:'网关状态暂不可读取；不因监测故障关闭连接'};
+  }
+  if(!valid())return this.status;
+  this.status=status;this.emit('status',this.status);return this.status;
+ }
+ async verify(){
+  const generation=this.generation;if(!this.current(generation))return this.status;
+  if(this.blocking)await this.blocking;if(!this.current(generation))return this.status;
+  const status=await this.manager.rpc(this.owner,this.id,'verify');
+  if(!this.current(generation))return this.status;
+  if(status.state==='ready'){
+   try{
+    await this.onVerified?.(status.ip);if(!this.current(generation))return this.status;
+    await this.startWorker({isCurrent:()=>this.current(generation)});
+   }catch(error){if(!this.current(generation))return this.status;await this.stop();throw error;}
+  }
+  if(!this.current(generation))return this.status;this.blockFailed=false;return this.sync();
+ }
+ async checkNow(){const generation=this.generation;if(!this.current(generation))return this.status;if(this.blocking)await this.blocking;if(!this.current(generation))return this.status;await this.manager.rpc(this.owner,this.id,'verify');if(!this.current(generation))return this.status;this.blockFailed=false;return this.sync();}
+ startMonitoring(){
+  if(this.closed || this.poll)return;
+  this.poll=setInterval(()=>{if(!this.polling){this.polling=true;void this.sync().finally(()=>{this.polling=false;});}},1000);this.poll.unref?.();
+ }
+ async detectRegion(){const generation=this.generation;if(!this.current(generation))return this.status;await this.manager.rpc(this.owner,this.id,'region');return this.current(generation)?this.sync():this.status;}
+ block(reason,options){
+  if(this.closed)return;
+  const generation=++this.generation;this.status={...this.status,state:'blocked',reason};this.emit('status',this.status);
+  // Do not let a status RPC overtake the control operation it is observing.
+  this.blocking=Promise.resolve(this.blocking).then(()=>{if(this.current(generation))return this.manager.rpc(this.owner,this.id,'block',{reason,options});}).then(()=>{if(this.current(generation))this.blockFailed=false;}).catch(()=>{if(this.current(generation)){this.blockFailed=true;this.status={...this.status,controlState:'unavailable'};this.emit('status',this.status);}});
+ }
+ stop(){
+  if(this.stopping)return this.stopping;
+  this.closed=true;this.generation++;clearInterval(this.poll);this.poll=null;this.status={...this.status,state:'blocked',reason:'代理已停止'};
+  this.stopping=Promise.resolve(this.blocking).then(()=>this.manager.rpc(this.owner,this.id,'stop')).catch(()=>{});return this.stopping;
+ }
 }

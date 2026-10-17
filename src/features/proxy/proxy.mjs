@@ -547,8 +547,8 @@ export class ProxyGateway extends EventEmitter {
     this.update({countryCode:code,city,region,regionLanguage:'en',regionSource:new URL(url).hostname,regionCheckedAt:new Date().toISOString()});return code;
   }
   async verifySources(urls) {
-    const generation=this.coreGeneration;
-    const invalid=()=>this.closed || this.quarantined || generation!==this.coreGeneration || !this.coreAvailable;
+    const generation=this.coreGeneration,poolGeneration=this.poolGeneration;
+    const invalid=()=>this.closed || this.quarantined || generation!==this.coreGeneration || poolGeneration!==this.poolGeneration || !this.coreAvailable;
     const failures=[];
     for (const url of urls) {
       if (invalid()) break;
@@ -565,7 +565,7 @@ export class ProxyGateway extends EventEmitter {
           break;
         }
         if (this.onVerified) {
-          try { await this.onVerified(ip); } catch { this.quarantined = true; this.block('固定出口记录保存失败，已禁止转发'); break; }
+          try { await this.onVerified(ip); } catch { if(invalid())break;this.quarantined = true; this.block('固定出口记录保存失败，已禁止转发'); break; }
         }
         if (invalid()) break;
         this.update({ state: 'ready', verificationState:'verified', probeFailures:[], ip, checkedAt: new Date().toISOString(), recovering: false, reason: '固定出口核验成功；应用代理就绪', probeSource: new URL(url).hostname,verificationConnection:'fresh',latencyMs:Math.round(performance.now()-started) });
