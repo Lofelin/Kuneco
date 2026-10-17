@@ -62,23 +62,24 @@ export function connectionFailureReason(error) {
 class AdmissionQueue {
   constructor(limit,capacity,timeout){
     if(!Number.isInteger(limit)||limit<1||!Number.isInteger(capacity)||capacity<0||!Number.isFinite(timeout)||timeout<1)throw new Error('无效代理容量');
-    Object.assign(this,{limit,capacity,timeout});this.active=0;this.queue=[];
+    Object.assign(this,{limit,capacity,timeout});this.active=0;this.queue=[];this.admitted=0;this.rejected=0;this.expired=0;this.cancelled=0;
   }
   acquire(signal){
     signal?.throwIfAborted();
     if(this.active<this.limit)return Promise.resolve(this.grant());
-    if(this.queue.length>=this.capacity)return Promise.reject(proxyError('PROXY_BUSY'));
+    if(this.queue.length>=this.capacity){this.rejected++;return Promise.reject(proxyError('PROXY_BUSY'));}
     return new Promise((resolve,reject)=>{
       const item={resolve,reject,clean:()=>{clearTimeout(item.timer);signal?.removeEventListener('abort',cancel);}};
-      const cancel=()=>{const i=this.queue.indexOf(item);if(i<0)return;this.queue.splice(i,1);item.clean();reject(signal?.aborted?signal.reason:proxyError('PROXY_QUEUE_TIMEOUT'));};
+      const cancel=()=>{const i=this.queue.indexOf(item);if(i<0)return;this.queue.splice(i,1);item.clean();if(signal?.aborted)this.cancelled++;else this.expired++;reject(signal?.aborted?signal.reason:proxyError('PROXY_QUEUE_TIMEOUT'));};
       item.timer=setTimeout(cancel,this.timeout);this.queue.push(item);signal?.addEventListener('abort',cancel,{once:true});
     });
   }
-  grant(){this.active++;let released=false;return()=>{if(released)return;released=true;this.active--;const next=this.queue.shift();if(next){next.clean();next.resolve(this.grant());}};}
+  snapshot(){return {active:this.active,queued:this.queue.length,limit:this.limit,queueLimit:this.capacity,admittedTotal:this.admitted,rejectedTotal:this.rejected,queueTimeoutTotal:this.expired,queueCancelledTotal:this.cancelled};}
+  grant(){this.active++;this.admitted++;let released=false;return()=>{if(released)return;released=true;this.active--;const next=this.queue.shift();if(next){next.clean();next.resolve(this.grant());}};}
 }
 
 export class ProxyGateway extends EventEmitter {
-  constructor(config, { timeout = 15000, allowLocalTargets = false, ca = undefined, expectedIp = null, healthInterval = 60000, retryBase = 5000, retryMax = 300000, leaseMs = 180000, jitter = 0.2, onVerified = null, listenHost = '127.0.0.1', listenPort = 0, gostBinary = null, coreRetryBase = 1000, coreRetryMax = 30000, coreRetryLimit = 5, coreStableMs = 60000, forwardingLimit = 64, forwardingQueueLimit = 128, queueTimeout = 15000 } = {}) {
+  constructor(config, { timeout = 15000, allowLocalTargets = false, ca = undefined, expectedIp = null, healthInterval = 60000, retryBase = 5000, retryMax = 300000, leaseMs = 180000, jitter = 0.2, onVerified = null, listenHost = '127.0.0.1', listenPort = 0, gostBinary = null, coreRetryBase = 1000, coreRetryMax = 30000, coreRetryLimit = 5, coreStableMs = 60000, forwardingLimit = 64, forwardingQueueLimit = 128, queueTimeout = 15000, responseHeadersTimeout = 30000, responseBodyTimeout = 30000 } = {}) {
     super();
     this.config = validateProxy(config);
     if (expectedIp && !net.isIP(expectedIp)) throw new Error('固定出口 IP 无效');
@@ -89,6 +90,9 @@ export class ProxyGateway extends EventEmitter {
     this.coreGeneration=0;this.coreAvailable=!gostBinary;this.coreAttempts=0;
     this.monitoring = false; this.quarantined = false; this.failures = 0;
     this.timeout = timeout;
+    for(const value of [responseHeadersTimeout,responseBodyTimeout])if(!Number.isFinite(value)||value<=0)throw new Error('无效响应超时');
+    Object.assign(this,{responseHeadersTimeout,responseBodyTimeout});
+    this.forwardMetrics={http:0,connect:0,establishedTotal:0,clientCancelledTotal:0,abortedTotal:0,responseTimeouts:{headers:0,body:0}};
     this.ca = ca;
     this.allowLocalTargets = allowLocalTargets;
     this.sockets = new Set();
@@ -102,6 +106,16 @@ export class ProxyGateway extends EventEmitter {
     this.status = { requestPool:this.poolStats,state: 'blocked', ip: expectedIp, reason: '尚未验证出口', connections: 0 };
     this.closed = false;
   }
+  get status(){
+    if(!this._status)return this._status;
+    const count=group=>Object.values(group).reduce((n,list)=>n+list.length,0);
+    let active=0,idle=0;for(const agent of this.requestAgents.values()){active+=count(agent.sockets);idle+=count(agent.freeSockets);}
+    this._status.connections=this.forwardMetrics.http+this.forwardMetrics.connect;
+    this._status.capacity={forwarding:{...this.forwarding.snapshot(),...this.forwardMetrics,responseTimeouts:{...this.forwardMetrics.responseTimeouts}},probes:this.probeAdmission.snapshot(),verification:this.exitAdmission.snapshot()};
+    this._status.requestPool={...this.poolStats,activeSockets:active,idleSockets:idle};
+    return this._status;
+  }
+  set status(value){this._status=value;}
   update(patch) { this.status = { ...this.status, ...patch }; this.emit('status', this.status); }
   track(socket) {
     this.sockets.add(socket);
@@ -277,13 +291,13 @@ export class ProxyGateway extends EventEmitter {
   reportFailure(error, host, port) {
     if (this.closed || this.status.state !== 'ready') return;
     const isolated = !this.isPolicyFailure(error);
-    const allowed = ['PROXY_BUSY','PROXY_QUEUE_TIMEOUT','PROXY_TARGET_REFUSED', 'TARGET_BLOCKED', 'INVALID_TARGET', 'TARGET_STREAM_ERROR', 'PROXY_AUTH_REQUIRED', 'PROXY_REFUSED', 'PROXY_CLOSED', 'PROXY_TIMEOUT', 'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'EAI_AGAIN'];
+    const allowed = ['REQUEST_TIMEOUT','PROXY_BUSY','PROXY_QUEUE_TIMEOUT','PROXY_TARGET_REFUSED', 'TARGET_BLOCKED', 'INVALID_TARGET', 'TARGET_STREAM_ERROR', 'PROXY_AUTH_REQUIRED', 'PROXY_REFUSED', 'PROXY_CLOSED', 'PROXY_TIMEOUT', 'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'EAI_AGAIN'];
     const code = allowed.includes(error?.code) ? error.code : 'PROXY_CONNECTION_ERROR';
     // Only a canonical host and port are retained; never URL paths, credentials or raw errors.
     const target = /^[a-z\d.:[\]-]+$/i.test(host || '') ? `${host}:${port}` : '未知目标';
     const statusCode = Number.isInteger(error?.statusCode) ? error.statusCode : undefined;
     const reason = code === 'PROXY_TARGET_REFUSED' ? `上游代理拒绝目标隧道（HTTP ${statusCode}）；仅本次请求失败，不回退直连` : code === 'TARGET_STREAM_ERROR' ? '目标响应中断；仅本次请求失败，不回退直连' : isolated ? '本次代理请求失败，其他连接保留，不回退直连' : connectionFailureReason(error);
-    const failure = { target, code, statusCode, reason, scope: isolated ? 'request' : 'gateway', at: new Date().toISOString() };
+    const failure = { target, code, statusCode, ...(error?.phase?{phase:error.phase}:{}), reason, scope: isolated ? 'request' : 'gateway', at: new Date().toISOString() };
     this.status.lastFailure = failure;
     this.emit('requestFailure', failure);
     if (!isolated) {
@@ -293,12 +307,12 @@ export class ProxyGateway extends EventEmitter {
   }
   forwardingScope(client){
     const controller=new AbortController();this.forwardControllers.add(controller);
-    let release;
+    let release,kind,done=false;
     const cancel=()=>controller.abort(Object.assign(new Error('客户端已取消'),{code:'CLIENT_CANCELLED'}));
-    const finish=()=>{release?.();release=null;client.off('close',cancel);client.off('end',cancel);this.forwardControllers.delete(controller);};
-    client.once('close',cancel);client.once('end',cancel);controller.signal.addEventListener('abort',finish,{once:true});
+    const finish=()=>{if(done)return;done=true;release?.();release=null;if(kind)this.forwardMetrics[kind]--;client.off('close',cancel);client.off('end',cancel);this.forwardControllers.delete(controller);};
+    client.once('close',cancel);client.once('end',cancel);controller.signal.addEventListener('abort',()=>{if(!done){if(controller.signal.reason?.code==='CLIENT_CANCELLED')this.forwardMetrics.clientCancelledTotal++;else this.forwardMetrics.abortedTotal++;}finish();},{once:true});
     if(client.destroyed)cancel();
-    return {signal:controller.signal,finish,connected:()=>client.off('end',cancel),acquire:async()=>{const slot=await this.forwarding.acquire(controller.signal);if(controller.signal.aborted){slot();controller.signal.throwIfAborted();}release=slot;}};
+    return {signal:controller.signal,finish,connected:(type)=>{client.off('end',cancel);if(!done&&!kind){kind=type;this.forwardMetrics[kind]++;this.forwardMetrics.establishedTotal++;}},acquire:async()=>{const slot=await this.forwarding.acquire(controller.signal);if(controller.signal.aborted){slot();controller.signal.throwIfAborted();}release=slot;}};
   }
   async forwardConnect(req, client, head) {
     if (!this.authorized(req)) return client.end('HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm="workspace"\r\n\r\n');
@@ -312,9 +326,9 @@ export class ProxyGateway extends EventEmitter {
       this.assertOpen();scope.signal.throwIfAborted();
       client.write('HTTP/1.1 200 Connection Established\r\n\r\n');
       if(head.length)upstream.write(head);
-      scope.connected();client.pipe(upstream);upstream.pipe(client);upstream.resume();
+      scope.connected('connect');client.pipe(upstream);upstream.pipe(client);upstream.resume();
       upstream.once('close',()=>{scope.finish();client.destroy();});
-      this.update({connections:this.status.connections+1});
+      this.update({});
     }catch(error){
       upstream?.destroy();scope.finish();
       if(!client.destroyed)client.end(`HTTP/1.1 ${['PROXY_BUSY','PROXY_QUEUE_TIMEOUT'].includes(error.code)?'503 Service Unavailable':'502 Bad Gateway'}\r\nConnection: close\r\n\r\n`);
@@ -324,21 +338,28 @@ export class ProxyGateway extends EventEmitter {
   async forward(req,res){
     if(!this.authorized(req)){res.writeHead(407,{'Proxy-Authenticate':'Basic realm="workspace"'});return res.end();}
     let target;try{target=new URL(req.url);if(target.protocol!=='http:')throw new Error();}catch{res.writeHead(400);return res.end('代理仅接受 HTTP 请求或 HTTPS CONNECT');}
-    const scope=this.forwardingScope(res);let socket,upstream;
+    const scope=this.forwardingScope(res);res.once('finish',scope.finish);let socket,upstream,life;
     try{
       this.assertOpen();await scope.acquire();this.assertOpen();scope.signal.throwIfAborted();
       socket=await this.tunnel(target.hostname,Number(target.port || 80),{signal:scope.signal});
       this.assertOpen();scope.signal.throwIfAborted();
       const headers={...req.headers,host:target.host};delete headers['proxy-authorization'];delete headers['proxy-connection'];
       const agent=new http.Agent({keepAlive:false});agent.createConnection=()=>socket;
-      upstream=http.request(target,{method:req.method,headers,agent,signal:scope.signal},response=>{
+      life=new RequestLifecycle({signal:scope.signal,timeouts:{queue:0,connect:0,tunnel:0,tls:0,headers:this.responseHeadersTimeout,body:this.responseBodyTimeout,total:0}});
+      life.rejectOnAbort(error=>{if(error.code==='REQUEST_TIMEOUT'){
+        this.forwardMetrics.responseTimeouts[error.phase]++;scope.finish();
+        this.reportFailure(error,target.hostname,Number(target.port || 80));
+        if(!res.headersSent){res.writeHead(504);res.end('目标响应超时');}else res.destroy();
+      }});
+      upstream=http.request(target,{method:req.method,headers,agent,signal:life.signal},response=>{
         res.writeHead(response.statusCode,response.headers);response.pipe(res);
         response.once('error',()=>res.destroy());response.once('end',()=>socket.destroy());
       });
-      upstream.once('close',()=>{scope.finish();socket.destroy();agent.destroy();});
-      upstream.on('error',()=>{if(!res.destroyed){if(!res.headersSent)res.writeHead(502);res.end();if(!scope.signal.aborted)this.reportFailure(proxyError('TARGET_STREAM_ERROR'),target.hostname,Number(target.port || 80));}socket.destroy();});
+      life.bind(upstream,{customConnection:true});scope.connected('http');
+      upstream.once('close',()=>{life.finish();scope.finish();socket.destroy();agent.destroy();});
+      upstream.on('error',()=>{if(!res.destroyed){if(!res.headersSent)res.writeHead(502);res.end();if(!scope.signal.aborted&&!life.signal.aborted)this.reportFailure(proxyError('TARGET_STREAM_ERROR'),target.hostname,Number(target.port || 80));}socket.destroy();});
       req.pipe(upstream);socket.resume();
-    }catch(error){socket?.destroy();scope.finish();if(!res.destroyed){if(!res.headersSent)res.writeHead(['PROXY_BUSY','PROXY_QUEUE_TIMEOUT'].includes(error.code)?503:502);res.end('代理未就绪或连接繁忙');}if(!scope.signal.aborted)this.reportFailure(error,target.hostname,Number(target.port || 80));}
+    }catch(error){life?.finish();socket?.destroy();scope.finish();if(!res.destroyed){if(!res.headersSent)res.writeHead(['PROXY_BUSY','PROXY_QUEUE_TIMEOUT'].includes(error.code)?503:502);res.end('代理未就绪或连接繁忙');}if(!scope.signal.aborted)this.reportFailure(error,target.hostname,Number(target.port || 80));}
   }
   async checkServiceLatencies(targets = {claude:'https://www.anthropic.com/',openai:'https://openai.com/'}) {
     if(this.closed || this.serviceChecking)return;
