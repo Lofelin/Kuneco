@@ -1,0 +1,20 @@
+/* Sole owner of table geometry, borders, scrolling and row interaction. */
+app-table,.app-table{display:block;box-sizing:border-box;width:100%;max-width:100%;min-height:0;overflow:auto;padding:0;margin:0;border:1px solid var(--line);border-radius:var(--data-list-radius,9px);background:var(--surface);font-size:12px;line-height:1.6;text-align:left}
+.app-table table{width:100%;border-collapse:separate;border-spacing:0;table-layout:fixed;color:var(--muted);font:inherit;text-align:inherit;margin:0}
+.app-table th,.app-table td{box-sizing:border-box;padding:var(--data-list-row-padding,12px) 20px;text-align:left;vertical-align:middle;overflow-wrap:anywhere;white-space:normal;border:0;border-bottom:1px solid var(--line);font:inherit}
+.app-table th{position:sticky;top:0;z-index:2;padding-block:var(--data-list-heading-padding,12px);background:var(--data-list-header-bg,var(--soft));font-weight:400;color:var(--muted);white-space:nowrap}
+.app-table tbody tr:last-child>td{border-bottom:0}
+.app-table td{height:var(--data-list-row-height,48px)}
+.app-table td strong{display:flex;align-items:center;gap:10px;min-width:0;color:var(--ink);font-size:inherit;font-weight:600}
+.app-table td strong>wa-icon{width:20px;height:20px;flex:none}
+.app-table tr.app-table-clickable{cursor:pointer}
+.app-table tr.app-table-clickable:is(:hover,:focus-visible){background:var(--soft)}
+.app-table tr.app-table-clickable:focus-visible{outline:2px solid var(--field-focus-ring,color-mix(in srgb,var(--blue) 16%,transparent));outline-offset:-2px}
+.app-table .app-table-actions{padding-inline:4px;text-align:center}
+.app-table-actions>wa-dropdown{opacity:0;pointer-events:none}
+.app-table tr:is(:hover,:focus-within) .app-table-actions>wa-dropdown,.app-table-actions>wa-dropdown[open]{opacity:1;pointer-events:auto}
+.app-table .app-table-empty{text-align:center;color:var(--muted);height:90px}
+.app-table .runtime-models-cell{white-space:normal;overflow-wrap:anywhere}
+.markdown-body>app-table{margin:12px 0 16px}
+.markdown-body>app-table table{table-layout:auto}
+.markdown-body>app-table th,.markdown-body>app-table td{min-width:75px}
