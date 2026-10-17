@@ -40,8 +40,9 @@ export async function runCodexStream({executable,project,prompt,images=[],sessio
    return;
   }
   const p=event.params || {};if(p.threadId && threadId && p.threadId!==threadId)return;
-  if(['item/started','item/updated','item/completed'].includes(event.method) && p.item){const types={commandExecution:'command_execution',fileChange:'file_change',mcpToolCall:'mcp_tool_call',webSearch:'web_search',imageView:'image_view',imageGeneration:'image_generation',collabAgentToolCall:'collab_tool_call',agentMessage:'agent_message',userMessage:'user_message'};const item={...p.item,type:types[p.item.type] || p.item.type,aggregated_output:p.item.aggregatedOutput,exit_code:p.item.exitCode};const activity=codexActivity({type:({'item/started':'item.started','item/updated':'item.updated','item/completed':'item.completed'})[event.method],item});if(activity){activities.set(activity.id,activity);onEvent('activity',activity);}}
-  if(['item/commandExecution/outputDelta','item/fileChange/outputDelta'].includes(event.method)){const activity=activities.get(p.itemId);if(activity){const next={...activity,detail:(typeof activity.detail==='string'?activity.detail:'')+(p.delta || '')};activities.set(next.id,next);onEvent('activity',next);}}
+  if(['item/started','item/updated','item/completed'].includes(event.method) && p.item){const types={commandExecution:'command_execution',fileChange:'file_change',mcpToolCall:'mcp_tool_call',dynamicToolCall:'dynamic_tool_call',subAgentActivity:'subagent_activity',webSearch:'web_search',imageView:'image_view',imageGeneration:'image_generation',collabAgentToolCall:'collab_tool_call',agentMessage:'agent_message',userMessage:'user_message'};const item={...p.item,type:types[p.item.type] || p.item.type,aggregated_output:p.item.aggregatedOutput,exit_code:p.item.exitCode,sender_thread_id:p.item.senderThreadId,receiver_thread_ids:p.item.receiverThreadIds};const activity=codexActivity({type:({'item/started':'item.started','item/updated':'item.updated','item/completed':'item.completed'})[event.method],item});if(activity){activities.set(activity.id,activity);onEvent('activity',activity);}}
+  if(['item/commandExecution/outputDelta','item/fileChange/outputDelta'].includes(event.method)){const activity=activities.get(p.itemId);if(activity){const output=(typeof activity.output==='string'?activity.output:typeof activity.detail==='string'?activity.detail:'')+(p.delta || '');const next={...activity,output,detail:output};activities.set(next.id,next);onEvent('activity',next);}}
+  if(event.method==='item/mcpToolCall/progress' && activities.has(p.itemId)){const next={...activities.get(p.itemId),progress:p.message};activities.set(p.itemId,next);onEvent('activity',next);}
   if(event.method==='item/reasoning/summaryTextDelta' && p.delta)onEvent('process',{text:p.delta});
   if(event.method==='item/agentMessage/delta' && typeof p.delta==='string'){
    const key=p.itemId || 'message';texts.set(key,(texts.get(key)||'')+p.delta);onEvent('text',p.delta);
@@ -50,7 +51,7 @@ export async function runCodexStream({executable,project,prompt,images=[],sessio
    if(text.startsWith(sent) && text.length>sent.length)onEvent('text',text.slice(sent.length));
    texts.set(p.item.id,text);onEvent('text','\n\n');
   }
-  else if(event.method==='thread/tokenUsage/updated'){const usage=p.tokenUsage?.last || p.tokenUsage?.total;if(usage)onEvent('usage',{input_tokens:usage.inputTokens,output_tokens:usage.outputTokens,cached_input_tokens:usage.cachedInputTokens});}
+  else if(event.method==='thread/tokenUsage/updated'){const usage=p.tokenUsage?.last || p.tokenUsage?.total;if(usage)onEvent('usage',{input_tokens:usage.inputTokens,output_tokens:usage.outputTokens,cached_input_tokens:usage.cachedInputTokens,context:p.tokenUsage});}
   else if(event.method==='turn/completed'){if(p.turn?.status==='completed')finish();else fail(p.turn?.error?.message || 'Codex 回复未完成。');}
   else if(event.method==='error' && !p.willRetry)fail(p.error?.message);
  });

@@ -14,7 +14,7 @@ test('streams before completion, resumes thread, deduplicates final message and 
   if(m.method==='turn/start'){
    emit('item/started',{threadId:'thread1',item:{type:'userMessage'}});
    emit('item/started',{threadId:'thread1',item:{type:'reasoning'}});
-   emit('item/started',{threadId:'thread1',item:{type:'webSearch'}});
+   emit('item/started',{threadId:'thread1',item:{id:'search-1',type:'webSearch'}});
    emit('item/agentMessage/delta',{threadId:'thread1',itemId:'a',delta:'hello '});assert.deepEqual(events.at(-1),['text','hello ']);
    emit('item/agentMessage/delta',{threadId:'thread1',itemId:'a',delta:'world'});
    emit('item/completed',{threadId:'thread1',item:{id:'a',type:'agentMessage',text:'hello world'}});
@@ -36,7 +36,7 @@ test('Shell output is delivered while the activity is running before the complet
  const child=new EventEmitter();child.stdout=new PassThrough();child.kill=()=>{};const events=[];
  const notify=(method,params)=>child.stdout.write(JSON.stringify({method,params:{threadId:'t',...params}})+'\n');
  child.stdin=new Writable({write(data,_encoding,cb){const m=JSON.parse(data.toString());if(m.id)queueMicrotask(()=>{child.stdout.write(JSON.stringify({id:m.id,result:m.method==='thread/start'?{thread:{id:'t'}}:m.method==='turn/start'?{turn:{id:'turn'}}:{}})+'\n');if(m.method==='turn/start'){
- notify('item/started',{item:{id:'cmd',type:'commandExecution',command:'echo 中文; sleep 8',status:'inProgress'}});notify('item/commandExecution/outputDelta',{itemId:'cmd',delta:'中文\n'});assert.equal(events.at(-1)[1].status,'in_progress');assert.equal(events.at(-1)[1].detail,'中文\n');notify('item/completed',{item:{id:'cmd',type:'commandExecution',command:'echo 中文; sleep 8',status:'completed',aggregatedOutput:'中文\n',exitCode:0}});notify('turn/completed',{turn:{status:'completed'}});
+ notify('item/started',{item:{id:'cmd',type:'commandExecution',command:'echo 中文; sleep 8',status:'inProgress'}});notify('item/commandExecution/outputDelta',{itemId:'cmd',delta:'中文\n'});assert.equal(events.at(-1)[1].status,'in_progress');assert.equal(events.at(-1)[1].detail,'中文\n');assert.equal(events.at(-1)[1].output,'中文\n');notify('item/completed',{item:{id:'cmd',type:'commandExecution',command:'echo 中文; sleep 8',status:'completed',aggregatedOutput:'中文\n',exitCode:0}});notify('turn/completed',{turn:{status:'completed'}});
  }});cb();}});
  await runCodexStream({executable:'fixture',project:'/workspace',prompt:'test',model:'fixture',gateway:{status:{mode:'direct'}},spawnProcess:()=>child,onEvent:(...e)=>events.push(e)});assert.deepEqual(events.filter(e=>e[0]==='activity').map(e=>e[1].status),['in_progress','in_progress','completed']);
 });

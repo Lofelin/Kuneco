@@ -1,4 +1,12 @@
+import {sandboxHTML,artifactCSP} from '../features/chat/artifact-sandbox.mjs';
+import {usageDetails,recordArtifacts,insightView} from '../features/chat/chat-insights.mjs';
+import {readArtifact} from '../features/runtimes/artifact-read.mjs';
+import {deepSeekMaintenance,compactCodex} from '../features/runtimes/compact-runner.mjs';
+import {readTextSnapshot} from '../features/runtimes/file-snapshot.mjs';
+import {createFileChangeHooks} from '../features/runtimes/file-change-hooks.mjs';
 import {readContainerDisplay,readNetworkDisplay} from '../features/environments/container-display.mjs';
+import {listChatContext,reconcileClaudeSkills} from '../features/runtimes/context-catalog.mjs';
+import {createClaudeActivityAdapter} from '../features/runtimes/claude-activity.mjs';
 import {ChatRuns} from '../features/chat/chat-runs.mjs';
 import {rewindPrefix,replayPrompt,deepSeekPrefix} from '../features/chat/message-rewind.mjs';
 import {connectEnvironmentProxy,restoreSelectedEnvironment} from '../features/environments/environment-proxy.mjs';
@@ -24,7 +32,7 @@ import {totalUsageTokens} from '../features/chat/token-usage.mjs';
 import {hostname} from 'node:os';
 import {DockerEnvironments,resourcePrefix} from '../features/environments/docker-environments.mjs';
 import {validateSessionOptions} from '../features/chat/session-options.mjs';
-import { app, Menu, Notification, BrowserWindow, WebContentsView, ipcMain, safeStorage, clipboard, powerMonitor, session, shell, nativeImage } from 'electron';
+import { app, protocol, Menu, Notification, BrowserWindow, WebContentsView, ipcMain, safeStorage, clipboard, powerMonitor, session, shell, nativeImage } from 'electron';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { readFile, writeFile, mkdir, access, rm, stat, rename, readdir } from 'node:fs/promises';
@@ -92,6 +100,9 @@ function syncAccountWindow(){
 const probeUrl = fixtureMode ? process.env.WORKSPACE_TEST_PROBE_URL : undefined;
 const browserHomeUrl = fixtureMode ? process.env.WORKSPACE_TEST_HOME_URL || 'https://www.google.com/?hl=en' : 'https://www.google.com/?hl=en';
 if (fixtureMode && process.env.WORKSPACE_TEST_DATA_DIR) app.setPath('userData', process.env.WORKSPACE_TEST_DATA_DIR);
+protocol.registerSchemesAsPrivileged([{scheme:'kuneco-artifact',privileges:{standard:true,secure:true}}]);
+const artifactPages=new Map();
+function serveArtifact(result,owner,environment){if(result.kind!=='html')return result;const id=randomUUID();artifactPages.set(id,{owner,environment,html:sandboxHTML(result.text)});while(artifactPages.size>64)artifactPages.delete(artifactPages.keys().next().value);return {...result,url:'kuneco-artifact://preview/'+id};}
 const exec = promisify(execFile);
 // Keep the profile path stable; only the Keychain identity is migrated.
 const legacyProfileName = '定途工作空间';
@@ -493,6 +504,7 @@ async function createWindow() {
   window.webContents.on('before-input-event',(event,input)=>{const key=input.key.toLowerCase();if(input.type==='keyDown' && (key==='f5' || ((input.control || input.meta) && ['r','e'].includes(key))))event.preventDefault();});
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', event => event.preventDefault());
+  window.webContents.on('will-frame-navigate', event => {if(!event.isMainFrame&&!event.url.startsWith('kuneco-artifact://preview/'))event.preventDefault();});
   createBrowserTab();
   window.on('closed', () => { browserVisible = false; void stopGateway(); window = null; for (const tab of browserTabs.values()) { if (tab.wc && !tab.wc.isDestroyed()) tab.wc.close(); } browserTabs.clear(); });
   await window.loadFile(path.join(here, 'index.html'));
@@ -982,6 +994,62 @@ ipcMain.handle('workspace:newSession',guarded(async(options)=>{
  const executable=item.engine==='cc'?await findClaude():await findExecutable('codex');
  return {...item,...(item.id==='codex'?{models:await currentCodexModels().catch(()=>[])}:{}),auth:activeContainerId?await containerAuth(item.engine):await detectAIAuth({engine:item.engine,executable,gateway})};
 }));
+function insightSession(value){
+ const item=aiSessions.get(value?.chatId);
+ if(!item||value.owner!==account?.user?.id||value.environmentId!==activeContainerId||(item.environmentId||null)!==activeContainerId||accountChanging||containerOperation)throw new Error('对话账号或环境已变化');
+ return item;
+}
+ipcMain.handle('workspace:chatInsights',guarded(async value=>{const item=insightSession(value);return {...insightView(item,chatViews),running:runs.has(item.id)};}));
+ipcMain.handle('workspace:chatArtifact',guarded(async value=>{
+ const item=insightSession(value),owner=dockerOwner(),environment=activeContainerId;
+ const artifact=insightView(item,chatViews).artifacts.find(a=>a.id===value.id);if(!artifact)throw new Error('没有此真实产物记录');
+ if(typeof artifact.after==='string'&&value.version!==false)return serveArtifact({kind:/\.html?$/i.test(artifact.path)?'html':/\.md$/i.test(artifact.path)?'markdown':'text',text:artifact.after,snapshot:true},owner,environment);
+ let result;if(environment){const source=await readFile(new URL('../features/runtimes/artifact-read.mjs',import.meta.url),'utf8');result=JSON.parse(await dockerEnvs.exec(owner,environment,['node','--input-type=module','-e',source+"\nconsole.log(JSON.stringify(await readArtifact(process.argv[1])));",artifact.path],{timeout:10000,maxBuffer:4000000}));}else result=await readArtifact(artifact.path);
+ insightSession(value);return serveArtifact(result,owner,environment);
+}));
+ipcMain.handle('workspace:chatCompact',guarded(async value=>{
+ const item=insightSession(value);if(item.contextPrefix)throw new Error('当前对话尚有待恢复的上下文，请先完成回复再压缩');if(item.engine==='codex'&&!item.codexSessionId)throw new Error('请先完成一轮 Codex 对话');if(!['deepseek','codex'].includes(item.engine))throw new Error('当前运行时尚未接入压缩能力');
+ if(!['compact','restore'].includes(value.action))throw new Error('未知上下文操作');
+ const owner=dockerOwner(),environment=activeContainerId,generation=chatGeneration;
+ const controller=runs.begin(item.id,{engine:item.engine,requestId:randomUUID(),networkMode:chatRequestRoute(item,gateway?.status)});
+ const proxy=controller.networkMode==='proxy',networkOwner=gateway;let timeout;
+ const valid=()=>!controller.signal.aborted&&generation===chatGeneration&&owner===dockerOwner()&&environment===activeContainerId&&(!proxy||gateway===networkOwner&&gateway?.status.state==='ready');
+ try{
+  await requireEnvironment();requireActiveEnvironment();if(!valid())throw new Error('环境或代理不可用');
+  if(value.action==='restore'&&item.engine!=='deepseek')throw new Error('运行时未提供恢复接口');
+  if(value.action==='compact'){const auth=environment?await containerAuth(item.engine):await detectAIAuth({engine:item.engine,executable:await findExecutable('codex'),gateway});if(auth.state!=='signed-in')throw new Error('当前环境运行时未登录');}
+  if(item.engine==='deepseek'){if(!environment)throw new Error('DeepSeek 需要当前容器环境');await dockerEnvs.syncDeepSeekSource(owner,environment);}
+  const base=environment?await (proxy?dockerEnvs.spawner(owner,environment):dockerEnvs.directChatSpawner(owner,environment)):(proxy?createRestrictedCCSpawner({port:gateway.port,canStart:valid}):createDirectChatSpawner(valid));
+  const launch=options=>{if(!valid())throw new Error('环境或代理已变化');return base({...options,signal:controller.signal,...(!environment?{env:chatRuntimeEnvironment(proxy?proxyEnvironment(process.env,gateway.url):directChatEnvironment(process.env))}:{})});};
+  timeout=setTimeout(()=>controller.abort(),180000);
+  const record=item.engine==='deepseek'?await deepSeekMaintenance({spawnProcess:launch,command:value.action,sessionId:item.deepseekSessionId||item.id,model:item.model,networkMode:proxy?'proxy':'direct',record:item.compression}):await compactCodex({spawnProcess:launch,executable:environment?'codex':await findExecutable('codex'),cwd:item.project||(environment?await dockerEnvs.workingDirectory(owner,environment):process.cwd()),threadId:item.codexSessionId,model:item.model,signal:controller.signal});
+  if(!valid())throw new Error('操作结束时环境已变化，请回到原环境确认状态');
+  item.compression=record;if(value.action==='compact'&&Number.isSafeInteger(record.usage?.total_tokens)){(item.tokenUsage||=[]).push({at:record.at,totalTokens:record.usage.total_tokens,purpose:'compaction',details:usageDetails('deepseek',record.usage)});}await persistAISessions();return {...insightView(item,chatViews),running:false};
+ }catch(error){if(controller.signal.aborted)throw new Error('已停止上下文操作；未自动重试');throw error;}finally{clearTimeout(timeout);runs.finish(controller);}
+}));
+ipcMain.handle('workspace:chatContext',guarded(async(value={})=>{
+ const owner=dockerOwner(),environmentId=activeContainerId,item=aiSessions.get(value.chatId);
+ if(!item||(item.environmentId||null)!==environmentId||accountChanging||containerOperation)throw new Error('对话环境已变化，请重新打开列表');
+ if(!['skills','files'].includes(value.kind)||typeof value.query!=='string'||value.query.length>200)throw new Error('查询无效');
+ const registry=await runtimeView(registeredRuntimes,{refresh:false});const runtime=registry.runtimes?.find(r=>r.id===item.engine);if(!runtime)throw new Error('当前环境未安装此运行时，请先检测运行时');
+ const project=item.project;const cwd=project||(environmentId?await dockerEnvs.workingDirectory(owner,environmentId):path.join(app.getPath('userData'),'chat-workspaces',item.id));
+ const request={cwd,engine:item.engine,kind:value.kind,query:item.engine==='cc'&&value.kind==='skills'?'':value.query,...(!environmentId&&item.engine==='codex'?{executable:await findExecutable('codex')}:{})};let result;
+ if(environmentId){const source=await readFile(new URL('../features/runtimes/context-catalog.mjs',import.meta.url),'utf8');result=JSON.parse(await dockerEnvs.exec(owner,environmentId,['node','--input-type=module','-e',source+"\nlet input='';for await(const chunk of process.stdin)input+=chunk;console.log(JSON.stringify(await listChatContext(JSON.parse(input))));"],{input:JSON.stringify(request),timeout:15000,maxBuffer:2000000}));}
+ else {await mkdir(cwd,{recursive:true});result=await listChatContext(request);}
+ if(item.engine==='cc'&&value.kind==='skills'){
+  const controller=new AbortController();let execution,timer;
+  try{
+   const launch=environmentId?await dockerEnvs.spawner(owner,environmentId):undefined;
+   execution=query({prompt:(async function*(){await new Promise(resolve=>controller.signal.addEventListener('abort',resolve,{once:true}));})(),options:{cwd,pathToClaudeCodeExecutable:environmentId?'claude':await findClaude(),spawnClaudeCodeProcess:launch,abortController:controller,settingSources:['user','project','local']}});
+   const commands=await Promise.race([execution.supportedCommands(),new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('Claude 技能能力检测超时')),10000);})]);
+   result.items=reconcileClaudeSkills(result.items,commands);
+  }catch(error){result.items=result.items.map(item=>({...item,enabled:false,reason:'运行时能力未确认'}));result.warnings.push('Claude 技能能力检测失败：'+error.message);}
+  finally{clearTimeout(timer);controller.abort();execution?.close();}
+  result.items=result.items.filter(item=>(item.name+' '+item.description).toLowerCase().includes(value.query.toLowerCase()));
+ }
+ if(owner!==dockerOwner()||environmentId!==activeContainerId||project!==(aiSessions.get(value.chatId)?.project))throw new Error('查询期间环境或项目已变化');
+ return {...result,engine:item.engine,environmentId,chatId:item.id};
+}));
 ipcMain.handle('workspace:selectSession',guarded(async(id,options={})=>{const generation=chatGeneration;if(accountChanging || containerOperation || chatNetworkChanging)throw new Error('正在处理环境或连接方式切换，请稍候');const item=aiSessions.get(id);if(!item || (item.environmentId || null)!==activeContainerId)throw new Error('会话不存在');storeCurrentSession();if(!options.deferAuth)await repairSessionModel(item);if(accountChanging || generation!==chatGeneration || aiSessions.get(id)!==item)throw new Error('对话账号或环境已变化');activateAISession(item,{viewed:options.viewed ?? !options.deferAuth});if(options.deferAuth)return {...item,auth:{state:'checking'}};const executable=item.engine==='cc'?await findClaude():await findExecutable('codex');return {...item,...(item.id==='codex'?{models:await currentCodexModels().catch(()=>[])}:{}),auth:activeContainerId?await containerAuth(item.engine):await detectAIAuth({engine:item.engine,executable,gateway})};}));
 ipcMain.handle('workspace:readChatImage',guarded(async value=>{
  const owner=account?.user?.id || null,environment=activeContainerId;
@@ -1013,7 +1081,7 @@ ipcMain.handle('workspace:cc', guarded(async (prompt,rewind,chatId=activeAISessi
   if(!preparedChat || (preparedChat.environmentId || null)!==environmentId)throw new Error('对话不存在');
   const engine=preparedChat.engine;
   const controller=runs.begin(chatId,{engine,requestId,networkMode:chatRequestRoute(preparedChat,gateway?.status)});
-  const emitChat=(type,data)=>emit(type,data,{chatId,requestId,owner:requestOwner,environmentId});
+  const emitChat=(type,data)=>{if(type==='ccActivity')recordArtifacts(preparedChat,data);emit(type,data,{chatId,requestId,owner:requestOwner,environmentId});};
   const valid=()=>!controller.signal.aborted && generation===chatGeneration && requestOwner===(account?.user?.id || null) && environmentId===activeContainerId && aiSessions.get(chatId)===preparedChat;
   try {
   if(['deepseek','codex'].includes(engine)){prompt=engine==='codex'?normalizeCodexInput(prompt):normalizeDeepSeekInput(prompt);for(const image of prompt.images){if(!image.dataURL)continue;const decoded=nativeImage.createFromDataURL(image.dataURL),size=decoded.getSize();const limit=prompt.images.length>=15?4096:8192;if(decoded.isEmpty() || size.width>limit || size.height>limit)throw new Error('图片无效或尺寸超过 '+limit+' 像素');}}
@@ -1055,53 +1123,60 @@ ipcMain.handle('workspace:cc', guarded(async (prompt,rewind,chatId=activeAISessi
   const launch=containerSpawn?options=>{if(!canContinue())throw new Error('对话网络不可用');return containerSpawn(options);}:directSpawn;
   const currentChat=preparedChat;if(currentChat){currentChat.updatedAt=new Date().toISOString();persistAISessions();}
   const usageOwner=chatOwner;
-  let latestUsage=null;
+  let latestUsage=null,latestUsageDetails=null;
   emitChat('ccStart', {updatedAt:currentChat?.updatedAt,model:currentChat?.model});
   void (async () => {
     try {
       if(engine==='deepseek'){
         if(!containerSpawn)throw new Error('DeepSeek 仅在当前容器环境可用');
-        const usage=await runDeepSeek({networkMode:requiresProxy?'proxy':'direct',spawnProcess:launch,sessionId:currentChat.deepseekSessionId || chatId,history:currentChat.contextPrefix?deepSeekPrefix(currentChat.contextPrefix):undefined,model:model,prompt,signal:controller.signal,onText:text=>emitChat('ccText',text),onReasoning:text=>emitChat('ccReasoning',text),onFinish:reason=>{if(reason==='length')emitChat('ccNotice','回复达到长度限制，可继续追问。');}});latestUsage=Number.isSafeInteger(usage?.total_tokens)?usage.total_tokens:null;
+        const usage=await runDeepSeek({project:workingDirectory,onActivity:activity=>emitChat('ccActivity',activity),networkMode:requiresProxy?'proxy':'direct',spawnProcess:launch,sessionId:currentChat.deepseekSessionId || chatId,history:currentChat.contextPrefix?deepSeekPrefix(currentChat.contextPrefix):undefined,model:model,prompt,signal:controller.signal,onText:text=>emitChat('ccText',text),onReasoning:text=>emitChat('ccReasoning',text),onFinish:reason=>{if(reason==='length')emitChat('ccNotice','回复达到长度限制，可继续追问。');}});latestUsage=Number.isSafeInteger(usage?.total_tokens)?usage.total_tokens:null;latestUsageDetails=usageDetails('deepseek',usage);
         delete currentChat.contextPrefix;emitChat('ccResult',{error:false});return;
       }
       if(engine==='codex') {
-        await runCodex({useLocalModel:!activeContainerId,spawnProcess:launch || undefined,executable:activeContainerId?'codex':codexPath,project:workingDirectory,model:model,images:[...(!nativeCodexId?currentChat.contextPrefix?.flatMap(m=>m.images || []) || []:[]),...prompt.images],prompt:!nativeCodexId?replayPrompt(currentChat.contextPrefix,prompt.text):prompt.text,sessionId:nativeCodexId,gateway:owner,signal:controller.signal,canStart:canContinue,onEvent:(type,value)=>{if(type==='session'){currentChat.codexSessionId=value;if(activeAISessionId===currentChat.id)codexSessionId=value;}else if(type==='usage')latestUsage=totalUsageTokens('codex',value);else emitChat({text:'ccText',tool:'ccTool',process:'ccProcess',activity:'ccActivity',error:'ccError'}[type],type==='tool'?{name:value}:value);}});
+        await runCodex({useLocalModel:!activeContainerId,spawnProcess:launch || undefined,executable:activeContainerId?'codex':codexPath,project:workingDirectory,model:model,images:[...(!nativeCodexId?currentChat.contextPrefix?.flatMap(m=>m.images || []) || []:[]),...prompt.images],prompt:!nativeCodexId?replayPrompt(currentChat.contextPrefix,prompt.text):prompt.text,sessionId:nativeCodexId,gateway:owner,signal:controller.signal,canStart:canContinue,onEvent:(type,value)=>{if(type==='session'){currentChat.codexSessionId=value;if(activeAISessionId===currentChat.id)codexSessionId=value;}else if(type==='usage'){latestUsage=totalUsageTokens('codex',value);latestUsageDetails=usageDetails('codex',value);}else emitChat({text:'ccText',tool:'ccTool',process:'ccProcess',activity:'ccActivity',error:'ccError'}[type],type==='tool'?{name:value}:value);}});
         delete currentChat.contextPrefix;emitChat('ccResult',{sessionId:currentChat.codexSessionId,error:false});return;
       }
+      const snapshotOwner=dockerOwner(),snapshotEnvironment=activeContainerId;
+      const snapshotSource=snapshotEnvironment?await readFile(path.join(here,'features/runtimes/file-snapshot.mjs'),'utf8'):null;
+      const fileHooks=createFileChangeHooks({cwd:workingDirectory,onActivity:activity=>emitChat('ccActivity',activity),snapshot:async file=>{
+       if(snapshotOwner!==dockerOwner()||snapshotEnvironment!==activeContainerId)return {available:false,reason:'环境已变化'};
+       return snapshotEnvironment?JSON.parse(await dockerEnvs.exec(snapshotOwner,snapshotEnvironment,['node','--input-type=module','-e',snapshotSource+"\nconsole.log(JSON.stringify(await readTextSnapshot(process.argv[1])));",file],{timeout:5000,maxBuffer:300000})):readTextSnapshot(file);
+      }});
       const execution = query({ prompt: (async function* () { yield { type: 'user', message: { role: 'user', content: !nativeSessionId?replayPrompt(currentChat.contextPrefix,prompt):prompt }, parent_tool_use_id: null, session_id: '' }; })(), options: {
         cwd: workingDirectory, pathToClaudeCodeExecutable: activeContainerId?'claude':claudePath, model:model || undefined,
         env: chatRuntimeEnvironment(requiresProxy?proxyEnvironment(process.env, owner.url):directChatEnvironment(process.env)), settingSources: ['user','project','local'],
         spawnClaudeCodeProcess: launch || createRestrictedCCSpawner({port:owner.port,canStart:()=>environmentStatus.allowed && gateway === owner && owner.status.state === 'ready' && !controller.signal.aborted}),
-        permissionMode: 'bypassPermissions',allowDangerouslySkipPermissions:true, abortController: controller, includePartialMessages: true,
+        permissionMode: 'bypassPermissions',allowDangerouslySkipPermissions:true, abortController: controller, includePartialMessages: true,hooks:fileHooks,
         resume: nativeSessionId,
       } });
-      let streamed = false;
+      let streamed = false;const activityEvents=createClaudeActivityAdapter();
       for await (const message of execution) {
+        for(const activity of activityEvents(message))emitChat('ccActivity',activity);
         if (message.session_id){currentChat.sessionId=message.session_id;if(activeAISessionId===currentChat.id)sessionId=message.session_id;}
+        if(message.parent_tool_use_id)continue;
         if (message.type === 'stream_event' && message.event?.type === 'content_block_delta' && message.event.delta?.type === 'text_delta') { streamed = true; emitChat('ccText', message.event.delta.text); }
         else if (message.type === 'assistant') {
           if (!streamed) for (const content of message.message.content || []) if (content.type === 'text') emitChat('ccText', content.text);
-          for (const content of message.message.content || []) if (content.type === 'tool_use') emitChat('ccActivity', {id:content.id,type:content.name,icon:content.name==='Bash'?'terminal':content.name==='Read'?'book-open':['Edit','Write'].includes(content.name)?'pencil':'activity',title:content.name,status:'in_progress',detail:content.input});
           streamed = false;
-        } else if(message.type==='user'){for(const content of message.message?.content || [])if(content.type==='tool_result')emitChat('ccActivity',{id:content.tool_use_id,status:content.is_error?'failed':'completed',detail:content.content});
+
         } else if (message.type === 'result') {
-          latestUsage=totalUsageTokens('cc',message);if(!message.is_error)delete currentChat.contextPrefix;
+          latestUsage=totalUsageTokens('cc',message);latestUsageDetails=usageDetails('cc',message);if(!message.is_error)delete currentChat.contextPrefix;
           if (message.is_error) emitChat('ccError', 'CC 返回错误，请核对官方登录、代理连通性及额度。');
           emitChat('ccResult', { sessionId:currentChat.sessionId, turns: message.num_turns, error: message.is_error });
         }
       }
     } catch (error) {
-      emitChat('ccError', controller.signal.aborted ? '请求已取消；未自动重放操作。' : (['codex','deepseek'].includes(engine) ? error.message : 'CC 调用失败，请检查本机登录、CLI兼容性及代理；不会转为直连。'));
+      emitChat('ccError', {status:controller.signal.aborted?'stopped':'failed',message:controller.signal.aborted ? '请求已取消；未自动重放操作。' : (['codex','deepseek'].includes(engine) ? error.message : 'CC 调用失败，请检查本机登录、CLI兼容性及代理；不会转为直连。')});
     } finally {
       if(currentChat.contextPrefix && engine!=='deepseek'){currentChat.sessionId=undefined;currentChat.codexSessionId=undefined;if(activeAISessionId===currentChat.id){sessionId=undefined;codexSessionId=undefined;}}
       if(latestUsage!==null && currentChat && chatOwner===usageOwner && aiSessions.get(currentChat.id)===currentChat){
-        const entry={at:new Date().toISOString(),totalTokens:latestUsage};
+        const entry={at:new Date().toISOString(),totalTokens:latestUsage,details:latestUsageDetails};
         (currentChat.tokenUsage ||= []).push(entry);
         emitChat('ccUsage',{sessionId:currentChat.id,entry});
       }
       persistAISessions();
       runs.finish(controller);
-      emitChat('ccEnd', {});
+      emitChat('ccEnd', {status:controller.signal.aborted?'stopped':'completed'});
     }
   })();
   return {chatId,requestId};
@@ -1115,6 +1190,7 @@ ipcMain.handle('workspace:claudeInfo', guarded(async () => {
   catch { return { available: true, version: '版本检测失败' }; }
 }));
 app.whenReady().then(async () => {
+ protocol.handle('kuneco-artifact',request=>{const u=new URL(request.url),entry=artifactPages.get(u.pathname.slice(1));if(u.hostname!=='preview'||!entry||entry.owner!==dockerOwner()||entry.environment!==activeContainerId)return new Response('产物所属环境已变化',{status:403});return new Response(entry.html,{headers:{'content-type':'text/html; charset=utf-8','Content-Security-Policy':artifactCSP,'Cache-Control':'no-store'}});});
   try{verifyKeychainMigration({directory:app.getPath('userData'),storage:safeStorage,migration:keychainMigration});}
   catch(error){console.error(error.message);app.exit(1);return;}
   app.setName('Kuneco');

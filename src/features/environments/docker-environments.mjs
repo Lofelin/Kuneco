@@ -138,9 +138,13 @@ export class DockerEnvironments {
  }
  async syncDeepSeekSource(owner,id){
   const runtime=await readFile(path.join(this.sourceRoot,'src/features/runtimes/deepseek-runtime.mjs'),'utf8');
+  const compaction=await readFile(path.join(this.sourceRoot,'src/features/runtimes/history-compaction.mjs'),'utf8');
+  const snapshot=await readFile(path.join(this.sourceRoot,'src/features/runtimes/file-snapshot.mjs'),'utf8');
+  const catalog=await readFile(path.join(this.sourceRoot,'src/features/runtimes/context-catalog.mjs'),'utf8');
+  const tools=await readFile(path.join(this.sourceRoot,'src/features/runtimes/deepseek-tools.mjs'),'utf8');
   const lifecycle=await readFile(path.join(this.sourceRoot,'src/features/proxy/request-lifecycle.mjs'),'utf8');
   const admission=await readFile(path.join(this.sourceRoot,'src/features/proxy/request-admission.mjs'),'utf8');
-  await this.exec(owner,id,['node','-e',"const fs=require('fs'),base='/home/node/.local/lib';let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>{const files=JSON.parse(s);for(const [file,value] of Object.entries(files)){const p=base+'/'+file;fs.mkdirSync(require('path').dirname(p),{recursive:true});const tmp=p+'.'+process.pid+'.tmp';fs.writeFileSync(tmp,value,{mode:0o600});fs.renameSync(tmp,p);}});"],{input:JSON.stringify({'dingtu/deepseek.mjs':runtime,'proxy/request-lifecycle.mjs':lifecycle,'proxy/request-admission.mjs':admission})});
+  await this.exec(owner,id,['node','-e',"const fs=require('fs'),base='/home/node/.local/lib';let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>{const files=JSON.parse(s);for(const [file,value] of Object.entries(files)){const p=base+'/'+file;fs.mkdirSync(require('path').dirname(p),{recursive:true});const tmp=p+'.'+process.pid+'.tmp';fs.writeFileSync(tmp,value,{mode:0o600});fs.renameSync(tmp,p);}});"],{input:JSON.stringify({'dingtu/deepseek.mjs':runtime,'dingtu/deepseek-tools.mjs':tools,'dingtu/context-catalog.mjs':catalog,'dingtu/file-snapshot.mjs':snapshot,'dingtu/history-compaction.mjs':compaction,'proxy/request-lifecycle.mjs':lifecycle,'proxy/request-admission.mjs':admission})});
  }
  async detectCommands(execute){const runtimes=[];for(const [id,command] of CLI_RUNTIMES.map(id=>[id,RUNTIME_CATALOG[id].command]))try{const version=await execute([command,'--version']);runtimes.push({id,name:RUNTIME_CATALOG[id].name,version});}catch{}try{const item=JSON.parse(await execute(['node','/home/node/.local/lib/dingtu/deepseek.mjs','info']));if(item.id==='deepseek')runtimes.push(item);}catch{}return {runtimes,checkedAt:new Date().toISOString()};}
  async workingDirectory(owner,id){const {item}=await this.get(owner,id);return item.external?.workingDirectory || '/workspace';}

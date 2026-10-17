@@ -1,11 +1,14 @@
 import test from 'node:test';import assert from 'node:assert/strict';import vm from 'node:vm';import {readFile} from 'node:fs/promises';import {JSDOM} from 'jsdom';
+import {mergeRuntimeActivity} from '../../../src/features/runtimes/activity-state.mjs';
+import {reasoningView,finishReasoning} from '../../../src/features/chat/reasoning-view.mjs';
 const source=await readFile(new URL('../../../src/app/renderer.js',import.meta.url),'utf8');
-function harness(){
+function harness(realReasoning=false){
  const {window}=new JSDOM('<div id="chat"></div><input id="prompt"><button id="send"></button>');const {document}=window;
+ if(realReasoning)globalThis.document=document;
  let context;const $=id=>id==='chat' && context?.chatRenderContainer?context.chatRenderContainer:document.getElementById(id)||Object.assign(document.body.appendChild(document.createElement('div')),{id});
  const chatSessions=['a','b','c'].map(id=>({id,engine:'deepseek',model:id,title:id,nodes:[]}));const calls=new Map();let saved=[];
- const noop=()=>{};context=vm.createContext({Date,crypto,document,$,chatRenderContainer:null,chatSessions,chatRuns:new Map(),activeChatId:'a',selectedEngine:'deepseek',selectedCodexModel:'a',busy:false,reply:null,chatOwnerID:'owner',dockerEnvironmentState:{activeId:'env'},authStates:{deepseek:{state:'signed-in'}},approvals:[],pendingChatMerges:[],
- api:{cc:(message,rewind,id,requestId)=>new Promise((resolve,reject)=>calls.set(id,{message,rewind,requestId,resolve,reject}))},renderSessionList:noop,renderChatAvailability:noop,renderRuntime:noop,renderSessionHeader:noop,renderProfileActivity:noop,renderAuth:noop,renderApproval:noop,chatNetworkReady:()=>true,applyChatMerge:noop,createIcon:()=>document.createElement('span'),deepseekComposer:{render:noop,clear:noop},finishReasoning:noop,reasoningView:noop,
+ const noop=()=>{};context=vm.createContext({insightPanel:{maintaining:()=>false,refresh:()=>{}},contextPicker:{close:noop},chatScroll:{follow:noop,jump:noop,canFollow:()=>false},Date,crypto,document,mergeRuntimeActivity,$,chatRenderContainer:null,chatSessions,chatRuns:new Map(),activeChatId:'a',selectedEngine:'deepseek',selectedCodexModel:'a',busy:false,reply:null,chatOwnerID:'owner',dockerEnvironmentState:{activeId:'env'},authStates:{deepseek:{state:'signed-in'}},approvals:[],pendingChatMerges:[],
+ api:{cc:(message,rewind,id,requestId)=>new Promise((resolve,reject)=>calls.set(id,{message,rewind,requestId,resolve,reject}))},renderSessionList:noop,renderChatAvailability:noop,renderRuntime:noop,renderSessionHeader:noop,renderProfileActivity:noop,renderAuth:noop,renderApproval:noop,chatNetworkReady:()=>true,applyChatMerge:noop,createIcon:()=>document.createElement('span'),deepseekComposer:{render:noop,clear:noop},finishReasoning:realReasoning?finishReasoning:noop,reasoningView:realReasoning?reasoningView:noop,
  updateChatMessage:(node,text)=>{node.textContent=text;node.dataset.rawText=text;},saveChatView:()=>{saved.push($('chat').textContent);},
  bubble:(role,text,_engine,pending)=>{const node=document.createElement('div');node.className='bubble '+role;const content=document.createElement('div');content.className='message-content'+(pending?' reply-loading':'');content.dataset.rawText=text;content.textContent=text;node.append(content);$('chat').append(node);return content;}
  });
@@ -36,4 +39,16 @@ test('background streaming leaves the mounted conversation and composer untouche
  const observer=new live.ownerDocument.defaultView.MutationObserver(()=>{});observer.observe(live,{subtree:true,childList:true,characterData:true});let refreshes=0;h.context.renderRuntime=()=>refreshes++;
  for(let n=0;n<500;n++)h.emit('a','ccText','x');
  assert.equal(observer.takeRecords().length,0);assert.equal(marker.isConnected,true);assert.equal(refreshes,0);assert.equal(h.text('a').length,501);observer.disconnect();
+});
+
+test('real routed reasoning keeps stopped and failed terminal states after ccEnd, without stopping another chat',async()=>{
+ const h=harness(true);const a=h.context.sendChatMessage('A');h.calls.get('a').resolve();await a;
+ h.emit('a','ccReasoning','partial A');h.emit('a','ccText','answer A');
+ const blockA=h.$('chat').querySelector('.assistant');assert.equal(blockA.messageReasoning.phase,'answering');
+ h.select('b');const b=h.context.sendChatMessage('B');h.calls.get('b').resolve();await b;h.emit('b','ccReasoning','partial B');
+ const blockB=h.$('chat').querySelector('.assistant');
+ h.emit('a','ccError',{status:'stopped',message:'cancelled'});h.emit('a','ccEnd',{status:'completed'});
+ assert.equal(blockA.messageReasoning.phase,'stopped');assert.equal(blockA.messageReasoning.timer,null);assert.equal(blockB.messageReasoning.phase,'thinking');assert.equal(h.context.busy,true);
+ h.emit('b','ccError','runtime failed');h.emit('b','ccEnd',{});assert.equal(blockB.messageReasoning.phase,'failed');assert.equal(blockB.messageReasoning.timer,null);
+ assert.equal(h.context.chatSessions.find(c=>c.id==='a').chatStatus,'stopped');assert.equal(h.context.chatSessions.find(c=>c.id==='b').chatStatus,'failed');
 });

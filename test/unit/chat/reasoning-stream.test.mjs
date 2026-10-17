@@ -11,7 +11,7 @@ test('reasoning renders expanded incrementally before the response finishes and 
  const {document}=new JSDOM('<div id="chat"><div class="bubble"><div class="bubble-label">DeepSeek</div><div id="reply"></div></div></div>').window;
  globalThis.document=document;
  const reply=document.getElementById('reply');
- const render=new Function('document','reply','$','updateChatMessage','data','type','reasoningView',handler);
+ const render=new Function('document','reply','$','updateChatMessage','data','type','reasoningView','chatScroll={canFollow:()=>true,follow(){}}',handler);
  const response=new PassThrough();let completed=false;
  const pending=readDeepSeekStream(response,()=>{},text=>render(document,reply,id=>document.getElementById(id),(body,text)=>{body.dataset.rawText=text;body.textContent=text;},text,'ccReasoning',reasoningView)).then(()=>completed=true);
  response.write('data: '+JSON.stringify({choices:[{delta:{reasoning_content:'第一段'}}]})+'\n\n');
@@ -34,11 +34,25 @@ test('DeepSeek waiting status is independent of deep thinking toggle and retains
  for(const engine of ['deepseek','codex']){
   const form={},prompt={value:'hello'},nodes=[],render=(node,text)=>node.textContent=text;
   let pending;const action=fn=>(pending=fn());const bubble=role=>{const block=document.createElement('div'),content=document.createElement('div');block.className='bubble '+role;block.append(content);document.getElementById('chat').append(block);nodes.push(content);return content;};
-  new Function('$','action','selectedEngine','deepseekComposer','api','chatSessions','activeChatId','renderSessionList','bubble','reasoningView','updateChatMessage','reply','saveChatView','chatRuns','updateSendButton','withChatView','dispatchWorkspaceEvent',submit)(id=>id==='chatForm'?form:prompt,action,engine,{payload:text=>({text,thinking:'disabled'}),clear(){}},{cc:async()=>{}},[],'chat',()=>{},bubble,reasoningView,render,null,()=>{},new Map(),()=>{},(_id,fn)=>fn(),()=>{});
+  new Function('$','action','selectedEngine','deepseekComposer','api','chatSessions','activeChatId','renderSessionList','bubble','reasoningView','updateChatMessage','reply','saveChatView','chatRuns','updateSendButton','withChatView','dispatchWorkspaceEvent','insightPanel={maintaining:()=>false,refresh:()=>{}},contextPicker={close(){}}','chatScroll={jump(){}}',submit)(id=>id==='chatForm'?form:prompt,action,engine,{payload:text=>({text,thinking:'disabled'}),clear(){}},{cc:async()=>{}},[],'chat',()=>{},bubble,reasoningView,render,null,()=>{},new Map(),()=>{},(_id,fn)=>fn(),()=>{});
   form.onsubmit({preventDefault(){}});await pending;
   const content=nodes.at(-1);assert.equal(Boolean(content.parentNode.querySelector('details')),true);
   if(engine==='codex'){finishReasoning(content,render);assert.match(content.parentNode.querySelector('summary').textContent,/用时 .* 秒/);}
-  if(engine==='deepseek'){finishReasoning(content,render);const state=content.parentNode.messageReasoning;assert.equal(state.text,'');assert.match(content.parentNode.querySelector('details').textContent,/模型未返回思考过程/);assert.ok(Number.isFinite(state.durationMs));const restored=document.createElement('div');document.body.append(restored);const answer=document.createElement('div');restored.append(answer);assert.match(reasoningView(answer,{...state,complete:true},render).textContent,/已思考/);}
+  if(engine==='deepseek'){finishReasoning(content,render);const state=content.parentNode.messageReasoning;assert.equal(state.text,'');assert.match(content.parentNode.querySelector('details').textContent,/模型未返回思考过程/);assert.ok(Number.isFinite(state.durationMs));const restored=document.createElement('div');document.body.append(restored);const answer=document.createElement('div');restored.append(answer);assert.match(reasoningView(answer,{...state,complete:true},render).textContent,/已完成 · 等待/);assert.equal(state.thinkingMs,0);}
  }
  dom.window.close();
+});
+
+test('user expansion wins over completion, stopped history survives and timers are cleared',async()=>{
+ const {window}=new JSDOM('<div class="bubble assistant"><div id="reply"></div></div>');globalThis.document=window.document;globalThis.CustomEvent=window.CustomEvent;
+ const render=(node,text)=>node.textContent=text,reply=document.getElementById('reply');
+ const details=reasoningView(reply,{text:'first'},render);
+ details.querySelector('summary').click();assert.equal(details.open,false);
+ reasoningView(reply,{text:'second'},render);assert.equal(details.open,false);
+ details.querySelector('summary').click();assert.equal(details.open,true);
+ finishReasoning(reply,render,'answering');assert.equal(details.open,true);
+ finishReasoning(reply,render,'stopped');finishReasoning(reply,render);
+ assert.equal(reply.parentNode.messageReasoning.phase,'stopped');assert.equal(reply.parentNode.messageReasoning.timer,null);assert.equal(details.open,true);
+ assert.match(details.querySelector('summary').textContent,/已停止/);assert.equal(details.querySelector('.reasoning-dots'),null);
+ window.close();
 });
