@@ -1,4 +1,5 @@
 import {codexActivity} from './runtime-activity.mjs';
+import {codexClientInfo} from './app-identity.mjs';
 import {directChatEnvironment,chatRuntimeEnvironment} from './chat-network.mjs';
 import {readFile} from 'node:fs/promises';
 import path from 'node:path';
@@ -71,6 +72,6 @@ export async function listCodexModels(executable,gateway,spawnProcess) {
       if(cursor){if(cursors.has(cursor))return reject(new Error('Repeated model list cursor'));cursors.add(cursor);send('model/list',{includeHidden:false,limit:100,cursor});}
       else resolve([...models.values()]);
     });
-    child.stdin.write(JSON.stringify({id:1,method:'initialize',params:{clientInfo:{name:'fixed_egress_workspace',version:'0.1.0'},capabilities:{experimentalApi:false}}})+'\n');
+    child.stdin.write(JSON.stringify({id:1,method:'initialize',params:{clientInfo:codexClientInfo,capabilities:{experimentalApi:false}}})+'\n');
   });} finally {clearTimeout(timer);lines.close();child.stdin.end();child.kill('SIGTERM');}
 }

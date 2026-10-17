@@ -1,4 +1,5 @@
 import {codexActivity} from './runtime-activity.mjs';
+import {codexClientInfo} from './app-identity.mjs';
 import {createInterface} from 'node:readline';
 import {directChatEnvironment,chatRuntimeEnvironment} from './chat-network.mjs';
 import {proxyEnvironment} from './proxy.mjs';
@@ -54,6 +55,6 @@ export async function runCodexStream({executable,project,prompt,images=[],sessio
   else if(event.method==='error' && !p.willRetry)fail(p.error?.message);
  });
  signal?.addEventListener('abort',abort,{once:true});startTimer=setTimeout(()=>fail('Codex 启动超时，请重试。'),30000);
- request('initialize',{clientInfo:{name:'fixed_egress_workspace',version:'0.1.0'},capabilities:{experimentalApi:false}});
+ request('initialize',{clientInfo:codexClientInfo,capabilities:{experimentalApi:false}});
  try{await done;}finally{clearTimeout(startTimer);signal?.removeEventListener('abort',abort);lines.close();child.stdin.end();child.kill('SIGTERM');}
 }

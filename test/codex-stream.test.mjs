@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {EventEmitter} from 'node:events';
 import {PassThrough,Writable} from 'node:stream';
+import {readFileSync} from 'node:fs';
 import {runCodexStream,codexStreamArguments} from '../src/codex-stream.mjs';
 test('streams before completion, resumes thread, deduplicates final message and preserves proxy controls',async()=>{
  const events=[],requests=[];let killed=false;
@@ -22,6 +23,7 @@ test('streams before completion, resumes thread, deduplicates final message and 
  });cb();}});
  await runCodexStream({executable:'fixture',project:'/workspace',prompt:'test',images:[{dataURL:'data:image/png;base64,fixture'}],sessionId:'thread1',model:'testmodel',gateway:{url:'http://127.0.0.1:1234',port:1234,status:{}},onEvent:(...args)=>events.push(args),spawnProcess:options=>{assert.equal(options.env.HTTPS_PROXY,'http://127.0.0.1:1234');assert.equal(options.env.LANG,'C.UTF-8');assert.equal(options.env.LC_ALL,'C.UTF-8');return child;}});
  assert.deepEqual(events.filter(x=>x[0]==='activity').map(x=>x[1].type),['web_search']);
+ assert.deepEqual(requests.find(x=>x.method==='initialize').params.clientInfo,{name:'kuneco',title:'Kuneco',version:JSON.parse(readFileSync(new URL('../package.json',import.meta.url),'utf8')).version});
  assert.equal(events.filter(x=>x[0]==='text').map(x=>x[1]).join(''),'hello world\n\n');assert.ok(killed);
  assert.ok(requests.some(x=>x.method==='thread/resume' && x.params.sandbox==='danger-full-access'));assert.ok(!codexStreamArguments().includes('--disable'));assert.ok(!codexStreamArguments().includes('mcp_servers={}'));assert.equal(requests.find(x=>x.method==='turn/start').params.input[0].text,'test');assert.deepEqual(requests.find(x=>x.method==='turn/start').params.input[1],{type:'image',url:'data:image/png;base64,fixture'});assert.equal(requests.find(x=>x.method==='thread/resume').params.baseInstructions,'');
 });

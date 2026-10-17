@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {codexClientInfo} from '../src/app-identity.mjs';
 import {execFileSync} from 'node:child_process';
 import {createInterface} from 'node:readline';
 import {createRestrictedCCSpawner} from '../src/cc-network-guard.mjs';
@@ -14,7 +15,7 @@ try {
     timer=setTimeout(()=>reject(new Error('Codex初始化超时')),15000);
     child.on('error',reject);child.on('exit',()=>reject(new Error('Codex初始化前退出')));
     lines.on('line',line=>{try{const msg=JSON.parse(line);if(msg.id===1)msg.error?reject(new Error('Codex初始化被拒绝')):resolve(msg.result);}catch{}});
-    child.stdin.write(JSON.stringify({id:1,method:'initialize',params:{clientInfo:{name:'fixed_egress_workspace',title:'Fixed Egress Workspace',version:'0.1.0'},capabilities:{experimentalApi:false}}})+'\n');
+    child.stdin.write(JSON.stringify({id:1,method:'initialize',params:{clientInfo:codexClientInfo,capabilities:{experimentalApi:false}}})+'\n');
   });
   assert.ok(response.userAgent);child.stdin.write(JSON.stringify({method:'initialized',params:{}})+'\n');
   console.log('本机Codex实际CLI参数与网络隔离初始化握手通过；未创建任务或发送模型提示。');
