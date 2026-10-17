@@ -25,7 +25,11 @@ export async function verifyWorkspace(ctx,verifyBrowser){
  assert.equal((await state()).aiSessions.length,0,'cancel does not create a session');
  await click('#railNewSession');await until(()=>e("document.getElementById('newSessionDialog').open"));
  await e("document.getElementById('runtimeEngine').value='codex';document.getElementById('runtimeEngine').dispatchEvent(new Event('change'))");
- await click('#createNewSession');await until(async()=>(await state()).aiSessions.length===1);
+ await click('#createNewSession');
+ // Completion includes async runtime capability/auth discovery, not just inserting a session.
+ await until(()=>e("!document.getElementById('newSessionDialog').open"));
+ assert.equal((await state()).aiSessions.length,1);
+ assert.equal((await state()).aiSessions[0].model,'desktop-fixture-model','session uses the model advertised by app-server, not a catalog fallback');
  assert.equal((await state()).selectedEngine,'codex');assert.equal((await state()).project,'');
  const tabs=await e("document.querySelectorAll('.content-tab').length");await click('#newContentTab');
  assert.equal(await e("document.querySelectorAll('.content-tab').length"),tabs+1);assert.equal((await state()).aiSessions.length,1,'blank tab is not a backend session');
@@ -50,7 +54,10 @@ export async function verifyWorkspace(ctx,verifyBrowser){
  await setting('notifications');assert.equal(await e("document.getElementById('notificationScopeBadge').textContent"),'当前账号 · 本设备');
  await e("document.querySelector('[data-notification=chat]').shadowRoot.querySelector('input').click()");
  assert.equal(await e("document.querySelector('[data-notification=chat]').checked"),false);
- await client.call('Page.reload');await until(()=>e("performance.getEntriesByName('chat-records-ready').length>0"));await setting('notifications');
+ const beforeReload=await e('performance.timeOrigin');
+ await client.call('Page.reload');
+ await until(()=>e(`performance.timeOrigin!==${beforeReload} && performance.getEntriesByName('chat-records-ready').length>0`));
+ await setting('notifications');
  assert.equal(await e("document.querySelector('[data-notification=chat]').checked"),false,'notification preference survives document reload');
  await e("document.querySelector('[data-notification=chat]').shadowRoot.querySelector('input').click()");
  // Environment gate must protect IPC, not only disabled UI controls.

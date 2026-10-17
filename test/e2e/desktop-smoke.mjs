@@ -86,7 +86,12 @@ try {
  const mock=`#!/usr/bin/env node
 if(process.argv.includes('--version')){console.log('codex fixture 1.0');process.exit(0);}
 if(process.argv[2]==='login'){console.log('Logged in using ChatGPT');process.exit(0);}
-if(process.argv[2]==='app-server'){require('readline').createInterface({input:process.stdin}).on('line',line=>{const m=JSON.parse(line);if(m.id)console.log(JSON.stringify({id:m.id,result:m.method==='model/list'?{data:[]}:{}}));});}
+if(process.argv[2]==='app-server'){require('readline').createInterface({input:process.stdin}).on('line',line=>{
+ const m=JSON.parse(line);if(m.id===undefined)return;
+ if(m.method==='initialize')console.log(JSON.stringify({id:m.id,result:{userAgent:'kuneco-desktop-fixture'}}));
+ else if(m.method==='model/list')console.log(JSON.stringify({id:m.id,result:{data:[{id:'desktop-fixture-model',model:'desktop-fixture-model',displayName:'Desktop fixture model',hidden:false,isDefault:true,supportedReasoningEfforts:[{reasoningEffort:'medium',description:'Fixture default'},{reasoningEffort:'high',description:'Fixture high'}],defaultReasoningEffort:'medium'}],nextCursor:null}}));
+ else console.log(JSON.stringify({id:m.id,error:{code:-32601,message:'Unsupported fixture method: '+m.method}}));
+});}
 else {process.stdin.resume();process.stdin.on('end',()=>{console.log(JSON.stringify({type:'item.completed',item:{type:'agent_message',text:'fixture response'}}));console.log(JSON.stringify({type:'turn.completed',usage:{input_tokens:1,output_tokens:1}}));});}
 `;
  await writeFile(path.join(bin,'codex'),mock,{mode:0o700});
