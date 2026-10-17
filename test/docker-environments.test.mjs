@@ -135,3 +135,14 @@ test('new environments reject images without required tools before saving any en
  await assert.rejects(manager.createAndStart('owner','new'),/Node.js、npm 或 curl/);assert.equal(created,false);
  manager.command=async()=> 'node npm curl available';await manager.verifyImageTools('dingtu-runtime:3-clean');
 });
+
+test('control-plane outage preserves forwarding status while confirmed core-container stop blocks it',async()=>{
+ const {ContainerGateway}=await import('../src/docker-environments.mjs');let unavailable=false,stopped=false;const calls=[];
+ const manager={rpc:async(...args)=>{calls.push(args);if(unavailable)throw new Error('control timeout');return {state:'ready',ip:'203.0.113.8'};},command:async()=>stopped?'false':'true'};
+ const gateway=new ContainerGateway(manager,'owner','183494cd-1b80-4886-a620-4956f9535772',12345,'test-token');
+ await gateway.sync();unavailable=true;await gateway.sync();
+ assert.equal(gateway.status.state,'ready');assert.equal(gateway.status.controlState,'unavailable');assert.equal(calls.some(args=>args[2]==='stop'),false);
+ stopped=true;await gateway.sync();assert.equal(gateway.status.state,'blocked');
+ unavailable=false;stopped=false;await gateway.sync();assert.equal(gateway.status.state,'ready');assert.equal(gateway.status.controlState,undefined);
+ await gateway.stop();const count=calls.length;await gateway.sync();assert.equal(calls.length,count);
+});

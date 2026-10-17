@@ -300,7 +300,7 @@ export class DockerEnvironments {
  };}
 
 }
-class ContainerGateway extends EventEmitter{
+export class ContainerGateway extends EventEmitter{
  constructor(manager,owner,id,port,token,onVerified){super();Object.assign(this,{manager,owner,id,port,token,onVerified});this.status={state:'blocked',reason:'容器出口未核验'};this.closed=false;}
  get address(){return `http://127.0.0.1:${this.port}`;}get url(){return `http://workspace:${this.token}@127.0.0.1:${this.port}`;}
  async sync(){if(this.closed)return this.status;try{this.status=await this.manager.rpc(this.owner,this.id,'status');}catch{let running;try{running=await this.manager.command(['inspect','--format','{{.State.Running}}',resourcePrefix(this.owner,this.id)+'-gateway']);}catch{}this.status=running==='false'?{...this.status,state:'blocked',reason:'容器代理服务已停止'}:{...this.status,controlState:'unavailable',reason:'网关状态暂不可读取；不因监测故障关闭连接'};}this.emit('status',this.status);return this.status;}

@@ -371,3 +371,94 @@ test('GOST: isolated gateways use separate authenticated ports and core exit fai
   await a.gateway.verify(a.url);assert.equal(a.gateway.status.state,'blocked');
  }finally{await a.cleanup();await b.cleanup();}
 });
+
+const recoveryOptions={gostBinary,coreRetryBase:30,coreRetryMax:120,coreRetryLimit:3,coreStableMs:10000,healthInterval:10000,retryBase:30,retryMax:100,jitter:0};
+const gostTest={skip:!existsSync(gostBinary)&&'Install GOST to run recovery acceptance'};
+test('GOST recovery preserves entry/token/pin, rechecks before forwarding, and does not affect another environment',gostTest,async()=>{
+ const a=await fixture(recoveryOptions),b=await fixture(recoveryOptions);
+ try{
+  await a.gateway.verify(a.url);await b.gateway.verify(b.url);
+  const port=a.gateway.port,token=a.gateway.token,pid=a.gateway.sidecar.pid;
+  a.offline();process.kill(pid,'SIGKILL');await waitFor(()=>!a.gateway.coreAvailable);
+  await waitFor(()=>a.gateway.sidecar.pid!==pid && a.gateway.coreAvailable);
+  assert.equal(a.gateway.status.state,'blocked');const hits=a.hits;
+  assert.equal((await request(a.gateway,a.url)).code,502);assert.equal(a.hits,hits);
+  assert.equal((await request(b.gateway,b.url)).code,200);
+  a.online();await waitFor(()=>a.gateway.status.state==='ready');
+  assert.equal(a.gateway.port,port);assert.equal(a.gateway.token,token);assert.equal(a.gateway.status.ip,'203.0.113.8');
+  assert.equal((await request(a.gateway,a.url)).code,200);assert.equal(a.routeVerified,true);
+ }finally{await a.cleanup();await b.cleanup();}
+});
+test('GOST recovery quarantines changed exit and cannot accept it on later verification',gostTest,async()=>{
+ const f=await fixture(recoveryOptions);
+ try{
+  await f.gateway.verify(f.url);f.changeIp();process.kill(f.gateway.sidecar.pid,'SIGKILL');
+  await waitFor(()=>f.gateway.quarantined);
+  assert.equal(f.gateway.status.ip,'203.0.113.8');assert.equal(f.gateway.status.state,'blocked');
+  const hits=f.hits;await f.gateway.checkNow();assert.equal((await request(f.gateway,f.url)).code,502);assert.equal(f.hits,hits);
+ }finally{await f.cleanup();}
+});
+test('GOST crash loop backs off and exhausts a bounded restart budget',gostTest,async()=>{
+ const f=await fixture(recoveryOptions);
+ try{
+  await f.gateway.verify(f.url);const delays=[];
+  f.gateway.on('status',s=>{if(s.coreState==='waiting'&&s.nextRetryAt)delays.push(Date.parse(s.nextRetryAt)-Date.now());});
+  for(let i=0;i<4;i++){
+   const pid=f.gateway.sidecar.pid;process.kill(pid,'SIGKILL');
+   if(i<3)await waitFor(()=>f.gateway.sidecar.pid!==pid&&f.gateway.status.state==='ready');
+  }
+  await waitFor(()=>f.gateway.status.coreState==='exhausted');
+  assert.equal(f.gateway.coreAttempts,3);assert.equal(f.gateway.status.state,'blocked');
+  assert.ok(delays.some(d=>d>=55));assert.ok(delays.some(d=>d>=110));
+  const generation=f.gateway.coreGeneration;await new Promise(r=>setTimeout(r,160));assert.equal(f.gateway.coreGeneration,generation);
+ }finally{await f.cleanup();}
+});
+test('GOST pending restart is cancelled on stop/environment switch',gostTest,async()=>{
+ const f=await fixture({...recoveryOptions,coreRetryBase:100});
+ try{
+  await f.gateway.verify(f.url);process.kill(f.gateway.sidecar.pid,'SIGKILL');await waitFor(()=>!f.gateway.coreAvailable);
+  const generation=f.gateway.coreGeneration;await f.gateway.stop();await new Promise(r=>setTimeout(r,150));
+  assert.equal(f.gateway.coreGeneration,generation);assert.equal(f.gateway.closed,true);assert.equal(f.gateway.status.state,'blocked');
+ }finally{await f.cleanup();}
+});
+test('late verification from a crashed core cannot reopen a recovering gateway',gostTest,async()=>{
+ let armed=false,release;const gate=new Promise(r=>release=r);
+ const f=await fixture({...recoveryOptions,onVerified:()=>armed?gate:undefined});
+ try{
+  await f.gateway.verify(f.url);armed=true;const verification=f.gateway.verify(f.url);await waitFor(()=>f.hits===2);
+  process.kill(f.gateway.sidecar.pid,'SIGKILL');await waitFor(()=>!f.gateway.coreAvailable);
+  f.offline();release();await verification;assert.equal(f.gateway.status.state,'blocked');
+  await waitFor(()=>f.gateway.coreAvailable);assert.equal(f.gateway.status.state,'blocked');
+ }finally{release();await f.cleanup();}
+});
+test('resume-style check and failed service/exit probes leave a live GOST stream intact',gostTest,async()=>{
+ const f=await fixture(recoveryOptions);let socket;
+ try{
+  await f.gateway.verify(f.url);const pid=f.gateway.sidecar.pid;
+  socket=net.connect(f.gateway.port,'127.0.0.1');
+  const connected=new Promise((r,j)=>{socket.once('data',r);socket.once('error',j);});
+  socket.write(`CONNECT ${new URL(f.url).host} HTTP/1.1\r\nProxy-Authorization: Basic ${Buffer.from(`workspace:${f.gateway.token}`).toString('base64')}\r\n\r\n`);
+  assert.match((await connected).toString(),/200/);
+  f.gateway.probeUrls=[f.url.replace('/exit','/bad-probe')];await f.gateway.checkNow();
+  await f.gateway.checkServiceLatencies({claude:f.url.replace('/exit','/bad-probe')});
+  assert.equal(f.gateway.status.state,'ready');assert.equal(f.gateway.sidecar.pid,pid);
+  const body=new Promise((r,j)=>{socket.once('data',r);socket.once('error',j);});
+  socket.write('GET /exit HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n');assert.match((await body).toString(),/203.0.113.8/);
+ }finally{socket?.destroy();await f.cleanup();}
+});
+test('GOST missing binary during recovery exhausts retries without native fallback',gostTest,async()=>{
+ const f=await fixture(recoveryOptions);
+ try{
+  await f.gateway.verify(f.url);f.gateway.gostBinary='/nonexistent/kuneco-gost';const hits=f.hits;
+  process.kill(f.gateway.sidecar.pid,'SIGKILL');await waitFor(()=>f.gateway.status.coreState==='exhausted');
+  assert.equal(f.gateway.coreAttempts,3);assert.equal((await request(f.gateway,f.url)).code,502);assert.equal(f.hits,hits);
+ }finally{await f.cleanup();}
+});
+test('GOST stable verified recovery resets the crash budget',gostTest,async()=>{
+ const f=await fixture({...recoveryOptions,coreStableMs:80});
+ try{
+  await f.gateway.verify(f.url);process.kill(f.gateway.sidecar.pid,'SIGKILL');await waitFor(()=>f.gateway.coreAttempts===1);
+  await waitFor(()=>f.gateway.status.state==='ready'&&f.gateway.coreAttempts===0);
+  assert.equal(f.gateway.status.coreAttempts,0);
+ }finally{await f.cleanup();}
+});
