@@ -24,3 +24,36 @@ test('activation reconciles stale direct tasks of the selected environment befor
  await m.activate('owner',id);assert.deepEqual(seen,['others',resourcePrefix('owner',id),'start','select']);
  m.stopDirectTasks=async()=>{throw Error('cleanup failed');};seen.length=0;await assert.rejects(m.activate('owner',id),/cleanup failed/);assert.deepEqual(seen,['others']);
 });
+test('cleanup rejects new direct/proxy launchers while pending and invalidates suspended preparation',async()=>{
+ const m=manager();m.exec=async()=> 'http://fixture';const proxy=await m.spawner('owner','id');
+ let release;const gate=new Promise(r=>release=r);m.directTasks=new Map([['task',{prefix,cancel:()=>gate}]]);
+ const stopping=m.stopDirectTasks(prefix);
+ await assert.rejects(m.directChatSpawner('owner','id'),/停止或切换/);
+ await assert.rejects(m.spawner('owner','id'),/停止或切换/);
+ assert.throws(()=>proxy({command:'node',args:[]}),/停止或切换/);
+ let resume;const get=new Promise(r=>resume=r);m.get=async()=>{await get;return {prefix,item:{}};};
+ const preparing=m.directChatSpawner('owner','id');release();await stopping;resume();await assert.rejects(preparing,/停止或切换/);
+});
+test('proxy preparation crossing a stop cannot return a stale launcher',async()=>{
+ const m=manager();let release;m.exec=()=>new Promise(r=>release=r);
+ const pending=m.spawner('owner','id');while(!release)await new Promise(r=>setImmediate(r));
+ await m.stopDirectTasks(prefix);release('http://fixture');await assert.rejects(pending,/停止或切换/);
+});
+test('installer is registered before run and switch cleanup cancels it without reporting success',async()=>{
+ const m=manager();let finish,name,exists=false;const calls=[];
+ m.command=async a=>{calls.push(a);if(a[0]==='run'){name=a[a.indexOf('--name')+1];exists=true;return new Promise(r=>finish=r);}
+  if(a[0]==='inspect'){if(!exists)throw Error('missing');return JSON.stringify({Id:'installer-id',Config:{Labels:{app:'dingtu-installer','io.kuneco.environment':prefix}}});}
+  if(a[0]==='ps')return exists?(a.includes('{{.Names}}')?name:'installer-id'):'';
+  if(a[0]==='stop'){exists=false;finish('');}return '';};
+ const installing=m.runRuntimeInstaller('owner','id',['node','--version']);const rejected=assert.rejects(installing,/停止或切换/);
+ while(!finish)await new Promise(r=>setImmediate(r));
+ await m.stopDirectTasks(prefix);await rejected;
+ assert.equal(m.directTasks.size,0);assert.ok(calls.find(a=>a[0]==='run').includes('io.kuneco.environment='+prefix));
+ assert.ok(!calls.flat().includes('-v'));
+});
+test('installer cleanup failures are visible and retained for retry',async()=>{
+ const m=manager();let fail=true;
+ m.command=async a=>{if(a[0]==='run')return '';if(a[0]==='inspect')return JSON.stringify({Id:'installer-id',Config:{Labels:{app:'dingtu-installer','io.kuneco.environment':prefix}}});if(a[0]==='stop'&&fail)throw Error('cleanup unavailable');if(a[0]==='ps')return fail?'installer-id':'';return '';};
+ await assert.rejects(m.runRuntimeInstaller('owner','id',['node','--version']),/cleanup unavailable/);assert.equal(m.directTasks.size,1);
+ fail=false;await m.stopDirectTasks(prefix);assert.equal(m.directTasks.size,0);
+});

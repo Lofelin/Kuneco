@@ -1,4 +1,4 @@
-import {cleanupDirectTask} from './direct-task-cleanup.mjs';
+import {cleanupDirectTask,waitForTaskCleanup} from './direct-task-cleanup.mjs';
 import {SPEC_LABEL,reliabilityArguments,specHash,workerImage,ensureWorker,containerStatus,inspectContainer,ensurePrivateNetwork,ensureDirectNetwork,validateContainerNetworks,ATTEMPT_LABEL,removeAttemptContainer} from './container-reliability.mjs';
 import {gatewayImage} from './gateway-image.mjs';
 
@@ -257,11 +257,26 @@ export class DockerEnvironments {
  async rpc(owner,id,action,value){const {prefix}=await this.get(owner,id);const raw=await this.command(['exec','-i',prefix+'-gateway','node','/opt/dingtu/control.mjs'],{input:JSON.stringify({action,value})});return JSON.parse(raw);}
  async start(owner,id){const {item}=await this.get(owner,id);if(item.external){await this.command(['start',item.external.id],{endpoint:item.external.endpoint});return this.state(owner);}const adapter=await this.connect(owner,id,{protocol:'http',host:'192.0.2.1',port:1,username:'',password:''},null);await adapter.startWorker();return this.state(owner);}
  async stopDirectTasks(prefix){
-  this.directGenerations ||= new Map();this.directGenerations.set(prefix,(this.directGenerations.get(prefix)||0)+1);
-  await Promise.all([...(this.directTasks?.entries() || [])].filter(([,task])=>task.prefix===prefix).map(async([id,task])=>{await task.cancel();this.directTasks.delete(id);}));
-  const names=(await this.command(['ps','-a','--format','{{.Names}}','--filter','label=app=dingtu-direct','--filter','label=io.kuneco.environment='+prefix])).split('\n').filter(Boolean);
-  for(const name of names)await cleanupDirectTask(this,name,prefix);
+  this.directStops ||= new Map();
+  if(this.directStops.has(prefix))return this.directStops.get(prefix);
+  this.directGenerations ||= new Map();
+  const invalidate=()=>this.directGenerations.set(prefix,(this.directGenerations.get(prefix)||0)+1);
+  invalidate();
+  const pending=Promise.resolve().then(async()=>{
+   await Promise.all([...(this.directTasks?.entries() || [])].filter(([,task])=>task.prefix===prefix).map(async([id,task])=>{await task.cancel();this.directTasks.delete(id);}));
+   for(const app of ['dingtu-direct','dingtu-installer']){
+    const names=(await this.command(['ps','-a','--format','{{.Names}}','--filter','label=app='+app,'--filter','label=io.kuneco.environment='+prefix])).split('\n').filter(Boolean);
+    for(const name of names)await cleanupDirectTask(this,name,prefix,app);
+   }
+  });
+  this.directStops.set(prefix,pending);
+  try{await pending;}finally{invalidate();this.directStops.delete(prefix);}
  }
+ taskLaunchGuard(){
+  const generations=new Map(this.directGenerations);
+  return prefix=>{if(this.directStops?.has(prefix)||(generations.get(prefix)||0)!==(this.directGenerations?.get(prefix)||0))throw new Error('环境已停止或切换，不能启动旧任务');};
+ }
+
  async stop(owner,id){const {prefix,item}=await this.get(owner,id);if(item.external){await this.command(['stop','-t','3',item.external.id],{endpoint:item.external.endpoint});return this.state(owner);}await this.stopDirectTasks(prefix);const names=new Set((await this.command(['ps','-a','--format','{{.Names}}'])).split('\n'));for(const suffix of ['worker','gateway']){const name=prefix+'-'+suffix;if(!names.has(name))continue;await this.command(['stop','-t','5',name]);if((await this.command(['inspect','--format','{{.State.Running}}',name]))!=='false')throw new Error('容器未能停止，请重试');}return this.state(owner);}
  async connect(owner,id,config,expectedIp,onVerified){
   const {item}=await this.get(owner,id);if(item.external)throw new Error('已有容器使用原网络，请使用应用代理连接');const {prefix,name,network}=await this.ensureGateway(owner,id);
@@ -290,12 +305,23 @@ export class DockerEnvironments {
  async runtimeInfo(owner,id,detect){const {item,prefix}=await this.get(owner,id);if(!detect)return item.registry || {hostName:item.name,runtimes:[]};if((await this.command(['inspect','--format','{{.State.Running}}',item.external?.id || prefix+'-worker'],{endpoint:item.external?.endpoint || this.endpoint}))!=='true')throw new Error('容器尚未运行，请先启动');const result=await this.detectCommands(args=>this.exec(owner,id,args));const registry={...result,hostName:item.name,runtimes:result.runtimes.map(runtime=>({...runtime,...(item.runtimeMetadata?.[runtime.id] || {})}))};await this.update(owner,id,{registry});return registry;}
  async exec(owner,id,args,options={}){const {prefix,item}=await this.get(owner,id);if(item.external)return this.command(['exec',...(options.input!==undefined?['-i']:[]),item.external.id,...args],{...options,endpoint:item.external.endpoint});return this.command(['exec','--user','1000:1000','--workdir','/workspace',...(options.input!==undefined?['-i']:[]),prefix+'-worker',...args],options);}
  async runRuntimeInstaller(owner,id,args,options={}){
+  const assertCurrent=this.taskLaunchGuard();
   const {item,prefix}=await this.get(owner,id);
   if(item.external)throw new Error('请在原容器中安装运行时，安装完成后点击重新检测');
-  const name=prefix+'-installer-'+randomUUID();
-  try{return await this.command(runtimeInstallerArguments({name,prefix,image:item.imageName || LEGACY_IMAGE,args,input:options.input!==undefined}),{...options,timeout:options.timeout || 600000});}
-  finally{await this.command(['rm','-f',name],{timeout:10000}).catch(()=>{});}
+  assertCurrent(prefix);
+  const name=prefix+'-installer-'+randomUUID();let closed=false,cancelling;
+  const cancel=()=>{
+   if(cancelling)return cancelling;
+   const pending=waitForTaskCleanup(this,name,prefix,()=>closed,'dingtu-installer');
+   cancelling=pending;void pending.catch(()=>{if(cancelling===pending)cancelling=null;});return pending;
+  };
+  this.directTasks ||= new Map();this.directTasks.set(name,{prefix,cancel});
+  const run=runtimeInstallerArguments({name,prefix,image:item.imageName || LEGACY_IMAGE,args,input:options.input!==undefined});
+  run.splice(2,0,'--label','io.kuneco.environment='+prefix);
+  try{const result=await this.command(run,{...options,timeout:options.timeout || 600000});assertCurrent(prefix);return result;}
+  finally{closed=true;await cancel();this.directTasks.delete(name);}
  }
+
  async removeRuntime(owner,id,engine){
   if(!Object.hasOwn(RUNTIME_CATALOG,engine))throw new Error('未知运行时');
   const {item}=await this.get(owner,id);if(item.external)throw new Error('请在原容器中移除运行时后重新检测');
@@ -320,9 +346,9 @@ export class DockerEnvironments {
   return saveMetadata();
  }if(!RUNTIME_INSTALL_COMMANDS[engine])throw new Error('未知运行时');await this.runRuntimeInstaller(owner,id,['bash','-o','pipefail','-c',RUNTIME_INSTALL_COMMANDS[engine]]);await this.exec(owner,id,[RUNTIME_CATALOG[engine].command,'--version']);return saveMetadata();}
  async directChatSpawner(owner,id){
-  const generations=new Map(this.directGenerations);
+  const guard=this.taskLaunchGuard();
   const {prefix,item}=await this.get(owner,id);if(item.external)return this.externalSpawner(owner,id,item,{direct:true});
-  const assertCurrent=()=>{if((generations.get(prefix)||0)!==(this.directGenerations?.get(prefix)||0))throw new Error('环境已停止或切换，不能启动旧直连任务');};
+  const assertCurrent=()=>guard(prefix);
   assertCurrent();const binary=await this.binary('docker'),image=await workerImage(this,item.imageName || LEGACY_IMAGE);assertCurrent();await ensureDirectNetwork(this,prefix);assertCurrent();
   return ({command,args=[],signal,cwd='/workspace'})=>{
    assertCurrent();if(signal?.aborted)throw new Error('请求已取消');const task=randomUUID();
@@ -332,16 +358,7 @@ export class DockerEnvironments {
    const kill=child.kill.bind(child);let closed=false,cancelling;
    const cancel=()=>{
     if(cancelling)return cancelling;
-    const pending=(async()=>{
-     const deadline=Date.now()+15000;
-     while(!closed && Date.now()<deadline){
-      if(await cleanupDirectTask(this,worker,prefix))return;
-      await new Promise(r=>setTimeout(r,100));
-     }
-     // A Docker client closing is not evidence that its daemon-side container stopped.
-     if(await cleanupDirectTask(this,worker,prefix))return;
-     if(!closed)throw new Error('直连任务取消超时，请检查容器引擎');
-    })();
+    const pending=waitForTaskCleanup(this,worker,prefix,()=>closed);
     cancelling=pending;void pending.catch(()=>{if(cancelling===pending)cancelling=null;});return pending;
    };
    this.directTasks ||= new Map();this.directTasks.set(task,{prefix,cancel});
@@ -352,8 +369,8 @@ export class DockerEnvironments {
   };
  }
 
- async spawner(owner,id){const {prefix,item}=await this.get(owner,id);if(item.external)throw new Error('已有容器无法保证全程代理隔离，请使用Kuneco创建的容器进行代理对话，或新建直连对话');const binary=await this.binary('docker');const proxy=await this.exec(owner,id,['node','-e',"try{process.stdout.write(require('fs').readFileSync('/tmp/dingtu-chat-proxy','utf8'))}catch{}"]);if(!proxy)throw new Error('当前环境代理尚未就绪，无法启动代理任务');const proxyEnvironment=proxy?['HTTP_PROXY','HTTPS_PROXY','ALL_PROXY','http_proxy','https_proxy','all_proxy'].flatMap(key=>['-e',key+'='+proxy]):[];return ({command,args,signal,cwd='/workspace'})=>{
-  if(signal?.aborted)throw new Error('请求已取消');const task=randomUUID();
+ async spawner(owner,id){const assertCurrent=this.taskLaunchGuard();const {prefix,item}=await this.get(owner,id);if(item.external)throw new Error('已有容器无法保证全程代理隔离，请使用Kuneco创建的容器进行代理对话，或新建直连对话');assertCurrent(prefix);const binary=await this.binary('docker');const proxy=await this.exec(owner,id,['node','-e',"try{process.stdout.write(require('fs').readFileSync('/tmp/dingtu-chat-proxy','utf8'))}catch{}"]);assertCurrent(prefix);if(!proxy)throw new Error('当前环境代理尚未就绪，无法启动代理任务');const proxyEnvironment=proxy?['HTTP_PROXY','HTTPS_PROXY','ALL_PROXY','http_proxy','https_proxy','all_proxy'].flatMap(key=>['-e',key+'='+proxy]):[];return ({command,args,signal,cwd='/workspace'})=>{
+  assertCurrent(prefix);if(signal?.aborted)throw new Error('请求已取消');const task=randomUUID();
   const child=spawn(binary,['--host',this.endpoint,'exec','-i','--user','1000:1000','--workdir','/workspace','-e','LANG=C.UTF-8','-e','LC_ALL=C.UTF-8',...proxyEnvironment,prefix+'-worker','node','/opt/dingtu/exec.mjs',task,command,...args],{stdio:['pipe','pipe','pipe'],env:{...process.env,DOCKER_HOST:'',DOCKER_CONTEXT:this.context}});
   const kill=child.kill.bind(child);child.kill=(type='SIGTERM')=>{void this.exec(owner,id,['node','-e',"const fs=require('fs'),p='/tmp/dingtu-'+process.argv[1];fs.writeFileSync(p+'.cancel','',{mode:0o600});try{process.kill(Number(fs.readFileSync(p,'utf8')),'SIGTERM')}catch{}",task]).finally(()=>kill(type)).catch(()=>{});return true;};
   const abort=()=>child.kill();signal?.addEventListener('abort',abort,{once:true});child.once('close',()=>signal?.removeEventListener('abort',abort));return child;
