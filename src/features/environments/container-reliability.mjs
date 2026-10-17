@@ -1,4 +1,4 @@
-import {createHash} from 'node:crypto';
+import {createHash,randomUUID} from 'node:crypto';
 import {readFile,mkdtemp,writeFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
@@ -35,6 +35,7 @@ export async function ensureWorker(manager,options){
 async function replaceWorker(manager,{name,image,spec,args,assertCurrent}){
  assertCurrent();const old=await inspectContainer(manager,name);
  assertCurrent();
+ if(old)validateContainerNetworks(old,args[args.indexOf('--network')+1]);
  if(old && old.Config?.Labels?.app!=='dingtu')throw new Error('容器归属不匹配，已停止升级');
  const validate=async()=>{
   assertCurrent();const state=JSON.parse(await manager.command(['inspect','--format','{{json .State}}',name]));assertCurrent();
@@ -51,14 +52,15 @@ async function replaceWorker(manager,{name,image,spec,args,assertCurrent}){
   if(!old.State.Running){await manager.command(['start',name]);assertCurrent();}
   await ready();return;
  }
+ const attempt=randomUUID();
  const backup=name+'-upgrade-'+Date.now();let renamed=false,created=false,stopped=false;
  try{
   if(old){if(old.State.Running){await manager.command(['stop','-t','5',name]);stopped=true;}assertCurrent();await manager.command(['rename',name,backup]);renamed=true;assertCurrent();}
-  // run can create a container before returning an error; cleanup is exact-name only.
-  created=true;await manager.command(args);assertCurrent();
+  // A failed run may have created a container; cleanup requires this attempt label and immutable ID.
+  created=true;await manager.command([...args.slice(0,2),'--label',ATTEMPT_LABEL+'='+attempt,...args.slice(2)]);assertCurrent();
   await ready();
  }catch(error){
-  if(created)await manager.command(['rm','-f',name]).catch(()=>{});
+  if(created)await removeAttemptContainer(manager,name,attempt);
   if(renamed)await manager.command(['rename',backup,name]);
   if(stopped){let current=true;try{assertCurrent();}catch{current=false;}if(old.State.Running&&current)await manager.command(['start',name]);}
   throw error;
@@ -74,4 +76,28 @@ export async function inspectContainer(manager,name){
   if(names.includes(name))throw error;
   return null;
  }
+}
+
+export const ATTEMPT_LABEL='io.kuneco.creation-attempt';
+export function validateContainerNetworks(container,network,{gateway=false}={}){
+ const attached=Object.keys(container.NetworkSettings?.Networks || {});
+ const allowed=gateway?['bridge',network]:[network];
+ if(!network || !attached.includes(network) || attached.some(name=>!allowed.includes(name)))throw new Error('容器网络与环境隔离配置不一致，保留原容器，请先核对网络');
+ if(gateway && !attached.includes('bridge'))throw new Error('网关缺少预期网络，保留原容器，请先核对网络');
+}
+export async function ensurePrivateNetwork(manager,name){
+ let network;
+ try{network=JSON.parse(await manager.command(['network','inspect','--format','{{json .}}',name]));}
+ catch(error){
+  const names=(await manager.command(['network','ls','--format','{{.Name}}'])).split('\n');
+  if(names.includes(name))throw error;
+  await manager.command(['network','create','--internal','--label','app=dingtu',name]);
+  network=JSON.parse(await manager.command(['network','inspect','--format','{{json .}}',name]));
+ }
+ if(network?.Internal!==true || network?.Driver!=='bridge' || network?.Labels?.app!=='dingtu')throw new Error('私有网络隔离配置或归属不匹配，已停止启动');
+}
+export async function removeAttemptContainer(manager,name,attempt){
+ const container=await inspectContainer(manager,name);if(!container)return;
+ if(!container.Id || container.Config?.Labels?.[ATTEMPT_LABEL]!==attempt)throw new Error('创建失败且同名容器归属无法确认，已保留容器与升级备份，请核对后重试');
+ await manager.command(['rm','-f',container.Id]);
 }

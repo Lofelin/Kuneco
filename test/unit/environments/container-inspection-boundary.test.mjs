@@ -34,7 +34,7 @@ test('gateway inspection failure cannot reach creation or cleanup of existing co
  manager.command=async args=>{
   calls.push(args);
   if(args[0]==='image')return args.includes('--format')?JSON.stringify({Id:'sha256:fixture',Architecture:'arm64'}):'cached';
-  if(args[0]==='network')return '{}';
+  if(args[0]==='network')return JSON.stringify({Internal:true,Driver:'bridge',Labels:{app:'dingtu'}});
   if(args[0]==='inspect')throw Error('temporary inspect failure');
   if(args[0]==='ps')return 'fixture-gateway';
   throw Error('unexpected mutation');

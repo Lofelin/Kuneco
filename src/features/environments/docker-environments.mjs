@@ -1,4 +1,4 @@
-import {SPEC_LABEL,reliabilityArguments,specHash,workerImage,ensureWorker,containerStatus,inspectContainer} from './container-reliability.mjs';
+import {SPEC_LABEL,reliabilityArguments,specHash,workerImage,ensureWorker,containerStatus,inspectContainer,ensurePrivateNetwork,validateContainerNetworks,ATTEMPT_LABEL,removeAttemptContainer} from './container-reliability.mjs';
 import {gatewayImage} from './gateway-image.mjs';
 import {DIRECT_CHAT_GID,directChatNetworkSetup,engineDNSResolver,directDNSRelay,directDNSReady} from '../chat/container-chat-network.mjs';
 import {ENVIRONMENT_ICONS,environmentIcon} from './environment-icons.mjs';
@@ -221,20 +221,21 @@ export class DockerEnvironments {
   const {prefix,item}=await this.get(owner,id),name=prefix+'-gateway',network=prefix+'-private';
   const engine=process.env.KUNECO_PROXY_ENGINE || 'native';
   const image=await gatewayImage(this,item.imageName || LEGACY_IMAGE,engine);
-  try{await this.command(['network','inspect',network]);}catch{await this.command(['network','create','--internal','--label','app=dingtu',network]);}
+  await ensurePrivateNetwork(this,network);
   const existing=await inspectContainer(this,name);
   if(existing && existing.Config?.Labels?.app!=='dingtu')throw new Error('容器归属不匹配，已停止升级');
+  if(existing){validateContainerNetworks(existing,network,{gateway:true});if((existing.Mounts || []).some(m=>m.Type!=='tmpfs'))throw new Error('网关存在额外数据挂载，保留原容器，请先核对挂载');}
   const privateIP=existing?.NetworkSettings?.Networks?.[network]?.IPAddress;
   const spec=specHash({version:1,image,role:'gateway'});
   if(existing?.Config.Image===image && existing.Config.Labels?.[SPEC_LABEL]===spec){await this.command(['start',name]);return{prefix,name,network};}
   // Build and validate first, then replace only this environment's stateless gateway.
   // Keep its private address because the worker's firewall pins that address.
-  const backup=name+'-upgrade-'+Date.now();let renamed=false,detached=false,created=false;
+  const attempt=randomUUID(),backup=name+'-upgrade-'+Date.now();let renamed=false,detached=false,created=false;
   try{if(existing){await this.command(['stop','-t','5',name]);await this.command(['rename',name,backup]);renamed=true;if(privateIP){await this.command(['network','disconnect',network,backup]);detached=true;}}
-  created=true;await this.command(['run','-d',...reliabilityArguments,'--label',SPEC_LABEL+'='+spec,'--health-cmd',"printf '%s' '{\"action\":\"status\"}' | node /opt/dingtu/control.mjs",'--health-interval','30s','--health-timeout','5s','--health-retries','3','--name',name,'--label','app=dingtu','--network','bridge','--read-only','--cap-drop','ALL','--security-opt','no-new-privileges','--pids-limit','128','--memory','256m','--tmpfs','/tmp:rw,nosuid,nodev,size=32m','-p','127.0.0.1::8080',image,'node','/opt/dingtu/gateway.mjs']);
+  created=true;await this.command(['run','-d',...reliabilityArguments,'--label',ATTEMPT_LABEL+'='+attempt,'--label',SPEC_LABEL+'='+spec,'--health-cmd',"printf '%s' '{\"action\":\"status\"}' | node /opt/dingtu/control.mjs",'--health-interval','30s','--health-timeout','5s','--health-retries','3','--name',name,'--label','app=dingtu','--network','bridge','--read-only','--cap-drop','ALL','--security-opt','no-new-privileges','--pids-limit','128','--memory','256m','--tmpfs','/tmp:rw,nosuid,nodev,size=32m','-p','127.0.0.1::8080',image,'node','/opt/dingtu/gateway.mjs']);
   await this.command(['network','connect',...(privateIP?['--ip',privateIP]:[]),network,name]);
   let ready=false;for(let i=0;i<30;i++){try{await this.rpc(owner,id,'status');ready=true;break;}catch{await new Promise(r=>setTimeout(r,100));}}if(!ready)throw new Error('新网关控制入口未就绪，已取消升级');
-  }catch(error){if(created)await this.command(['rm','-f',name]).catch(()=>{});if(existing){if(renamed)await this.command(['rename',backup,name]);if(detached)await this.command(['network','connect','--ip',privateIP,network,name]);if(existing.State.Running)await this.command(['start',name]);}throw error;}
+  }catch(error){if(created)await removeAttemptContainer(this,name,attempt);if(existing){if(renamed)await this.command(['rename',backup,name]);if(detached)await this.command(['network','connect','--ip',privateIP,network,name]);if(existing.State.Running)await this.command(['start',name]);}throw error;}
   if(existing)await this.command(['rm',backup]);
   return{prefix,name,network};
  }

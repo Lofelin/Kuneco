@@ -1,18 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {ensureWorker,containerStatus,SPEC_LABEL,reliabilityArguments} from '../../../src/features/environments/container-reliability.mjs';
+import {ensureWorker,containerStatus,SPEC_LABEL,reliabilityArguments,ATTEMPT_LABEL} from '../../../src/features/environments/container-reliability.mjs';
 const name='owned-worker',image='new-image',spec='new-spec';
-const args=['run','-d','--name',name,'--mount','type=volume,src=owned-worker-home,dst=/home/node',image];
+const args=['run','-d','--network','private','--name',name,'--mount','type=volume,src=owned-worker-home,dst=/home/node',image];
 function fixture({same=false,running=true,failRun=false,cancelAt,extraMount=false}={}){
- let current=true,ready=0;const calls=[];
- const old={Config:{Image:same?image:'old',Labels:{app:'dingtu',[SPEC_LABEL]:same?spec:'old'}},State:{Running:running},Mounts:[{Type:'volume',Name:extraMount?'owned-worker-home-old':'owned-worker-home',Destination:'/home/node',RW:true}]};
- const manager={command:async a=>{calls.push(a);if(a[0]===cancelAt)current=false;if(a.includes('{{json .}}'))return JSON.stringify(old);if(a.includes('{{json .State}}'))return JSON.stringify({Running:true});if(a[0]==='exec'&&++ready===1)throw Error('not ready yet');if(a[0]==='run'&&failRun)throw Error('run failed');return '';}};
+ let current=true,ready=0,replacement=null;const calls=[];
+ const old={NetworkSettings:{Networks:{private:{}}},Config:{Image:same?image:'old',Labels:{app:'dingtu',[SPEC_LABEL]:same?spec:'old'}},State:{Running:running},Mounts:[{Type:'volume',Name:extraMount?'owned-worker-home-old':'owned-worker-home',Destination:'/home/node',RW:true}]};
+ const manager={command:async a=>{calls.push(a);if(a[0]==='run'){const label=a.find(v=>v.startsWith(ATTEMPT_LABEL+'='));replacement={Id:'attempt-id',Config:{Labels:{[ATTEMPT_LABEL]:label.slice(ATTEMPT_LABEL.length+1)}}};}if(a[0]===cancelAt)current=false;if(a.includes('{{json .}}'))return JSON.stringify(replacement || old);if(a.includes('{{json .State}}'))return JSON.stringify({Running:true});if(a[0]==='exec'&&++ready===1)throw Error('not ready yet');if(a[0]==='run'&&failRun)throw Error('run failed');return '';}};
  return {manager,calls,options:{name,image,spec,args,assertCurrent:()=>{if(!current)throw Error('cancelled');}}};
 }
 test('worker upgrade retains exact volumes and removes backup only after readiness',async()=>{
  const f=fixture();await ensureWorker(f.manager,f.options);
  assert.ok(f.calls.findIndex(a=>a[0]==='rm')>f.calls.findIndex(a=>a[0]==='exec'));
- assert.ok(f.calls.some(a=>a===args));assert.ok(!f.calls.flat().includes('-v'));
+ assert.ok(f.calls.some(a=>a[0]==='run'&&a.includes(image)&&a.includes('type=volume,src=owned-worker-home,dst=/home/node')));assert.ok(!f.calls.flat().includes('-v'));
 });
 test('same-spec reconnect keeps running worker and never recreates it',async()=>{
  const f=fixture({same:true});await ensureWorker(f.manager,f.options);assert.ok(!f.calls.some(a=>['run','stop','rm','start'].includes(a[0])));
