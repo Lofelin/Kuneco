@@ -7,11 +7,13 @@ const server=http.createServer(async(req,res)=>{
   const {action,value}=JSON.parse(raw);let result;
   if(action==='connect'){
    await gateway?.stop();
-   gateway=await new ProxyGateway(value.config,{listenHost:'0.0.0.0',listenPort:8080,expectedIp:value.expectedIp,healthInterval:1000,jitter:0}).start();
+   if(!['native','gost'].includes(value.engine || 'native'))throw new Error('未知代理内核');
+   gateway=await new ProxyGateway(value.config,{gostBinary:value.engine==='gost'?'/usr/local/bin/gost':null,listenHost:'0.0.0.0',listenPort:8080,expectedIp:value.expectedIp,healthInterval:60000,jitter:0.2}).start();
    result={token:gateway.token};
   }else if(action==='status')result=gateway?.status || {state:'blocked',reason:'代理未连接'};
   else if(action==='verify'){if(!gateway)throw new Error('请先连接代理');result=await gateway.verify();gateway.serviceProbes=true;gateway.startMonitoring();}
   else if(action==='region'){await gateway.detectRegion();result=gateway.status;}
+  else if(action==='block'){gateway?.block(value.reason,value.options);result=true;}
   else if(action==='stop'){await gateway?.stop();result=true;}
   else throw new Error('未知操作');
   res.setHeader('content-type','application/json');res.end(JSON.stringify(result));

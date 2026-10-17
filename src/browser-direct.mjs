@@ -2,7 +2,7 @@
 import http from 'node:http';
 import net from 'node:net';
 import {randomBytes} from 'node:crypto';
-export async function createBrowserDirectTransport({routeProxy=()=>null,allowDirectFallback=()=>false,onRouteSelected=()=>{}}={}){
+export async function createBrowserDirectTransport({routeProxy=()=>null,onRouteSelected=()=>{}}={}){
  const token=randomBytes(24).toString('hex'),sockets=new Set(),routes=new Map(),pending=new Map();
  const authorization='Basic '+Buffer.from('workspace:'+token).toString('base64');
  const authorize=(req,socket)=>{if(req.headers['proxy-authorization']===authorization)return true;socket.end('HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm="browser-direct"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n');return false;};
@@ -21,8 +21,8 @@ export async function createBrowserDirectTransport({routeProxy=()=>null,allowDir
   if(chosen==='proxy'){const proxy=routeProxy(host);if(!proxy)throw new Error('Selected proxy unavailable');return proxied(proxy,host,port);}
   let unlock;pending.set(host,new Promise(resolve=>unlock=resolve));
   try{
-   let proxy;try{proxy=routeProxy(host);}catch(error){if(!allowDirectFallback())throw error;}
-   if(proxy){try{const connection=await proxied(proxy,host,port);routes.set(host,'proxy');onRouteSelected(host,'proxy');return connection;}catch(error){if(!allowDirectFallback())throw error;}}
+   const proxy=routeProxy(host);
+   if(proxy){const connection=await proxied(proxy,host,port);routes.set(host,'proxy');onRouteSelected(host,'proxy');return connection;}
    const connection=await direct(host,port);routes.set(host,'direct');onRouteSelected(host,'direct');return connection;
   }finally{pending.delete(host);unlock();}
  }

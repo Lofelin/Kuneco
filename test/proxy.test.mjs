@@ -1,3 +1,4 @@
+import {existsSync} from 'node:fs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
@@ -26,7 +27,7 @@ async function fixture(options = {}) {
     if (rejectProxy) { client.end('HTTP/1.1 407 Authentication Required\r\n\r\n'); return; }
     if (rejectTargetOnce) { rejectTargetOnce = false; client.end('HTTP/1.1 403 Forbidden\r\n\r\n'); return; }
     const url = new URL(`http://${req.url}`);
-    const remote = net.connect(Number(url.port), url.hostname, () => {
+    const remote = net.connect(Number(url.port), url.hostname==='proxy-target.invalid'?'127.0.0.1':url.hostname, () => {
       remotePorts.add(remote.localPort);
       client.write('HTTP/1.1 200 Connection Established\r\n\r\n'); if (head.length) remote.write(head); client.pipe(remote); remote.pipe(client);
     });
@@ -93,7 +94,7 @@ test('单个目标隧道被拒绝不锁定其他请求，且没有直连', async
     assert.equal(f.routeVerified, true); assert.equal(f.tunnels, 3);
   } finally { await f.cleanup(); }
 });
-test('入口连接失败锁定，并记录脱敏原因而非泛化提示', async () => {
+test('入口单次连接失败保持其他连接，并记录脱敏原因', async () => {
   const f = await fixture();
   try {
     await f.gateway.verify(f.url);
@@ -102,10 +103,10 @@ test('入口连接失败锁定，并记录脱敏原因而非泛化提示', async
     f.gateway.config.port = port;
     const hits = f.hits;
     await request(f.gateway, f.url).catch(() => {});
-    assert.equal(f.gateway.status.state, 'blocked'); assert.equal(f.hits, hits);
+    assert.equal(f.gateway.status.state, 'ready'); assert.equal(f.hits, hits);
     assert.equal(f.gateway.status.lastFailure.code, 'ECONNREFUSED');
-    assert.equal(f.gateway.status.lastFailure.scope, 'gateway');
-    assert.match(f.gateway.status.reason, /无法连接代理端口/);
+    assert.equal(f.gateway.status.lastFailure.scope, 'request');
+    assert.match(f.gateway.status.lastFailure.reason, /其他连接保留/);
     assert.ok(!JSON.stringify(f.gateway.status.lastFailure).includes('secret'));
     assert.ok(!JSON.stringify(f.gateway.status.lastFailure).includes('/exit'));
   } finally { await f.cleanup(); }
@@ -222,15 +223,15 @@ async function waitFor(fn, timeout = 3000) {
   while (Date.now() < until) { if (fn()) return; await new Promise(resolve => setTimeout(resolve, 10)); }
   assert.fail('恢复状态等待超时');
 }
-test('断网锁定后自动退避恢复，同一出口及入口，禁止直连', async () => {
+test('检测断网降级后自动退避恢复，同一出口及入口，禁止直连', async () => {
   const f = await fixture({ healthInterval: 40, retryBase: 20, retryMax: 80, jitter: 0 });
   try {
     await f.gateway.verify(f.url); const address = f.gateway.address, ip = f.gateway.status.ip;
     f.gateway.startMonitoring(f.url); f.offline();
-    await waitFor(() => f.gateway.status.state === 'blocked');
+    await waitFor(() => f.gateway.status.verificationState === 'unavailable');
     const hits = f.hits; await request(f.gateway, f.url).catch(() => {}); assert.equal(f.hits, hits);
-    await waitFor(() => f.gateway.failures >= 2); assert.equal(f.gateway.status.recovering, true);
-    f.online(); await waitFor(() => f.gateway.status.state === 'ready');
+    await waitFor(() => f.gateway.failures >= 2); assert.equal(f.gateway.status.recovering, false);
+    f.online(); await waitFor(() => f.gateway.status.verificationState === 'verified');
     assert.equal(f.gateway.status.ip, ip); assert.equal(f.gateway.address, address);
     assert.equal((await request(f.gateway, f.url)).code, 200); assert.equal(f.routeVerified, true);
     await f.gateway.stop(); const tunnels = f.tunnels;
@@ -252,13 +253,13 @@ test('重建网关仍校验传入的固定出口，不重新接受不同IP', asy
   try { assert.equal((await f.gateway.verify(f.url)).state, 'blocked'); assert.equal(f.gateway.status.ip, '203.0.113.99'); assert.equal(f.gateway.quarantined, true); }
   finally { await f.cleanup(); }
 });
-test('检测服务故障使用备用来源核验同一出口；过期核验禁止转发', async () => {
+test('检测服务故障使用备用来源核验同一出口；过期只标记不打断转发', async () => {
   const f = await fixture({ leaseMs: 20 });
   try {
     assert.equal((await f.gateway.verify([f.url.replace('/exit', '/bad-probe'), f.url])).state, 'ready');
     assert.equal(f.gateway.status.ip, '203.0.113.8');
     await new Promise(resolve => setTimeout(resolve, 30)); const hits = f.hits;
-    await request(f.gateway, f.url).catch(() => {}); assert.equal(f.hits, hits); assert.equal(f.gateway.status.state, 'blocked');
+    assert.equal((await request(f.gateway, f.url)).code,200); assert.equal(f.hits, hits+1); assert.equal(f.gateway.status.state, 'ready');assert.equal(f.gateway.status.verificationState,'stale');
   } finally { await f.cleanup(); }
 });
 
@@ -324,4 +325,49 @@ test('service latency uses proxy HEAD responses without requiring API credential
     assert.equal(f.gateway.status.state,'ready');
     assert.ok(f.routeVerified);
   } finally {await f.cleanup();}
+});
+
+test('所有检测来源失败保留已有CONNECT流，备用成功不发生中间blocked',async()=>{
+ const f=await fixture();let socket;
+ try{
+  await f.gateway.verify(f.url);const states=[];f.gateway.on('status',status=>states.push(status.state));
+  socket=net.connect(f.gateway.port,'127.0.0.1');
+  const response=new Promise((resolve,reject)=>{socket.once('data',resolve);socket.once('error',reject);});
+  socket.write(`CONNECT ${new URL(f.url).host} HTTP/1.1\r\nProxy-Authorization: Basic ${Buffer.from(`workspace:${f.gateway.token}`).toString('base64')}\r\n\r\n`);
+  assert.match((await response).toString(),/200/);
+  await f.gateway.verify([f.url.replace('/exit','/bad-probe'),f.url.replace('/exit','/bad-probe')]);
+  assert.equal(f.gateway.status.verificationState,'unavailable');assert.equal(socket.destroyed,false);
+  const body=new Promise((resolve,reject)=>{socket.once('data',resolve);socket.once('error',reject);});
+  socket.write('GET /exit HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n');
+  assert.match((await body).toString(),/203.0.113.8/);
+  await f.gateway.verify([f.url.replace('/exit','/bad-probe'),f.url]);
+  assert.equal(f.gateway.status.verificationState,'verified');assert.ok(states.every(state=>state==='ready'));
+ }finally{socket?.destroy();await f.cleanup();}
+});
+
+const gostBinary=new URL('../vendor/gost/'+process.platform+'_'+(process.arch==='x64'?'amd64':process.arch)+'/gost',import.meta.url).pathname;
+test('GOST: forwarding, failed probes and upstream loss never bypass the configured proxy',{skip:!existsSync(gostBinary)&&'Run npm run proxy:install-gost to enable integration tests'},async()=>{
+ const f=await fixture({gostBinary});
+ try{
+  assert.equal((await f.gateway.verify(f.url)).state,'ready');assert.equal(f.gateway.status.engine,'gost');
+  assert.equal((await request(f.gateway,f.url.replace('127.0.0.1','proxy-target.invalid'))).code,200,'target DNS must resolve at the upstream');
+  assert.equal((await request(f.gateway,f.url)).code,200);assert.equal(f.routeVerified,true);assert.equal(f.forwardedAuth,undefined);
+  await f.gateway.verify([f.url.replace('/exit','/bad-probe')]);assert.equal(f.gateway.status.state,'ready');assert.equal(f.gateway.status.verificationState,'unavailable');
+  assert.equal((await request(f.gateway,f.url)).code,200);
+  const hits=f.hits;f.offline();assert.equal((await request(f.gateway,f.url)).code,502);assert.equal(f.hits,hits);
+  f.online();assert.equal((await request(f.gateway,f.url)).code,200);
+  f.changeIp();await f.gateway.verify(f.url);assert.equal(f.gateway.quarantined,true);assert.equal(f.gateway.status.state,'blocked');
+  const stoppedHits=f.hits;await request(f.gateway,f.url).catch(()=>{});assert.equal(f.hits,stoppedHits);
+ }finally{await f.cleanup();}
+});
+test('GOST: isolated gateways use separate authenticated ports and core exit fails closed',{skip:!existsSync(gostBinary)&&'Run npm run proxy:install-gost to enable integration tests'},async()=>{
+ const a=await fixture({gostBinary}),b=await fixture({gostBinary});
+ try{
+  await a.gateway.verify(a.url);await b.gateway.verify(b.url);
+  assert.notEqual(a.gateway.sidecar.config.port,b.gateway.sidecar.config.port);assert.notEqual(a.gateway.token,b.gateway.token);
+  const response=await new Promise((resolve,reject)=>http.get({host:'127.0.0.1',port:a.gateway.port,path:a.url,headers:{'Proxy-Authorization':'Basic '+Buffer.from('workspace:'+b.gateway.token).toString('base64')}},res=>{res.resume();res.once('end',()=>resolve(res.statusCode));}).on('error',reject));assert.equal(response,407);
+  process.kill(a.gateway.sidecar.pid,'SIGTERM');await waitFor(()=>a.gateway.status.state==='blocked');
+  assert.equal((await request(b.gateway,b.url)).code,200);const hits=a.hits;await request(a.gateway,a.url).catch(()=>{});assert.equal(a.hits,hits);
+  await a.gateway.verify(a.url);assert.equal(a.gateway.status.state,'blocked');
+ }finally{await a.cleanup();await b.cleanup();}
 });

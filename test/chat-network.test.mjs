@@ -24,10 +24,10 @@ test('direct Codex launches without a gateway and reaches local fixture without 
  }finally{await new Promise(resolve=>server.close(resolve));await rm(directory,{recursive:true,force:true});}
 });
 
-test('automatic mode prefers a verified ready proxy and otherwise selects direct for the next request',async()=>{
+test('automatic mode never selects direct when proxy is unavailable',async()=>{
  const {chatRequestRoute}=await import('../src/chat-network.mjs');
  assert.equal(chatRequestRoute({networkMode:'auto'},{state:'ready'}),'proxy');
- for(const status of [undefined,{state:'blocked'},{state:'checking'}])assert.equal(chatRequestRoute({networkMode:'auto'},status),'direct');
+ for(const status of [undefined,{state:'blocked'},{state:'checking'}])assert.equal(chatRequestRoute({networkMode:'auto'},status),'proxy');
  assert.equal(chatRequestRoute({networkMode:'proxy'},{state:'blocked'}),'proxy');
  assert.equal(chatRequestRoute({networkMode:'direct'},{state:'ready'}),'direct');
 });

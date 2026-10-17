@@ -1,3 +1,4 @@
+import {startGost} from './gost-sidecar.mjs';
 import http from 'node:http';
 import https from 'node:https';
 import net from 'node:net';
@@ -57,13 +58,13 @@ export function connectionFailureReason(error) {
 }
 
 export class ProxyGateway extends EventEmitter {
-  constructor(config, { timeout = 15000, allowLocalTargets = false, ca = undefined, expectedIp = null, healthInterval = 30000, retryBase = 1000, retryMax = 60000, leaseMs = 90000, jitter = 0.2, onVerified = null, listenHost = '127.0.0.1', listenPort = 0 } = {}) {
+  constructor(config, { timeout = 15000, allowLocalTargets = false, ca = undefined, expectedIp = null, healthInterval = 60000, retryBase = 5000, retryMax = 300000, leaseMs = 180000, jitter = 0.2, onVerified = null, listenHost = '127.0.0.1', listenPort = 0, gostBinary = null } = {}) {
     super();
     this.config = validateProxy(config);
     if (expectedIp && !net.isIP(expectedIp)) throw new Error('固定出口 IP 无效');
     Object.assign(this, { healthInterval, retryBase, retryMax, leaseMs, jitter });
     this.onVerified = onVerified;
-    this.listenHost=listenHost;this.listenPort=listenPort;
+    this.listenHost=listenHost;this.listenPort=listenPort;this.gostBinary=gostBinary;
     this.monitoring = false; this.quarantined = false; this.failures = 0;
     this.timeout = timeout;
     this.ca = ca;
@@ -89,14 +90,15 @@ export class ProxyGateway extends EventEmitter {
     return req.headers['proxy-authorization'] === `Basic ${Buffer.from(`workspace:${this.token}`).toString('base64')}`;
   }
   async start() {
+    if(this.gostBinary){this.sidecar=await startGost(this.config,{binary:this.gostBinary,ca:this.ca,onExit:()=>{if(!this.closed){this.quarantined=true;this.block('GOST代理内核已退出，转发已停止；请重新连接，不回退直连');}}});this.status.engine='gost';}else this.status.engine='native';
     this.server = http.createServer((req, res) => this.forward(req, res));
     this.server.on('connect', (req, client, head) => this.forwardConnect(req, client, head));
     this.server.on('connection', socket => this.track(socket));
     this.server.on('clientError', (_err, socket) => socket.destroy());
-    await new Promise((resolve, reject) => {
+    try{await new Promise((resolve, reject) => {
       this.server.once('error', reject);
       this.server.listen(this.listenPort, this.listenHost, resolve);
-    });
+    });}catch(error){await this.sidecar?.stop();throw error;}
     this.port = this.server.address().port;
     return this;
   }
@@ -104,8 +106,7 @@ export class ProxyGateway extends EventEmitter {
   get address() { return `http://127.0.0.1:${this.port}`; }
   assertOpen() {
     if (this.status.state === 'ready' && Date.now() - Date.parse(this.status.checkedAt) > this.leaseMs) {
-      this.block('出口核验已过期，暂停转发并重新核验', { recoverable: true });
-      throw proxyError('LEASE_EXPIRED');
+      if(this.status.verificationState!=='stale')this.update({verificationState:'stale',reason:'出口暂未重新确认；保留已验证的代理通道，不回退直连'});
     }
     if (this.closed || this.status.state !== 'ready') throw proxyError('GATEWAY_BLOCKED');
   }
@@ -124,14 +125,13 @@ export class ProxyGateway extends EventEmitter {
     if (this.closed || this.quarantined) return this.status;
     if (this.checking) return this.checking;
     clearTimeout(this.healthTimer);
-    const started=Date.now();
     if(this.status.state==='ready')this.update({healthChecking:true});
     this.checking = this.verify(this.probeUrls).finally(() => {
       this.update({healthChecking:false});
       this.checking = null;
-      if (this.status.state === 'ready') this.failures = 0; else this.failures++;
-      const base = this.status.state === 'ready' ? this.healthInterval : Math.min(this.retryMax, this.retryBase * 2 ** Math.min(this.failures - 1, 10));
-      const delay=this.status.state==='ready'?Math.max(0,base-(Date.now()-started)):base;
+      if (this.status.verificationState === 'verified') this.failures = 0; else this.failures++;
+      const base = this.status.verificationState === 'verified' ? this.healthInterval : Math.min(this.retryMax, this.retryBase * 2 ** Math.min(this.failures - 1, 10));
+      const delay=base;
       this.scheduleCheck(Math.min(this.retryMax, Math.round(delay * (1 + this.jitter * Math.random()))));
     });
     return this.checking;
@@ -139,7 +139,7 @@ export class ProxyGateway extends EventEmitter {
   async tunnel(host, port) {
     if (this.closed) throw new Error('代理已停止');
     if (!this.allowLocalTargets && localTarget(host)) throw proxyError('TARGET_BLOCKED');
-    const c = this.config;
+    const c = this.sidecar?.config || this.config;
     if (c.protocol === 'socks5') {
       // Build and track the upstream socket before the SOCKS handshake so stop() also cancels pending handshakes.
       const existing_socket = await this.openSocket(false);
@@ -177,7 +177,7 @@ export class ProxyGateway extends EventEmitter {
     });
   }
   async openSocket(secure) {
-    const c = this.config;
+    const c = this.sidecar?.config || this.config;
     return new Promise((resolve, reject) => {
       const socket = this.track(secure ? tls.connect({ ca: this.ca, host: c.host, port: c.port, servername: net.isIP(c.host) ? undefined : c.host }) : net.connect({ host: c.host, port: c.port }));
       socket.setNoDelay(true); socket.setKeepAlive(true, 30000);
@@ -189,20 +189,23 @@ export class ProxyGateway extends EventEmitter {
       socket.once(secure ? 'secureConnect' : 'connect', () => { clean(); resolve(socket); });
     });
   }
+  isPolicyFailure(error) {
+    return error?.code==='PROXY_AUTH_REQUIRED' || (error?.proxyScope!=='target' && /CERT|TLS|SSL/.test(error?.code || ''));
+  }
   reportFailure(error, host, port) {
     if (this.closed || this.status.state !== 'ready') return;
-    const isolated = ['PROXY_TARGET_REFUSED', 'TARGET_BLOCKED', 'INVALID_TARGET', 'TARGET_STREAM_ERROR'].includes(error?.code);
+    const isolated = !this.isPolicyFailure(error);
     const allowed = ['PROXY_TARGET_REFUSED', 'TARGET_BLOCKED', 'INVALID_TARGET', 'TARGET_STREAM_ERROR', 'PROXY_AUTH_REQUIRED', 'PROXY_REFUSED', 'PROXY_CLOSED', 'PROXY_TIMEOUT', 'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'EAI_AGAIN'];
     const code = allowed.includes(error?.code) ? error.code : 'PROXY_CONNECTION_ERROR';
     // Only a canonical host and port are retained; never URL paths, credentials or raw errors.
     const target = /^[a-z\d.:[\]-]+$/i.test(host || '') ? `${host}:${port}` : '未知目标';
     const statusCode = Number.isInteger(error?.statusCode) ? error.statusCode : undefined;
-    const reason = code === 'PROXY_TARGET_REFUSED' ? `上游代理拒绝目标隧道（HTTP ${statusCode}）；仅本次请求失败，不回退直连` : code === 'TARGET_STREAM_ERROR' ? '目标响应中断；仅本次请求失败，不回退直连' : isolated ? '目标请求被阻止，不回退直连' : connectionFailureReason(error);
+    const reason = code === 'PROXY_TARGET_REFUSED' ? `上游代理拒绝目标隧道（HTTP ${statusCode}）；仅本次请求失败，不回退直连` : code === 'TARGET_STREAM_ERROR' ? '目标响应中断；仅本次请求失败，不回退直连' : isolated ? '本次代理请求失败，其他连接保留，不回退直连' : connectionFailureReason(error);
     const failure = { target, code, statusCode, reason, scope: isolated ? 'request' : 'gateway', at: new Date().toISOString() };
     this.status.lastFailure = failure;
     this.emit('requestFailure', failure);
     if (!isolated) {
-      if (code === 'PROXY_AUTH_REQUIRED' || /CERT|TLS|SSL/.test(error?.code || '')) this.quarantined = true;
+      this.quarantined = true;
       this.block(`${reason} [${code}] 目标 ${target}`, { recoverable: !this.quarantined });
     }
   }
@@ -249,7 +252,6 @@ export class ProxyGateway extends EventEmitter {
   }
   async checkServiceLatencies(targets = {claude:'https://www.anthropic.com/',openai:'https://openai.com/'}) {
     if(this.closed || this.serviceChecking)return;
-    const cycleStarted=performance.now();
     this.serviceChecking=true;
     try {
       if(this.status.state!=='ready')return;
@@ -261,7 +263,7 @@ export class ProxyGateway extends EventEmitter {
       if(!this.closed && this.status.state==='ready')this.update({serviceLatencies:Object.fromEntries(results)});
     } finally {
       this.serviceChecking=false;
-      if(this.monitoring && !this.closed && this.serviceProbes===true){clearTimeout(this.serviceTimer);this.serviceTimer=setTimeout(()=>void this.checkServiceLatencies(),Math.max(0,5000-(performance.now()-cycleStarted)));this.serviceTimer.unref?.();}
+      if(this.monitoring && !this.closed && this.serviceProbes===true){clearTimeout(this.serviceTimer);this.serviceTimer=setTimeout(()=>void this.checkServiceLatencies(),this.healthInterval);this.serviceTimer.unref?.();}
     }
   }
   async readText(url, {headersOnly=false} = {}) {
@@ -283,7 +285,7 @@ export class ProxyGateway extends EventEmitter {
       const deadline = setTimeout(() => request.destroy(proxyError('PROXY_TIMEOUT')), this.timeout);
       request.once('close', () => clearTimeout(deadline));
       request.setTimeout(this.timeout, () => request.destroy(proxyError('PROXY_TIMEOUT')));
-      request.on('error', err => { socket.destroy(); reject(err); });
+      request.on('error', err => { socket.destroy(); err.proxyScope='target'; reject(err); });
       request.end(); socket.resume();
     });
   }
@@ -301,6 +303,7 @@ export class ProxyGateway extends EventEmitter {
     this.update({countryCode:code,city,region,regionLanguage:'en',regionSource:new URL(url).hostname,regionCheckedAt:new Date().toISOString()});return code;
   }
   async verifySources(urls) {
+    const failures=[];
     for (const url of urls) {
       if (this.closed || this.quarantined) break;
       try {
@@ -318,19 +321,21 @@ export class ProxyGateway extends EventEmitter {
           try { await this.onVerified(ip); } catch { this.quarantined = true; this.block('固定出口记录保存失败，已禁止转发'); break; }
         }
         if (this.closed || this.quarantined) break;
-        this.update({ state: 'ready', ip, checkedAt: new Date().toISOString(), recovering: false, reason: '固定出口核验成功；应用代理就绪', probeSource: new URL(url).hostname,latencyMs:Math.round(performance.now()-started) });
+        this.update({ state: 'ready', verificationState:'verified', probeFailures:[], ip, checkedAt: new Date().toISOString(), recovering: false, reason: '固定出口核验成功；应用代理就绪', probeSource: new URL(url).hostname,latencyMs:Math.round(performance.now()-started) });
         return this.status;
       } catch (error) {
         if (this.closed || this.quarantined) break;
-        if (error.code === 'PROXY_AUTH_REQUIRED' || /CERT|TLS|SSL/.test(error.code || '')) this.quarantined = true;
-        this.block(connectionFailureReason(error), { recoverable: !this.quarantined });
+        failures.push({source:new URL(url).hostname,code:error.code || 'PROBE_FAILED',at:new Date().toISOString()});
+        if(this.isPolicyFailure(error)){this.quarantined=true;this.block(connectionFailureReason(error));break;}
       }
     }
+    if(!this.closed && !this.quarantined)this.update({verificationState:'unavailable',probeFailures:failures,reason:this.status.state==='ready'?'出口检测暂不可用；现有代理连接保留，不回退直连':'尚未成功验证固定出口，暂不开放代理转发'});
     return this.status;
   }
   async stop() {
     clearTimeout(this.serviceTimer);
     this.closed = true; this.monitoring = false; clearTimeout(this.healthTimer); this.block('代理已停止');
     if (this.server?.listening) await new Promise(resolve => this.server.close(resolve));
+    await this.sidecar?.stop();
   }
 }

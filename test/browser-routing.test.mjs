@@ -9,13 +9,13 @@ test('automatic routing prefers proxy regardless of country',()=>{
  assert.equal(browserRoute('mixed','https://google.com'),'proxy');
  assert.equal(browserRoute('direct','https://google.com'),'direct');
 });
-for(const automatic of [true,false])test('proxy failure '+(automatic?'falls back and pins direct':'does not fall back in proxy-only mode'),async()=>{
+for(const automatic of [true,false])test('proxy failure '+(automatic?'cannot enable legacy direct fallback':'does not fall back in proxy-only mode'),async()=>{
  let attempts=0;
  const target=http.createServer((req,res)=>res.end('direct'));
  await new Promise(resolve=>target.listen(0,'127.0.0.1',resolve));
  const transport=await createBrowserDirectTransport({routeProxy:()=>{attempts++;throw new Error('offline');},allowDirectFallback:()=>automatic});
  const request=()=>new Promise((resolve,reject)=>http.get({hostname:'127.0.0.1',port:transport.port,path:`http://127.0.0.1:${target.address().port}/`,headers:{'proxy-authorization':'Basic '+Buffer.from('workspace:'+transport.token).toString('base64')}},res=>{let body='';res.on('data',chunk=>body+=chunk);res.on('end',()=>resolve({status:res.statusCode,body}));}).on('error',reject));
- try{assert.equal((await request()).status,automatic?200:502);assert.equal((await request()).status,automatic?200:502);assert.equal(attempts,automatic?1:2);assert.equal(transport.getRoute('127.0.0.1'),automatic?'direct':null);}finally{await transport.close();await new Promise(resolve=>target.close(resolve));}
+ try{assert.equal((await request()).status,502);assert.equal((await request()).status,502);assert.equal(attempts,2);assert.equal(transport.getRoute('127.0.0.1'),null);}finally{await transport.close();await new Promise(resolve=>target.close(resolve));}
 });
 test('successful proxy stays pinned and never falls back after proxy loss',async()=>{
  let ready=true,hits=0;

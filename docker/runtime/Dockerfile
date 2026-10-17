@@ -7,7 +7,7 @@ RUN printf '\n[ -r /usr/share/bash-completion/bash_completion ] && . /usr/share/
 RUN node --version && npm --version && curl --version
 WORKDIR /opt/dingtu
 RUN npm init -y && npm install socks@2.8.10
-COPY src/proxy.mjs ./proxy.mjs
+COPY src/proxy.mjs src/gost-sidecar.mjs ./
 COPY docker/runtime/gateway.mjs docker/runtime/control.mjs docker/runtime/exec.mjs docker/runtime/worker.sh ./
 RUN chmod 755 worker.sh && mkdir -p /workspace /data && chown node:node /workspace /data
 ENV HOME=/home/node CODEX_HOME=/home/node/.codex

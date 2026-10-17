@@ -568,7 +568,7 @@ function setNetwork(status) {
   $('connectionState').textContent = status.recovering?'恢复中':names[status.state] || '未连接';$('connectionState').dataset.state=state;
   $('exitIp').textContent = status.ip || '尚未核验';$('exitIpLabel').textContent=status.ip && status.state!=='ready'?'上次核验 IP':'出口 IP';
   renderNetworkTimes(status);
-  $('footerStatus').textContent = status.state === 'ready' ? `● 应用代理就绪 · ${status.ip}` : browserTabsState.mode==='mixed'?'● 代理未连接 · 自动选择可用线路':browserTabsState.mode==='direct'?'● 代理未连接 · 浏览器直连':'● 应用联网已锁定';
+  $('footerStatus').textContent = status.state === 'ready' ? `● 应用代理就绪 · ${status.ip}` : browserTabsState.mode==='mixed'?'● 代理未连接 · 已阻止访问':browserTabsState.mode==='direct'?'● 代理未连接 · 浏览器直连':'● 应用联网已锁定';
   $('localAddress').textContent = status.state==='ready'?(status.address || '已连接'):'等待连接';
   $('prompt').disabled=!chatNetworkReady() || !activeChatId;
   $('chatProxyTooltip').disabled=chatNetworkReady();if(chatNetworkReady())$('chatProxyTooltip').open=false;
@@ -709,8 +709,8 @@ function renderBrowserTabs(state) {
   $('browserModeSelect').value=state.mode || 'proxy';
   const direct=state.mode==='direct',mixed=state.mode==='mixed';
   $('browserViewport').querySelector('.browser-empty h2').textContent=mixed?'自动选择访问线路':direct?'使用本机网络浏览':'在同一出口下浏览';
-  $('browserViewport').querySelector('.browser-empty p').textContent=mixed?'优先使用应用代理，无法代理时尝试直连；同一网站保持选定线路。':direct?'输入网址或关键词，无需连接代理。':'连接代理后输入网址或关键词，默认使用 Google 搜索。';
-  if(network.state!=='ready')$('footerStatus').textContent=mixed?'● 代理未连接 · 自动选择可用线路':direct?'● 代理未连接 · 浏览器直连':'● 应用联网已锁定';
+  $('browserViewport').querySelector('.browser-empty p').textContent=mixed?'使用应用代理；代理不可用时停止访问，不自动直连。':direct?'输入网址或关键词，无需连接代理。':'连接代理后输入网址或关键词，默认使用 Google 搜索。';
+  if(network.state!=='ready')$('footerStatus').textContent=mixed?'● 代理未连接 · 已阻止访问':direct?'● 代理未连接 · 浏览器直连':'● 应用联网已锁定';
   $('navigate').disabled=state.mode==='proxy' && network.state!=='ready';
   if (changedTab) { addressEditing = false; closeSuggestions(); }
   for (const tab of state.tabs) {
@@ -736,7 +736,7 @@ function renderBrowserTabs(state) {
   if (active) {
     $('browserMessage').classList.toggle('has-error', Boolean(active.error));
     if (!addressEditing) $('address').value = active.url;
-    $('browserMessage').textContent = active.error || (active.loading ? (mixed?'正在自动选择访问线路…':state.mode==='direct'?'正在通过本机网络加载…':'正在通过应用代理加载…') : active.started ? (mixed?'优先代理，同一网站保持选定线路。':state.mode==='direct'?'页面使用本机网络直接连接。':'页面使用应用代理。') : '输入网址或关键词，默认使用 Google 搜索。');
+    $('browserMessage').textContent = active.error || (active.loading ? (mixed?'正在自动选择访问线路…':state.mode==='direct'?'正在通过本机网络加载…':'正在通过应用代理加载…') : active.started ? (mixed?'使用应用代理，不自动回退直连。':state.mode==='direct'?'页面使用本机网络直接连接。':'页面使用应用代理。') : '输入网址或关键词，默认使用 Google 搜索。');
   }
   bounds();
 }
@@ -825,7 +825,7 @@ function chooseProjectMode(container){
 }
 const deepseekComposer=mountDeepSeekComposer({context:()=>({key:(chatOwnerID || '')+':'+dockerEnvironmentState.activeId+':'+activeChatId,enabled:['deepseek','codex'].includes(selectedEngine) && Boolean(activeChatId),engine:selectedEngine,busy}),toast});
 mountAssistantImagePreviews({root:$('chat'),context:()=>({owner:chatOwnerID || null,environmentId:chatEnvironmentID || null}),read:value=>api.readChatImage(value),preview:image=>deepseekComposer.showPreview(image)});
-const chatNeedsProxy=()=>chatSessions.find(item=>item.id===activeChatId)?.networkMode!=='direct' && chatSessions.find(item=>item.id===activeChatId)?.networkMode!=='auto';
+const chatNeedsProxy=()=>chatSessions.find(item=>item.id===activeChatId)?.networkMode!=='direct';
 const chatNetworkReady=()=>!chatNeedsProxy() || network.state==='ready';
 function renderAuth(){
  const auth=authStates[selectedEngine];const labels={'signed-in':'已登录','signed-out':'未登录','not-installed':'未安装','unknown':'登录态检测失败','checking':'正在检测登录态…'};

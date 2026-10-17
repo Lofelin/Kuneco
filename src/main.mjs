@@ -133,9 +133,9 @@ function saveEgressPin(config, ip) {
   return pinWrite;
 }
 let browserMode='proxy',browserRoutingChanging=false,directBrowserTransport,directBrowserTransportPromise;
-const browserNetworkReady=(url)=>!browserRoutingChanging && (browserMode==='direct' || browserMode==='mixed' || gateway?.status.state==='ready');
+const browserNetworkReady=(url)=>!browserRoutingChanging && (browserMode==='direct' || gateway?.status.state==='ready');
 async function browserProxyConfiguration(){
- if(browserMode!=='proxy'){directBrowserTransport=await (directBrowserTransportPromise ||= createBrowserDirectTransport({routeProxy:host=>{if(browserMode==='direct')return null;if(gateway?.status.state!=='ready')throw new Error('代理未连接');return gateway;},allowDirectFallback:()=>browserMode==='mixed',onRouteSelected:()=>publishTabs()}).catch(error=>{directBrowserTransportPromise=null;throw error;}));return {mode:'fixed_servers',proxyRules:directBrowserTransport.address,proxyBypassRules:'<-loopback>'};}
+ if(browserMode!=='proxy'){directBrowserTransport=await (directBrowserTransportPromise ||= createBrowserDirectTransport({routeProxy:host=>{if(browserMode==='direct')return null;if(gateway?.status.state!=='ready')throw new Error('代理未连接');return gateway;},onRouteSelected:()=>publishTabs()}).catch(error=>{directBrowserTransportPromise=null;throw error;}));return {mode:'fixed_servers',proxyRules:directBrowserTransport.address,proxyBypassRules:'<-loopback>'};}
  return {mode:'fixed_servers',proxyRules:gateway?.address || 'http://127.0.0.1:1',proxyBypassRules:'<-loopback>'};
 }
 let savedConfig = { protocol: 'http', host: '', port: 8080, username: '' };
@@ -331,7 +331,7 @@ async function stopGateway({preserveDirectChat=false}={}) {
   clearInterval(healthTimer); healthTimer = null;
   if(!preserveDirectChat || run?.networkMode!=='direct')abortRun();
   if (gateway) { const old = gateway; gateway = null; await old.stop(); }
-  if(browserMode==='proxy')stopBrowserTabs();
+  if(browserMode!=='direct')stopBrowserTabs();
 }
 const aiSessions=new Map(); let activeAISessionId, defaultEngine='cc', defaultCodexModel=null;
 let sessionSave=Promise.resolve(),chatOwner=null,chatRevision=0,chatViews=[],chatReady=false,legacyChatOwner=null,chatImportLegacy=false,chatDirty=false,chatBase=null,chatGeneration=0;
@@ -459,14 +459,14 @@ async function connect(config, remember, {environmentSwitch=false}={}) {
     await stopGateway({preserveDirectChat:true});
     emit('network', { state: 'checking', reason: '正在通过指定代理核验出口' });
     const externalContainer=activeContainerId && (await dockerEnvs.get(dockerOwner(),activeContainerId)).item.external;
-    const next = activeContainerId && !externalContainer?await dockerEnvs.connect(dockerOwner(),activeContainerId,validated,egressPins[proxyIdentity(validated)] || null,ip=>saveEgressPin(validated,ip)):await new ProxyGateway(validated, { healthInterval:fixtureMode?30000:1000,jitter:fixtureMode?0.2:0, expectedIp: egressPins[proxyIdentity(validated)] || null, onVerified: ip => saveEgressPin(validated, ip) }).start();
+    const next = activeContainerId && !externalContainer?await dockerEnvs.connect(dockerOwner(),activeContainerId,validated,egressPins[proxyIdentity(validated)] || null,ip=>saveEgressPin(validated,ip)):await new ProxyGateway(validated, { gostBinary:process.env.KUNECO_PROXY_ENGINE==='gost'?path.join(here,'..','vendor','gost',process.platform+'_'+(process.arch==='x64'?'amd64':process.arch),'gost'):null, healthInterval:60000,jitter:0.2, expectedIp: egressPins[proxyIdentity(validated)] || null, onVerified: ip => saveEgressPin(validated, ip) }).start();
     gateway = next;
     next.on('requestFailure', failure => { if (gateway === next) emit('requestFailure', failure); });
     next.on('status', status => {
       if (gateway !== next) return;
       emit('network', { ...status, address: next.address });
       refreshProxyRegion(next);
-      if (status.state === 'blocked') { if(browserMode==='proxy')stopBrowserTabs(); if(run?.networkMode!=='direct')abortRun(); }
+      if (status.state === 'blocked') { if(browserMode!=='direct')stopBrowserTabs(); if(run?.networkMode!=='direct')abortRun(); }
       showBrowserViews();
     });
     const configuration=await browserProxyConfiguration();
@@ -1120,7 +1120,7 @@ app.whenReady().then(async () => {
    }catch(error){await stopGateway();emit('network',{state:'blocked',reason:'自动恢复环境失败：'+error.message});}
    finally{containerOperation=false;emit('chatAccountChanged',{});}
   }
-  powerMonitor.on('resume', () => { if (gateway) { gateway.block('设备从休眠恢复，暂停访问并核验固定出口', { recoverable: true }); void gateway.checkNow(); } });
+  powerMonitor.on('resume', () => { if (gateway) void gateway.checkNow().catch(()=>{}); });
   if (process.env.WORKSPACE_SMOKE_DIR) {
     setTimeout(async () => {
       await mkdir(process.env.WORKSPACE_SMOKE_DIR, { recursive: true });

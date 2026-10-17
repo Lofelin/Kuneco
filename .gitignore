@@ -16,3 +16,5 @@ backend/bin/
 artifacts/
 *.log
 .DS_Store
+
+vendor/gost/

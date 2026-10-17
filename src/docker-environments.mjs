@@ -1,3 +1,4 @@
+import {gatewayImage} from './gateway-image.mjs';
 import {DIRECT_CHAT_GID,directChatNetworkSetup,engineDNSResolver,directDNSRelay,directDNSReady} from './container-chat-network.mjs';
 import {ENVIRONMENT_ICONS,environmentIcon} from './environment-icons.mjs';
 import http from 'node:http';
@@ -193,12 +194,22 @@ export class DockerEnvironments {
  }
  async forget(owner,id,name){const {data,item}=await this.get(owner,id);if(name!==item.name)throw new Error('请输入完整且一致的环境名称');const ordered=[...(data.localEnabled!==false?[null]:[]),...data.environments.map(item=>item.id)],index=ordered.indexOf(id);const remaining=ordered.filter(value=>value!==id);data.environments=data.environments.filter(item=>item.id!==id);if(data.activeId===id)data.activeId=remaining[index] ?? remaining[0] ?? null;await this.save(owner,data);if(item.external)await releaseExternal(this,owner,item.external);}
  async state(owner){const data=await this.load(owner),engine=await this.engineStatus(data.imageConfig);const environments=await Promise.all(data.environments.map(async item=>{let running=false;if(item.external || engine.ready)try{running=(await this.command(['inspect','--format','{{.State.Running}}',item.external?.id || resourcePrefix(owner,item.id)+'-worker'],{endpoint:item.external?.endpoint || this.endpoint,timeout:5000}))==='true';}catch{}return{id:item.id,name:item.name,icon:item.icon,createdAt:item.createdAt,running,external:Boolean(item.external),containerName:item.external?.name || null,runtimeCount:item.registry?.runtimes?.length||0};}));return{...data,localEnabled:data.localEnabled!==false,localName:data.localName || '本机环境',environments,engine,activeId:data.activeId};}
- async ensureGateway(owner,id){const {prefix,item}=await this.get(owner,id);const name=prefix+'-gateway',network=prefix+'-private';
+ async ensureGateway(owner,id){
+  const {prefix,item}=await this.get(owner,id),name=prefix+'-gateway',network=prefix+'-private';
+  const engine=process.env.KUNECO_PROXY_ENGINE || 'native';
+  const image=await gatewayImage(this,item.imageName || LEGACY_IMAGE,engine);
   try{await this.command(['network','inspect',network]);}catch{await this.command(['network','create','--internal','--label','app=dingtu',network]);}
-  try{await this.command(['inspect',name]);await this.command(['start',name]);}catch{
-   await this.command(['run','-d','--name',name,'--label','app=dingtu','--network','bridge','--read-only','--cap-drop','ALL','--security-opt','no-new-privileges','--pids-limit','128','--memory','256m','--tmpfs','/tmp:rw,nosuid,nodev,size=32m','-p','127.0.0.1::8080',item.imageName || LEGACY_IMAGE,'node','/opt/dingtu/gateway.mjs']);
-   await this.command(['network','connect',network,name]);
-  }
+  let existing;try{existing=JSON.parse(await this.command(['inspect','--format','{{json .}}',name]));}catch{}
+  const privateIP=existing?.NetworkSettings?.Networks?.[network]?.IPAddress;
+  if(existing?.Config.Image===image){await this.command(['start',name]);return{prefix,name,network};}
+  // Build and validate first, then replace only this environment's stateless gateway.
+  // Keep its private address because the worker's firewall pins that address.
+  const backup=name+'-upgrade-'+Date.now();
+  if(existing){await this.command(['stop','-t','3',name]);await this.command(['rename',name,backup]);if(privateIP)await this.command(['network','disconnect',network,backup]);}
+  try{await this.command(['run','-d','--name',name,'--label','app=dingtu','--network','bridge','--read-only','--cap-drop','ALL','--security-opt','no-new-privileges','--pids-limit','128','--memory','256m','--tmpfs','/tmp:rw,nosuid,nodev,size=32m','-p','127.0.0.1::8080',image,'node','/opt/dingtu/gateway.mjs']);
+  await this.command(['network','connect',...(privateIP?['--ip',privateIP]:[]),network,name]);
+  }catch(error){await this.command(['rm','-f',name]).catch(()=>{});if(existing){await this.command(['rename',backup,name]);if(privateIP)await this.command(['network','connect','--ip',privateIP,network,name]);if(existing.State.Running)await this.command(['start',name]);}throw error;}
+  if(existing)await this.command(['rm',backup]);
   return{prefix,name,network};
  }
  async rpc(owner,id,action,value){const {prefix}=await this.get(owner,id);const raw=await this.command(['exec','-i',prefix+'-gateway','node','/opt/dingtu/control.mjs'],{input:JSON.stringify({action,value})});return JSON.parse(raw);}
@@ -208,7 +219,7 @@ export class DockerEnvironments {
   const {item}=await this.get(owner,id);if(item.external)throw new Error('已有容器使用原网络，请使用应用代理连接');const {prefix,name,network}=await this.ensureGateway(owner,id);
   // Give the container service time to bind without silently retrying a proxy request.
   let ready=false;for(let i=0;i<30;i++){try{await this.rpc(owner,id,'status');ready=true;break;}catch{await new Promise(r=>setTimeout(r,100));}}if(!ready)throw new Error('容器代理服务未启动');
-  const info=await this.rpc(owner,id,'connect',{config,expectedIp});
+  const info=await this.rpc(owner,id,'connect',{config,expectedIp,engine:process.env.KUNECO_PROXY_ENGINE || 'native'});
   const ports=JSON.parse(await this.command(['inspect','--format','{{json .NetworkSettings.Ports}}',name]));const port=Number(ports['8080/tcp']?.[0]?.HostPort);if(!port)throw new Error('容器代理端口未就绪');
   const gatewayIP=await this.command(['inspect','--format',`{{(index .NetworkSettings.Networks "${network}").IPAddress}}`,name]);
   const adapter=new ContainerGateway(this,owner,id,port,info.token,onVerified);
@@ -292,11 +303,11 @@ export class DockerEnvironments {
 class ContainerGateway extends EventEmitter{
  constructor(manager,owner,id,port,token,onVerified){super();Object.assign(this,{manager,owner,id,port,token,onVerified});this.status={state:'blocked',reason:'容器出口未核验'};this.closed=false;}
  get address(){return `http://127.0.0.1:${this.port}`;}get url(){return `http://workspace:${this.token}@127.0.0.1:${this.port}`;}
- async sync(){if(this.closed)return this.status;try{this.status=await this.manager.rpc(this.owner,this.id,'status');}catch{this.status={state:'blocked',reason:'容器代理服务已停止'};}this.emit('status',this.status);return this.status;}
+ async sync(){if(this.closed)return this.status;try{this.status=await this.manager.rpc(this.owner,this.id,'status');}catch{let running;try{running=await this.manager.command(['inspect','--format','{{.State.Running}}',resourcePrefix(this.owner,this.id)+'-gateway']);}catch{}this.status=running==='false'?{...this.status,state:'blocked',reason:'容器代理服务已停止'}:{...this.status,controlState:'unavailable',reason:'网关状态暂不可读取；不因监测故障关闭连接'};}this.emit('status',this.status);return this.status;}
  async verify(){const status=await this.manager.rpc(this.owner,this.id,'verify');if(status.state==='ready'){try{await this.onVerified?.(status.ip);await this.startWorker();}catch(error){await this.stop();throw error;}}return this.sync();}
  async checkNow(){await this.manager.rpc(this.owner,this.id,'verify');return this.sync();}
  startMonitoring(){this.poll=setInterval(()=>{if(!this.polling){this.polling=true;void this.sync().finally(()=>{this.polling=false;});}},1000);this.poll.unref?.();}
  async detectRegion(){await this.manager.rpc(this.owner,this.id,'region');return this.sync();}
- block(reason){this.status={...this.status,state:'blocked',reason};this.emit('status',this.status);void this.manager.rpc(this.owner,this.id,'stop').catch(()=>{});}
+ block(reason,options){this.status={...this.status,state:'blocked',reason};this.emit('status',this.status);void this.manager.rpc(this.owner,this.id,'block',{reason,options}).catch(()=>{});}
  async stop(){this.closed=true;clearInterval(this.poll);await this.manager.rpc(this.owner,this.id,'stop').catch(()=>{});}
 }

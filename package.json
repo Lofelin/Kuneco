@@ -22,7 +22,9 @@
     "test:docker": "node scripts/test-docker-environments.mjs && node scripts/test-existing-container.mjs && node scripts/test-docker-proxy.mjs",
     "bundle:engine": "node scripts/bundle-container-engine.mjs",
     "test:console": "node scripts/test-container-console.mjs",
-    "test:dialogs": "electron test/app-dialog-smoke.cjs"
+    "test:dialogs": "electron test/app-dialog-smoke.cjs",
+    "proxy:install-gost": "node scripts/install-gost.mjs",
+    "test:proxy": "node --test test/proxy.test.mjs test/browser-routing.test.mjs test/chat-network.test.mjs"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.3.232",
