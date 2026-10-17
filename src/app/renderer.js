@@ -688,6 +688,12 @@ async function reconnectCurrentProxy(){
 }
 
 $('verify').onclick = () => action(reconnectCurrentProxy);
+$('proxyDetailsToggle').onclick=()=>{
+ const expanded=$('proxyDetailsToggle').getAttribute('aria-expanded')!=='true';
+ $('proxyDetailsToggle').setAttribute('aria-expanded',String(expanded));
+ $('proxyConnectionDetails').classList.toggle('hidden',!expanded);
+ $('proxyDetailsChevron').setAttribute('src','assets/icons/'+(expanded?'chevron-down':'chevron-right')+'.svg');
+};
 let proxyMethod='manual';
 function selectProxyMethod(method){
  proxyMethod=method;importPrepared=false;closeImport();proxyFileSelection=null;++proxyFileVersion;

@@ -36,6 +36,14 @@ export async function verifyWorkspace(ctx,verifyBrowser){
   const gaps=await e(`(()=>{const p=document.querySelector('.settings-panel[data-panel=${key}]');return [...p.querySelectorAll('.preference-heading,.profile-section-heading')].map(h=>{if(h.parentElement.classList.contains('proxy-config-toolbar'))h=h.parentElement;const n=h.nextElementSibling;return n?{gap:n.getBoundingClientRect().top-h.getBoundingClientRect().bottom,description:n.classList.contains('settings-section-description'),after:n.classList.contains('settings-section-description')?n.nextElementSibling.getBoundingClientRect().top-n.getBoundingClientRect().bottom:null}:null}).filter(Boolean)})()`);
   for(const g of gaps){assert.ok(Math.abs(g.gap-(g.description?4:8))<1,key+JSON.stringify(g));if(g.description)assert.equal(g.after,8);}
  }
+ await setting('proxy');
+ assert.deepEqual(await e("[...document.querySelectorAll('[data-panel=proxy] h2')].map(x=>x.textContent.trim().startsWith('代理配置'))"),[true]);
+ assert.equal(await e("getComputedStyle(document.getElementById('proxyConnectionDetails')).display"),'none');
+ await click('#proxyDetailsToggle');
+ assert.ok(await e("document.getElementById('proxyDetailsToggle').getAttribute('aria-expanded')==='true' && document.getElementById('proxyConnectionDetails').offsetHeight>0"));
+ assert.equal(await e("document.querySelectorAll('.proxy-summary-card dd').length"),13,'merged card preserves all configuration and connection fields');
+ await click('#proxyDetailsToggle');
+ assert.equal(await e("getComputedStyle(document.getElementById('proxyConnectionDetails')).display"),'none');
  await setting('preferences');await e("document.getElementById('themeSelect').value='dark';document.getElementById('themeSelect').dispatchEvent(new Event('change'))");
  assert.ok(await e("document.body.classList.contains('dark') && localStorage.getItem('ui-theme')==='dark'"));
  await e("document.getElementById('themeSelect').value='light';document.getElementById('themeSelect').dispatchEvent(new Event('change'))");
