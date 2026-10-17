@@ -49,7 +49,7 @@ function proxyError(code, statusCode) {
 export function connectionFailureReason(error) {
   const code = error?.code;
   if (['ERR_SSL_WRONG_VERSION_NUMBER', 'ERR_SSL_PACKET_LENGTH_TOO_LONG', 'ERR_SSL_UNSUPPORTED_PROTOCOL', 'ERR_SSL_RECORD_OVERFLOW'].includes(code)) return '代理入口协议不匹配：IPRoyal HTTP|HTTPS 请选“HTTP / HTTPS”；它同样支持 HTTPS 网站。当前入口已锁定。';
-  if (code === 'PROXY_AUTH_REQUIRED') return '代理认证失败（407），请检查用户名、密码或 IP 白名单；应用访问已锁定。';
+  if (code === 'PROXY_AUTH_REQUIRED') return `代理认证失败（${error?.protocol==='socks5'?'SOCKS5':'407'}），请检查用户名、密码或 IP 白名单；应用访问已锁定。`;
   if (code === 'PROXY_CLOSED') return '代理在建立隧道时关闭连接；应用访问已锁定，请重新核验。';
   if (code === 'PROXY_REFUSED') return '上游代理拒绝隧道，请检查套餐权限或目标限制；应用访问已锁定。';
   if (['ETIMEDOUT', 'PROXY_TIMEOUT'].includes(code)) return '连接代理或出口检测超时；应用访问已锁定，请检查代理可达性。';
@@ -294,12 +294,27 @@ export class ProxyGateway extends EventEmitter {
       // Build and track the upstream socket before the SOCKS handshake so stop() also cancels pending handshakes.
       const existing_socket = await this.openSocket(false,signal);
       onPhase('tunnel');
-      const result = await SocksClient.createConnection({
-        proxy: { host: c.host, port: c.port, type: 5, userId: c.username, password: c.password },
-        command: 'connect', destination: { host, port }, existing_socket, timeout: this.timeout,
-      });
-      if (this.closed) { result.socket.destroy(); throw new Error('代理已停止'); }
-      return this.track(result.socket);
+      try {
+        const result = await SocksClient.createConnection({
+          proxy: { host: c.host, port: c.port, type: 5, userId: c.username, password: c.password },
+          command: 'connect', destination: { host, port }, existing_socket, timeout: this.timeout,
+        });
+        signal?.throwIfAborted();
+        if (this.closed) throw proxyError('GATEWAY_BLOCKED');
+        return this.track(result.socket);
+      } catch(error) {
+        existing_socket.destroy();
+        if(signal?.aborted)throw signal.reason;
+        // socks exposes credential-bearing options on errors. Retain only a
+        // safe code; authentication policy and target failures stay distinct.
+        const message=error?.message || '';
+        const code=message==='Proxy connection timed out'?'PROXY_TIMEOUT':
+          ['Socks5 Authentication failed','Received invalid Socks5 initial handshake (no accepted authentication type)'].includes(message)?'PROXY_AUTH_REQUIRED':
+          message.startsWith('Socks5 proxy rejected connection')?'PROXY_TARGET_REFUSED':
+          message==='Socket closed'?'PROXY_CLOSED':
+          ['ECONNRESET','ECONNREFUSED','ETIMEDOUT','GATEWAY_BLOCKED'].includes(error?.code)?error.code:'PROXY_REFUSED';
+        throw Object.assign(proxyError(code),{phase:'tunnel',protocol:'socks5'});
+      }
     }
     const socket = await this.openSocket(c.protocol === 'https',signal);
     onPhase('tunnel');
@@ -349,12 +364,12 @@ export class ProxyGateway extends EventEmitter {
   reportFailure(error, host, port) {
     if (this.closed || this.status.state !== 'ready') return;
     const isolated = !this.isPolicyFailure(error);
-    const allowed = ['REQUEST_TIMEOUT','PROXY_BUSY','PROXY_QUEUE_TIMEOUT','PROXY_TARGET_REFUSED', 'TARGET_BLOCKED', 'INVALID_TARGET', 'TARGET_STREAM_ERROR', 'PROXY_AUTH_REQUIRED', 'PROXY_REFUSED', 'PROXY_CLOSED', 'PROXY_TIMEOUT', 'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'EAI_AGAIN'];
+    const allowed = ['REQUEST_TIMEOUT','PROXY_BUSY','PROXY_QUEUE_TIMEOUT','PROXY_UPGRADE_UNSUPPORTED','PROXY_TARGET_REFUSED', 'TARGET_BLOCKED', 'INVALID_TARGET', 'TARGET_STREAM_ERROR', 'PROXY_AUTH_REQUIRED', 'PROXY_REFUSED', 'PROXY_CLOSED', 'PROXY_TIMEOUT', 'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'EAI_AGAIN'];
     const code = allowed.includes(error?.code) ? error.code : 'PROXY_CONNECTION_ERROR';
     // Only a canonical host and port are retained; never URL paths, credentials or raw errors.
     const target = /^[a-z\d.:[\]-]+$/i.test(host || '') ? `${host}:${port}` : '未知目标';
     const statusCode = Number.isInteger(error?.statusCode) ? error.statusCode : undefined;
-    const reason = code === 'PROXY_TARGET_REFUSED' ? `上游代理拒绝目标隧道（HTTP ${statusCode}）；仅本次请求失败，不回退直连` : code === 'TARGET_STREAM_ERROR' ? '目标响应中断；仅本次请求失败，不回退直连' : isolated ? '本次代理请求失败，其他连接保留，不回退直连' : connectionFailureReason(error);
+    const reason = code === 'PROXY_TARGET_REFUSED' ? `上游代理拒绝目标隧道${statusCode?`（HTTP ${statusCode}）`:''}；仅本次请求失败，不回退直连` : code === 'TARGET_STREAM_ERROR' ? '目标响应中断；仅本次请求失败，不回退直连' : isolated ? '本次代理请求失败，其他连接保留，不回退直连' : connectionFailureReason(error);
     const failure = { target, code, statusCode, ...(error?.phase?{phase:error.phase}:{}), reason, scope: isolated ? 'request' : 'gateway', at: new Date().toISOString() };
     this.status.lastFailure = failure;
     this.emit('requestFailure', failure);
@@ -397,9 +412,10 @@ export class ProxyGateway extends EventEmitter {
   async forward(req,res,expectContinue=false){
     if(!this.authorized(req)){res.writeHead(407,{'Proxy-Authenticate':'Basic realm="workspace"',connection:'close'});return res.end();}
     let target;try{target=new URL(req.url);if(target.protocol!=='http:'||target.username||target.password)throw new Error();}catch{res.writeHead(400,{connection:'close'});return res.end('代理仅接受 HTTP 请求或 HTTPS CONNECT');}
-    const scope=this.forwardingScope(res),timings=this.performanceStats.start('http');res.once('finish',scope.finish);let upstream,life,agent;
+    const scope=this.forwardingScope(res),timings=this.performanceStats.start('http');res.once('finish',scope.finish);let upstream,life,agent,responseReceived=false,failureHandled=false;
     const failed=error=>{
-      scope.finish();
+      if(failureHandled)return;failureHandled=true;
+      scope.finish();req.unpipe(upstream);req.pause();upstream?.destroy();
       if(!res.destroyed){if(!res.headersSent){res.writeHead(error?.code==='REQUEST_TIMEOUT'||error?.code==='PROXY_TIMEOUT'?504:['PROXY_BUSY','PROXY_QUEUE_TIMEOUT'].includes(error?.code)?503:502,{connection:'close'});res.end('代理未就绪或请求失败');}else res.destroy();}
       if(!scope.signal.aborted)this.reportFailure(error,target.hostname,Number(target.port || 80));
     };
@@ -410,11 +426,12 @@ export class ProxyGateway extends EventEmitter {
       life.rejectOnAbort(error=>{if(requestOutcome(error)==='timeout'){this.forwardMetrics.responseTimeouts[error.phase]=(this.forwardMetrics.responseTimeouts[error.phase]||0)+1;failed(error);}});
       const headers={...forwardingHeaders(req.headers),host:target.host};delete headers.expect;
       upstream=http.request(target,{method:req.method,headers,agent,requestLifecycle:life,signal:life.signal},response=>{
+        responseReceived=true;
         const responseHeaders=forwardingHeaders(response.headers);
         const early=!req.complete || !upstream.writableFinished;
         if(early){req.unpipe(upstream);req.pause();upstream.shouldKeepAlive=false;res.shouldKeepAlive=false;responseHeaders.connection='close';response.once('end',()=>upstream.socket?.destroy());}
         res.writeHead(response.statusCode,responseHeaders);response.pipe(res);
-        response.once('error',()=>res.destroy());
+        response.once('error',error=>failed(error));
       });
       life.bind(upstream,{customConnection:true,uploadSource:req,downstream:res});
       upstream.once('socket',socket=>{
@@ -424,7 +441,8 @@ export class ProxyGateway extends EventEmitter {
         // Never inherit an idle pool timer into a healthy active transfer.
         socket.setTimeout(0);
       });
-      upstream.once('close',()=>{if(agent.ephemeral){agent.destroy();this.transientAgents.delete(agent);}});
+      upstream.once('upgrade',(_response,socket)=>{socket.destroy();life.finish('error');failed(proxyError('PROXY_UPGRADE_UNSUPPORTED'));});
+      upstream.once('close',()=>{if(!responseReceived&&!failureHandled&&!scope.signal.aborted)failed(proxyError('PROXY_CLOSED'));if(agent.ephemeral){agent.destroy();this.transientAgents.delete(agent);}});
       upstream.on('error',error=>{life.finish(requestOutcome(error));failed(life.signal.aborted?life.signal.reason:error);});
       req.pipe(upstream);
     }catch(error){timings.finish(scope.signal.aborted?'cancelled':requestOutcome(error));life?.finish(requestOutcome(error));scope.finish();if(agent?.ephemeral){agent.destroy();this.transientAgents.delete(agent);}failed(error);}
@@ -477,7 +495,7 @@ export class ProxyGateway extends EventEmitter {
         if(!valid())throw proxyError('GATEWAY_BLOCKED');
         if(target.protocol==='https:'){
           life?.advance('tls');
-          socket=this.track(tls.connect({ca:this.ca,socket,servername:net.isIP(target.hostname.replace(/^\[|\]$/g,''))?undefined:target.hostname}));
+          socket=this.track(tls.connect({ca:this.ca,socket,host:target.hostname.replace(/^\[|\]$/g,''),servername:net.isIP(target.hostname.replace(/^\[|\]$/g,''))?undefined:target.hostname}));
           await new Promise((resolve,reject)=>{
             const timer=setTimeout(()=>socket.destroy(Object.assign(proxyError('PROXY_TIMEOUT'),{phase:'tls'})),this.timeout);
             socket.once('secureConnect',()=>{clearTimeout(timer);resolve();});

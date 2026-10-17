@@ -20,8 +20,8 @@ export async function readDeepSeekStream(response,onText=()=>{},onReasoning=()=>
   if(typeof delta?.content==='string'){answer+=delta.content;onText(delta.content);}
   if(choice?.finish_reason)finish=choice.finish_reason;if(event.usage)usage=event.usage;
  };
- response.setEncoding('utf8');for await(const chunk of response){total+=chunk.length;if(total>16_000_000)throw new Error('响应过大');buffer+=chunk;buffer=buffer.replace(/\r\n/g,'\n');let end;while((end=buffer.indexOf('\n\n'))!==-1){frame(buffer.slice(0,end));buffer=buffer.slice(end+2);}}
- if(buffer.trim())frame(buffer);if(!done)throw new Error('DeepSeek 响应中断');
+ response.setEncoding('utf8');for await(const chunk of response){total+=chunk.length;if(total>16_000_000)throw new Error('响应过大');buffer+=chunk;buffer=buffer.replace(/\r\n/g,'\n');let end;while((end=buffer.indexOf('\n\n'))!==-1){frame(buffer.slice(0,end));buffer=buffer.slice(end+2);if(done)break;}if(done)break;}
+ if(!done&&buffer.trim())frame(buffer);if(!done)throw new Error('DeepSeek 响应中断');
  if(finish && !['stop','length'].includes(finish))throw new Error(({content_filter:'回复被内容过滤',insufficient_system_resource:'服务资源不足，请稍后重试',aborted:'服务中断了回复',tool_calls:'当前对话未启用工具执行'})[finish] || 'DeepSeek 回复未完成');
  return {choices:[{message:{content:answer,reasoning_content:reasoning},finish_reason:finish}],usage};
 }

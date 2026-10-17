@@ -742,3 +742,20 @@ test('successful CONNECT headers do not count coalesced target payload against h
  const port=await listen(server),g=await new ProxyGateway({protocol:'http',host:'127.0.0.1',port}).start();
  try{const socket=await g.tunnel('example.invalid',443);const received=[];await new Promise((resolve,reject)=>{socket.on('data',b=>received.push(b));socket.on('end',resolve);socket.on('error',reject);socket.resume();});assert.deepEqual(Buffer.concat(received),payload);}finally{await g.stop();for(const s of sockets)s.destroy();await close(server);}
 });
+
+for(const engine of ['native','gost'])test(`${engine}: unexpected HTTP upgrade and truncated body release forwarding without quarantine`,engine==='gost'?gostTest:{},async()=>{
+ const f=await fixture({...(engine==='gost'?{gostBinary}:{}),responseHeadersTimeout:100,responseBodyTimeout:100,respond(req,res){
+  if(req.url==='/upgrade'){res.writeHead(101,{connection:'Upgrade',upgrade:'websocket'});res.end();return true;}
+  if(req.url==='/truncated'){res.writeHead(200,{'content-length':'100'});res.write('short');setTimeout(()=>req.socket.destroy(),10);return true;}
+ }});
+ try{
+  await f.gateway.verify(f.url);
+  assert.equal((await request(f.gateway,new URL('/upgrade',f.url).href)).code,502);
+  assert.equal(f.gateway.status.capacity.forwarding.active,0);assert.equal(f.gateway.status.lastFailure.code,'PROXY_UPGRADE_UNSUPPORTED');
+  assert.equal((await request(f.gateway,f.url)).code,200);
+  await assert.rejects(new Promise((resolve,reject)=>{const r=http.get({host:'127.0.0.1',port:f.gateway.port,path:new URL('/truncated',f.url).href,agent:false,headers:{'proxy-authorization':`Basic ${Buffer.from(`workspace:${f.gateway.token}`).toString('base64')}`}},res=>{res.on('error',reject);res.resume();res.on('end',resolve);});r.on('error',reject);r.setTimeout(1000,()=>r.destroy(new Error('fixture deadline')));}));
+  await new Promise(r=>setTimeout(r,20));
+  assert.equal(f.gateway.status.capacity.forwarding.active,0);assert.equal(f.gateway.status.capacity.forwarding.clientCancelledTotal,0);assert.equal(f.gateway.status.state,'ready');
+  assert.equal((await request(f.gateway,f.url)).code,200);
+ }finally{await f.cleanup();}
+});
