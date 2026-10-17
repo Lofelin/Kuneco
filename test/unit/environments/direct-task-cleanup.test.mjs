@@ -9,7 +9,7 @@ test('foreign container and uncertain inspection never become deletion or succes
  const fail={command:async a=>{if(a[0]==='inspect')throw Error('inspect failed');return name;}};await assert.rejects(cleanupDirectTask(fail,name,prefix),/inspect failed/);
 });
 test('failed removal remains retryable and an already removed container is accepted',async()=>{const {m}=fixture(),original=m.command;let fail=true;m.command=async a=>{if(a[0]==='rm'&&fail)throw Error('daemon failure');return original(a);};await assert.rejects(cleanupDirectTask(m,name,prefix),/daemon failure/);fail=false;assert.equal(await cleanupDirectTask(m,name,prefix),true);assert.equal(await cleanupDirectTask({command:async a=>{if(a[0]==='inspect')throw Error('missing');return '';}},name,prefix),false);});
-function manager(){const m=new DockerEnvironments({sourceRoot:process.cwd()});m.get=async()=>({prefix,item:{}});m.binary=async()=>'/usr/bin/true';m.command=async a=>{if(a[0]==='network')return JSON.stringify({Internal:false,Driver:'bridge',Labels:{app:'dingtu-direct','io.kuneco.environment':prefix}});if(a[0]==='image'&&a.includes('{{json .}}'))return JSON.stringify({Id:'fixture'});return '';};return m;}
+function manager(){const m=new DockerEnvironments({sourceRoot:process.cwd()});m.get=async()=>({prefix,item:{}});m.binary=async()=>'/usr/bin/true';m.command=async a=>{if(a.includes('{{.Id}}'))return 'a'.repeat(64);if(a[0]==='network')return JSON.stringify({Internal:false,Driver:'bridge',Labels:{app:'dingtu-direct','io.kuneco.environment':prefix}});if(a[0]==='image'&&a.includes('{{json .}}'))return JSON.stringify({Id:'fixture'});return '';};return m;}
 test('stop invalidates captured launchers and preparations suspended before get returns',async()=>{
  const m=manager(),launch=await m.directChatSpawner('owner','id');await m.stopDirectTasks(prefix);assert.throws(()=>launch({command:'node'}),/停止或切换/);
  let resolve;const wait=new Promise(r=>resolve=r);m.get=async()=>{await wait;return {prefix,item:{}};};const pending=m.directChatSpawner('owner','id');await m.stopDirectTasks(prefix);resolve();await assert.rejects(pending,/停止或切换/);
@@ -54,7 +54,7 @@ test('installer is registered before run and switch cleanup cancels it without r
 test('installer cleanup failures are visible and retained for retry',async()=>{
  const m=manager();let fail=true;
  m.command=async a=>{if(a[0]==='run')return '';if(a[0]==='inspect')return JSON.stringify({Id:'installer-id',Config:{Labels:{app:'dingtu-installer','io.kuneco.environment':prefix}}});if(a[0]==='stop'&&fail)throw Error('cleanup unavailable');if(a[0]==='ps')return fail?'installer-id':'';return '';};
- await assert.rejects(m.runRuntimeInstaller('owner','id',['node','--version']),/cleanup unavailable/);assert.equal(m.directTasks.size,1);
+ await assert.rejects(m.runRuntimeInstaller('owner','id',['node','--version']),/cleanup unavailable/);assert.equal(m.directTasks.size,1);assert.throws(()=>m.taskLaunchGuard()(prefix),/清理未完成/);
  fail=false;await m.stopDirectTasks(prefix);assert.equal(m.directTasks.size,0);
 });
 test('failed cancellation waits for other tasks and keeps launches blocked until successful retry',async()=>{
@@ -88,4 +88,14 @@ test('one owned container cleanup failure does not skip other containers or inst
  await assert.rejects(m.stopDirectTasks(prefix),/bad stop/);assert.deepEqual(seen,['bad','good','installer']);
  assert.throws(()=>m.taskLaunchGuard()(prefix),/清理未完成/);
  fail=false;await m.stopDirectTasks(prefix);assert.doesNotThrow(()=>m.taskLaunchGuard()(prefix));
+});
+
+test('autonomous direct task cleanup failure blocks new work until explicit reconciliation',async()=>{
+ const m=manager();let fail=true;
+ const command=m.command;m.command=async a=>{if(a[0]==='inspect')throw Error('daemon unavailable');if(a[0]==='ps'&&fail)throw Error('daemon unavailable');return command(a);};
+ const launch=await m.directChatSpawner('owner','id');const child=launch({command:'node',args:[]});
+ await new Promise(r=>child.once('close',r));
+ for(let i=0;!m.directStopFailures?.has(prefix)&&i<50;i++)await new Promise(r=>setTimeout(r,10));
+ assert.throws(()=>m.taskLaunchGuard()(prefix),/清理未完成/);assert.equal(m.directTasks.size,1);
+ fail=false;await m.stopDirectTasks(prefix);assert.equal(m.directTasks.size,0);assert.doesNotThrow(()=>m.taskLaunchGuard()(prefix));
 });

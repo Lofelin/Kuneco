@@ -175,7 +175,7 @@ export class DockerEnvironments {
   const data=await this.load(owner);
   if(id?!data.environments.some(item=>item.id===id):data.localEnabled===false)throw new Error('环境不存在');
   await this.stopOtherEnvironments(owner,id);
-  if(id){const item=data.environments.find(item=>item.id===id),prefix=resourcePrefix(owner,id);if(this.environmentStopFailures?.has(prefix))await this.stopEnvironmentResources(prefix,item);else if(!item.external)await this.stopDirectTasks(prefix);}
+  if(id){const item=data.environments.find(item=>item.id===id),prefix=resourcePrefix(owner,id);if(this.environmentStopFailures?.has(prefix))await this.stopEnvironmentResources(prefix,item);else await this.stopDirectTasks(prefix,{reconcileManagedContainers:!item.external});}
   if(id){
    try{await this.start(owner,id);}
    catch(error){await this.stop(owner,id).catch(()=>{});throw new Error('目标环境启动失败，原环境已停止：'+error.message);}
@@ -262,7 +262,7 @@ export class DockerEnvironments {
  }
  async rpc(owner,id,action,value){const {prefix}=await this.get(owner,id);const raw=await this.command(['exec','-i',prefix+'-gateway','node','/opt/dingtu/control.mjs'],{input:JSON.stringify({action,value})});return JSON.parse(raw);}
  async start(owner,id){return this.withEnvironmentPreparation(resourcePrefix(owner,id),async assertCurrent=>{const {item}=await this.get(owner,id);assertCurrent();if(item.external){await this.command(['start',item.external.id],{endpoint:item.external.endpoint});assertCurrent();return this.state(owner);}const adapter=await this.connect(owner,id,{protocol:'http',host:'192.0.2.1',port:1,username:'',password:''},null);assertCurrent();await adapter.startWorker();assertCurrent();return this.state(owner);});}
- async stopDirectTasks(prefix){
+ async stopDirectTasks(prefix,{reconcileManagedContainers=true}={}){
   this.directStops ||= new Map();
   if(this.directStops.has(prefix))return this.directStops.get(prefix);
   this.directGenerations ||= new Map();
@@ -271,7 +271,7 @@ export class DockerEnvironments {
   const pending=Promise.resolve().then(async()=>{
    const settled=await Promise.allSettled([...(this.directTasks?.entries() || [])].filter(([,task])=>task.prefix===prefix).map(async([id,task])=>{await task.cancel();this.directTasks.delete(id);}));
    const errors=settled.filter(result=>result.status==='rejected').map(result=>result.reason);
-   for(const app of ['dingtu-direct','dingtu-installer']){
+   for(const app of reconcileManagedContainers?['dingtu-direct','dingtu-installer']:[]){
     try{
      const names=(await this.command(['ps','-a','--format','{{.Names}}','--filter','label=app='+app,'--filter','label=io.kuneco.environment='+prefix])).split('\n').filter(Boolean);
      for(const name of names)try{await cleanupDirectTask(this,name,prefix,app);}catch(error){errors.push(error);}
@@ -297,15 +297,15 @@ export class DockerEnvironments {
   const invalidate=()=>this.directGenerations.set(prefix,(this.directGenerations.get(prefix)||0)+1);
   invalidate();
   const pending=Promise.resolve().then(async()=>{
-   const direct=this.stopDirectTasks(prefix);
+   const direct=this.stopDirectTasks(prefix,{reconcileManagedContainers:!item.external});
    // Wait even when task cleanup fails: a delayed Docker create must settle before stop returns.
    const [cleanup]=await Promise.allSettled([direct,...(this.environmentPreparations?.get(prefix)||[])]);
    const endpoint=item.external?.endpoint || this.endpoint;
-   const names=new Set((await this.command(['ps','-a','--format','{{.Names}}'],{endpoint})).split('\n'));
+   const names=new Set((await this.command(['ps','-a',...(item.external?['--no-trunc']:[]),'--format',item.external?'{{.ID}}':'{{.Names}}'],{endpoint})).split('\n'));
    const targets=item.external?[item.external.id]:['worker','gateway'].map(suffix=>prefix+'-'+suffix);
    const errors=cleanup.status==='rejected'?[cleanup.reason]:[];
    for(const target of targets){
-    if(!item.external&&!names.has(target))continue;
+    if(!names.has(target))continue;
     try{await this.command(['stop','-t','5',target],{endpoint});if((await this.command(['inspect','--format','{{.State.Running}}',target],{endpoint})).trim()!=='false')throw new Error('容器未能停止，请重试');}
     catch(error){errors.push(error);}
    }
@@ -360,7 +360,7 @@ export class DockerEnvironments {
   const run=runtimeInstallerArguments({name,prefix,image:item.imageName || LEGACY_IMAGE,args,input:options.input!==undefined});
   run.splice(2,0,'--label','io.kuneco.environment='+prefix);
   try{const result=await this.command(run,{...options,timeout:options.timeout || 600000});assertCurrent(prefix);return result;}
-  finally{closed=true;await cancel();this.directTasks.delete(name);}
+  finally{closed=true;try{await cancel();this.directTasks.delete(name);}catch(error){this.directStopFailures ||= new Set();this.directStopFailures.add(prefix);throw error;}}
  }
 
  async removeRuntime(owner,id,engine){
@@ -403,17 +403,17 @@ export class DockerEnvironments {
     cancelling=pending;void pending.catch(()=>{if(cancelling===pending)cancelling=null;});return pending;
    };
    this.directTasks ||= new Map();this.directTasks.set(task,{prefix,cancel});
-   const report=error=>{if(!closed && child.listenerCount('error'))child.emit('error',error);console.error('直连任务清理失败：'+error.message);};
+   const report=error=>{this.directStopFailures ||= new Set();this.directStopFailures.add(prefix);if(!closed && child.listenerCount('error'))child.emit('error',error);console.error('直连任务清理失败：'+error.message);};
    child.once('close',()=>{closed=true;void cancel().then(()=>this.directTasks.delete(task)).catch(report);});
    child.kill=(type='SIGTERM')=>{void cancel().then(()=>kill(type)).catch(report);return true;};
    const abort=()=>child.kill();signal?.addEventListener('abort',abort,{once:true});child.once('close',()=>signal?.removeEventListener('abort',abort));return child;
   };
  }
 
- async spawner(owner,id){const assertCurrent=this.taskLaunchGuard();const {prefix,item}=await this.get(owner,id);if(item.external)throw new Error('已有容器无法保证全程代理隔离，请使用Kuneco创建的容器进行代理对话，或新建直连对话');assertCurrent(prefix);const binary=await this.binary('docker');const proxy=await this.exec(owner,id,['node','-e',"try{process.stdout.write(require('fs').readFileSync('/tmp/dingtu-chat-proxy','utf8'))}catch{}"]);assertCurrent(prefix);if(!proxy)throw new Error('当前环境代理尚未就绪，无法启动代理任务');const proxyEnvironment=proxy?['HTTP_PROXY','HTTPS_PROXY','ALL_PROXY','http_proxy','https_proxy','all_proxy'].flatMap(key=>['-e',key+'='+proxy]):[];return ({command,args,signal,cwd='/workspace'})=>{
+ async spawner(owner,id){const assertCurrent=this.taskLaunchGuard();const {prefix,item}=await this.get(owner,id);if(item.external)throw new Error('已有容器无法保证全程代理隔离，请使用Kuneco创建的容器进行代理对话，或新建直连对话');assertCurrent(prefix);const binary=await this.binary('docker');const proxy=await this.exec(owner,id,['node','-e',"try{process.stdout.write(require('fs').readFileSync('/tmp/dingtu-chat-proxy','utf8'))}catch{}"]);assertCurrent(prefix);if(!proxy)throw new Error('当前环境代理尚未就绪，无法启动代理任务');const containerId=(await this.command(['inspect','--format','{{.Id}}',prefix+'-worker'])).trim();assertCurrent(prefix);if(!/^[a-f0-9]{64}$/.test(containerId))throw new Error('工作容器标识不可确认');const proxyEnvironment=proxy?['HTTP_PROXY','HTTPS_PROXY','ALL_PROXY','http_proxy','https_proxy','all_proxy'].flatMap(key=>['-e',key+'='+proxy]):[];return ({command,args,signal,cwd='/workspace'})=>{
   assertCurrent(prefix);if(signal?.aborted)throw new Error('请求已取消');const task=randomUUID();
-  const child=spawn(binary,['--host',this.endpoint,'exec','-i','--user','1000:1000','--workdir','/workspace','-e','LANG=C.UTF-8','-e','LC_ALL=C.UTF-8',...proxyEnvironment,prefix+'-worker','node','/opt/dingtu/exec.mjs',task,command,...args],{stdio:['pipe','pipe','pipe'],env:{...process.env,DOCKER_HOST:'',DOCKER_CONTEXT:this.context}});
-  trackProxyTask(this,owner,id,prefix,task,child);
+  const child=spawn(binary,['--host',this.endpoint,'exec','-i','--user','1000:1000','--workdir','/workspace','-e','LANG=C.UTF-8','-e','LC_ALL=C.UTF-8',...proxyEnvironment,containerId,'node','/opt/dingtu/exec.mjs',task,command,...args],{stdio:['pipe','pipe','pipe'],env:{...process.env,DOCKER_HOST:'',DOCKER_CONTEXT:this.context}});
+  trackProxyTask(this,owner,id,prefix,task,child,undefined,{containerId,endpoint:this.endpoint});
   const abort=()=>child.kill();signal?.addEventListener('abort',abort,{once:true});child.once('close',()=>signal?.removeEventListener('abort',abort));return child;
  };}
 
@@ -421,7 +421,7 @@ export class DockerEnvironments {
   guard(prefix);if(signal?.aborted)throw new Error('请求已取消');const token=randomUUID();
   const config=direct?null:item.proxy,environment=direct?['HTTP_PROXY','HTTPS_PROXY','ALL_PROXY','http_proxy','https_proxy','all_proxy'].flatMap(key=>['-e',key+'=']).concat(['-e','NO_PROXY=*','-e','no_proxy=*']):[];if(config?.host){const proxy=new URL((config.protocol==='socks5'?'socks5:':config.protocol==='https'?'https:':'http:')+'//'+config.host+':'+config.port);if(config.username){proxy.username=config.username;proxy.password=config.password || '';}for(const key of ['HTTP_PROXY','HTTPS_PROXY','ALL_PROXY','http_proxy','https_proxy','all_proxy'])environment.push('-e',key+'='+proxy.toString());}
   const child=spawn(binary,['--host',item.external.endpoint,'exec','-i','--workdir',item.external.workingDirectory,'-e','LANG=C.UTF-8','-e','LC_ALL=C.UTF-8',...environment,item.external.id,...externalTaskArguments(token,command,args)],{stdio:['pipe','pipe','pipe']});
-  trackProxyTask(this,owner,id,prefix,token,child,externalTaskCancellation(this,item,token));const abort=()=>child.kill();signal?.addEventListener('abort',abort,{once:true});child.once('close',()=>signal?.removeEventListener('abort',abort));return child;
+  trackProxyTask(this,owner,id,prefix,token,child,externalTaskCancellation(this,item,token),{containerId:item.external.id,endpoint:item.external.endpoint});const abort=()=>child.kill();signal?.addEventListener('abort',abort,{once:true});child.once('close',()=>signal?.removeEventListener('abort',abort));return child;
  };}
 
 }

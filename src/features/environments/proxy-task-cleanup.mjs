@@ -1,3 +1,4 @@
+import {cancelWithContainerFallback} from './task-container-state.mjs';
 // Cancellation belongs to the container task, not to its attached Docker CLI.
 export const cancelProxyTaskSource = `
 const fs=require('node:fs');
@@ -14,11 +15,12 @@ const deadline=Date.now()+5000;
 const timer=setInterval(()=>{if(!fs.existsSync(file)){clearInterval(timer);return;}if(Date.now()>=deadline){clearInterval(timer);console.error('Task cancellation not completed');process.exitCode=1;}},50);
 `;
 
-export function trackProxyTask(manager,owner,id,prefix,task,child,externalCancel){
+export function trackProxyTask(manager,owner,id,prefix,task,child,externalCancel,execution){
  const kill=child.kill.bind(child);let closed=false,cancelling;
  const cancel=(mark=true)=>{
   if(cancelling)return cancelling;
-  const pending=externalCancel?externalCancel():manager.exec(owner,id,['node','-e',cancelProxyTaskSource,task,mark?'1':'0'],{timeout:10000});
+  const args=['node','-e',cancelProxyTaskSource,task,mark?'1':'0'];
+  const pending=cancelWithContainerFallback(manager,execution,()=>externalCancel?externalCancel():execution?manager.command(['exec','--user','1000:1000',execution.containerId,...args],{endpoint:execution.endpoint,timeout:10000}):manager.exec(owner,id,args,{timeout:10000}));
   cancelling=pending;void pending.catch(()=>{if(cancelling===pending)cancelling=null;});return pending;
  };
  manager.directTasks ||= new Map();manager.directTasks.set(task,{prefix,cancel});

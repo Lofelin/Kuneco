@@ -44,7 +44,7 @@ test('stop barrier covers container shutdown and failure stays blocked until a s
 });
 test('external stop invalidates old tasks and stops on its endpoint without deleting foreign containers',async()=>{
  const {m,calls}=fixture(),cleaned=[];m.get=async()=>({prefix,item:{external:{id:'foreign-id',endpoint:'unix:///fixture.sock'}}});m.stopDirectTasks=async p=>cleaned.push(p);
- m.command=async(a,options)=>{calls.push([a,options]);return a[0]==='inspect'?'false':'';};const stale=m.taskLaunchGuard();await m.stop(owner,id);
+ m.command=async(a,options)=>{calls.push([a,options]);return a[0]==='ps'?'foreign-id':a[0]==='inspect'?'false':'';};const stale=m.taskLaunchGuard();await m.stop(owner,id);
  assert.deepEqual(cleaned,[prefix]);assert.throws(()=>stale(prefix),/停止或切换/);assert.ok(calls.some(([a,o])=>a[0]==='stop'&&a.at(-1)==='foreign-id'&&o.endpoint==='unix:///fixture.sock'));assert.ok(!calls.some(([a])=>a[0]==='rm'));
 });
 test('worker preparation held across environment stop cannot publish credentials or finish late',async()=>{
@@ -71,8 +71,31 @@ test('upgrade rollback restores the old gateway name but does not restart it aft
 test('external startup already in Docker is awaited and stopped before environment stop returns',async()=>{
  const {m,calls}=fixture(),entered=deferred(),release=deferred();let running=false;
  m.get=async()=>({prefix,item:{external:{id:'foreign-id',endpoint:'unix:///fixture.sock'}}});m.stopDirectTasks=async()=>{};
- m.command=async(a,options)=>{calls.push([a,options]);if(a[0]==='start'){entered.resolve();await release.promise;running=true;}if(a[0]==='stop')running=false;return a[0]==='inspect'?String(running):'';};
+ m.command=async(a,options)=>{calls.push([a,options]);if(a[0]==='start'){entered.resolve();await release.promise;running=true;}if(a[0]==='stop')running=false;return a[0]==='ps'?'foreign-id':a[0]==='inspect'?String(running):'';};
  const starting=m.start(owner,id),rejected=assert.rejects(starting,/停止或切换/);await entered.promise;
  let stopped=false;const stopping=m.stop(owner,id).then(()=>{stopped=true;});await new Promise(r=>setImmediate(r));assert.equal(stopped,false);
  release.resolve();await Promise.all([stopping,rejected]);assert.equal(running,false);assert.ok(!calls.some(([a])=>a[0]==='rm'));
+});
+test('external stop cancels tracked tasks without depending on the managed engine',async()=>{
+ const {m}=fixture(),external={id:'a'.repeat(64),endpoint:'unix:///external-only.sock'};let cancelled=false;const seen=[];
+ m.get=async()=>({prefix,item:{external}});m.directTasks=new Map([['tracked',{prefix,cancel:async()=>{cancelled=true;}}]]);
+ m.command=async(a,o={})=>{assert.equal(o.endpoint,external.endpoint,'must never query the managed engine');seen.push(a);return a[0]==='ps'?external.id:a[0]==='inspect'?'false':'';};
+ await m.stop(owner,id);assert.equal(cancelled,true);assert.equal(m.directTasks.size,0);assert.ok(seen.some(a=>a[0]==='ps'&&a.includes('--no-trunc')&&a.includes('{{.ID}}')));assert.ok(seen.some(a=>a[0]==='stop'&&a.at(-1)===external.id));
+});
+test('confirmed absent external container does not block switching and partial IDs never match',async()=>{
+ const {m}=fixture(),external={id:'a'.repeat(64),endpoint:'unix:///external-only.sock'},seen=[];m.load=async()=>({environments:[{id,external}]});
+ m.command=async(a,o)=>{assert.equal(o.endpoint,external.endpoint);seen.push(a);if(a[0]!=='ps')assert.fail('absent external container must not be stopped');return external.id.slice(0,12);};
+ const stale=m.taskLaunchGuard();await m.stopOtherEnvironments(owner,null);assert.equal(seen.length,1);assert.throws(()=>stale(prefix),/停止或切换/);
+});
+test('external daemon listing failure stays visible and blocks startup until retry',async()=>{
+ const {m}=fixture(),external={id:'b'.repeat(64),endpoint:'unix:///external-only.sock'};let unavailable=true;
+ m.get=async()=>({prefix,item:{external}});m.command=async()=>{if(unavailable)throw Error('external daemon unavailable');return '';};
+ await assert.rejects(m.stop(owner,id),/external daemon unavailable/);assert.throws(()=>m.taskLaunchGuard()(prefix),/清理未完成/);
+ unavailable=false;await m.stop(owner,id);assert.doesNotThrow(()=>m.taskLaunchGuard()(prefix));
+});
+test('reactivating an external environment reconciles its tracked tasks without managed scans',async()=>{
+ const {m}=fixture(),external={id:'c'.repeat(64),endpoint:'unix:///external-only.sock'},seen=[];m.load=async()=>({environments:[{id,external}]});
+ m.stopOtherEnvironments=async()=>{};m.start=async()=>seen.push('start');m.select=async()=>seen.push('select');m.command=async()=>assert.fail('no managed engine request');
+ m.directTasks=new Map([['tracked',{prefix,cancel:async()=>seen.push('cancel') }]]);
+ await m.activate(owner,id);assert.deepEqual(seen,['cancel','start','select']);assert.equal(m.directTasks.size,0);
 });
