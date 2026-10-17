@@ -1,0 +1,46 @@
+import assert from 'node:assert/strict';
+import {once} from 'node:events';
+import {randomUUID} from 'node:crypto';
+import {DockerEnvironments,workerArguments,directTaskArguments} from '../../src/features/environments/docker-environments.mjs';
+import {workerImage,validateWorkerFirewall,ensureDirectNetwork} from '../../src/features/environments/container-reliability.mjs';
+const m=new DockerEnvironments({sourceRoot:process.cwd()}),prefix='kuneco-firewall-test-'+randomUUID(),network=prefix+'-private',worker=prefix+'-worker',gateway=prefix+'-gateway',peer=prefix+'-direct-peer',direct=prefix+'-direct-client';
+const image=await workerImage(m,'dingtu-runtime:3-clean');
+const inspect=async name=>JSON.parse(await m.command(['inspect','--format','{{json .}}',name]));
+const probe=`const net=require('net');const s=net.connect(Number(process.argv[2]),process.argv[1]);s.on('connect',()=>{s.destroy();process.exit(0)});s.on('error',()=>process.exit(2));s.setTimeout(700,()=>{s.destroy();process.exit(3)});`;
+const server=`require('net').createServer(s=>s.end('fixture')).listen(8080,'0.0.0.0');`;
+try{
+ await m.command(['network','create','--internal','--label','app=dingtu',network]);
+ await ensureDirectNetwork(m,prefix);
+ for(const [name,net] of [[gateway,network],[peer,prefix+'-direct-egress']])await m.command(['run','-d','--name',name,'--network',net,'--network-alias','fixture-peer','--cap-drop','ALL','--user','1000:1000','--entrypoint','node',image,'-e',server]);
+ const gatewayIP=(await inspect(gateway)).NetworkSettings.Networks[network].IPAddress,peerIP=(await inspect(peer)).NetworkSettings.Networks[prefix+'-direct-egress'].IPAddress;
+ await m.command(workerArguments({name:worker,network,gatewayIP,proxyURL:'http://fixture',image,spec:'firewall-test'}));
+ for(let i=0;;i++){try{await validateWorkerFirewall(m,worker,await inspect(worker));break;}catch(e){if(i===20)throw e;await new Promise(r=>setTimeout(r,100));}}
+ await m.command(['exec','--user','1000:1000',worker,'node','-e',probe,gatewayIP,'8080']);
+ await assert.rejects(m.command(['exec','--user','1000:1000',worker,'node','-e',probe,peerIP,'8080']));
+ await assert.rejects(m.command(['exec','--user','1000:1000',worker,'node','-e',probe,gatewayIP,'8081']));
+ await m.command(directTaskArguments({prefix,name:direct,image,task:randomUUID(),command:'node',args:['-e',probe,'fixture-peer','8080']}));
+ // Cancel before Docker has finished creating the direct execution container.
+ m.get=async()=>({prefix,item:{imageName:'dingtu-runtime:3-clean'}});
+ const launch=await m.directChatSpawner('fixture','fixture'),abort=new AbortController();
+ const child=launch({command:'node',args:['-e','setInterval(()=>{},1000)'],signal:abort.signal});
+ const ended=once(child,'close');abort.abort();await ended;
+ const leftovers=await m.command(['ps','-aq','--filter','label=app=dingtu-direct','--filter','label=io.kuneco.environment='+prefix]);assert.equal(leftovers,'');
+ assert.throws(()=>launch({command:'node',args:[],signal:abort.signal}),/取消/);
+ // Raw-chain drops must precede Docker's embedded DNS translation (including IPv6 loopback).
+ await m.command(['exec','--user','1000:1000',worker,'node','-e',`for(const [family,host] of [['udp4','127.0.0.1'],['udp6','::1']]){const s=require('dgram').createSocket(family);s.on('error',()=>{});s.send(Buffer.from('fixture'),53,host,()=>s.close());}`]);
+ await m.command(['exec','--user','1000:1000',worker,'node','-e',`const s=require('dgram').createSocket('udp4');s.send(Buffer.from('fixture'),45678,'127.0.0.11',()=>s.close());`]);
+ const resolverCounters=await m.command(['exec',worker,'iptables','-t','raw','-L','OUTPUT','-n','-v']);assert.match(resolverCounters,/\s[1-9]\d*\s+\d+\s+DROP[^\n]+127\.0\.0\.11/);
+ for(const bin of ['iptables','ip6tables']){const rules=await m.command(['exec','--user','0',worker,bin,'-t','raw','-L','OUTPUT','-n','-v']);assert.match(rules,/\s[1-9]\d*\s+\d+\s+DROP\s+(?:udp|17)/);}
+ // A local direct relay cannot be reached through shared localhost: distinct network/PID namespaces.
+ const w=await inspect(worker);assert.deepEqual(Object.keys(w.NetworkSettings.Networks),[network]);
+ await assert.rejects(m.command(['exec','--user','1000:1000',worker,'iptables','-P','OUTPUT','ACCEPT']));
+ const before=await m.command(['exec',worker,'iptables','-t','raw','-S','OUTPUT']);
+ await m.command(['exec',worker,'iptables','-t','raw','-D','OUTPUT','1']);
+ await assert.rejects(validateWorkerFirewall(m,worker,await inspect(worker)),/规则/);
+ assert.match(before,/--dport 53 -j DROP/);
+ console.log(JSON.stringify({proxyGatewayAllowed:true,directPeerBlocked:true,otherGatewayPortBlocked:true,directTaskConnected:true,dockerDNSHighPortBlocked:true,dnsBeforeDNATBlocked:true,ipv6DNSBlocked:true,unprivilegedRulesImmutable:true,missingRuleRejected:true,directEarlyCancelCleaned:true,productionUntouched:true}));
+}finally{
+ for(const name of [worker,gateway,peer,direct])await m.command(['rm','-f',name]).catch(()=>{});
+ await m.command(['network','rm',network,prefix+'-direct-egress']).catch(()=>{});
+ for(const suffix of ['home','work'])await m.command(['volume','rm',worker+'-'+suffix]).catch(()=>{});
+}

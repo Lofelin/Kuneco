@@ -1,6 +1,6 @@
-import {SPEC_LABEL,reliabilityArguments,specHash,workerImage,ensureWorker,containerStatus,inspectContainer,ensurePrivateNetwork,validateContainerNetworks,ATTEMPT_LABEL,removeAttemptContainer} from './container-reliability.mjs';
+import {SPEC_LABEL,reliabilityArguments,specHash,workerImage,ensureWorker,containerStatus,inspectContainer,ensurePrivateNetwork,ensureDirectNetwork,validateContainerNetworks,ATTEMPT_LABEL,removeAttemptContainer} from './container-reliability.mjs';
 import {gatewayImage} from './gateway-image.mjs';
-import {DIRECT_CHAT_GID,directChatNetworkSetup,engineDNSResolver,directDNSRelay,directDNSReady} from '../chat/container-chat-network.mjs';
+
 import {ENVIRONMENT_ICONS,environmentIcon} from './environment-icons.mjs';
 import http from 'node:http';
 import {RUNTIME_INSTALL_COMMANDS,RUNTIME_CATALOG,CLI_RUNTIMES} from '../runtimes/runtime-install-config.mjs';
@@ -20,8 +20,15 @@ export function workerArguments({name,network,gatewayIP,proxyURL,image=IMAGE,pro
  return ['run','-d',...reliabilityArguments,'--health-cmd','test -f /tmp/kuneco-worker-ready','--health-interval','30s','--health-timeout','3s','--health-retries','3','--name',name,'--label','app=dingtu',...(spec?['--label',SPEC_LABEL+'='+spec]:[]),'--network',network,'--dns','127.0.0.1','--read-only','--cap-drop','ALL','--cap-add','NET_ADMIN','--cap-add','SETUID','--cap-add','SETGID','--security-opt','no-new-privileges','--pids-limit','256','--memory','2g','--cpus','2','--tmpfs','/tmp:rw,nosuid,nodev,size=256m','--mount',`type=volume,src=${name}-home,dst=/home/node`,'--mount',`type=volume,src=${name}-work,dst=/workspace`,...projectMounts.flatMap(m=>['--mount',`type=bind,src=${m.source},dst=${m.target}`]),'-e',`DINGTU_GATEWAY_IP=${gatewayIP}`,...['HTTP_PROXY','HTTPS_PROXY','ALL_PROXY'].flatMap(key=>['-e',`${key}=${proxyURL}`]),'-e','NO_PROXY=localhost,127.0.0.1','-e','PATH=/home/node/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin','--entrypoint','/opt/dingtu/worker.sh',image];
 }
 // Downloads run separately from the proxy-only worker. Only its home volume is shared.
-export function runtimeInstallerArguments({name,prefix,image=IMAGE,args,input=false}){
- return ['run','--rm',...reliabilityArguments,...(input?['-i']:[]),'--name',name,'--label','app=dingtu-installer','--network','bridge','--user','1000:1000','--read-only','--cap-drop','ALL','--security-opt','no-new-privileges','--pids-limit','128','--memory','2g','--cpus','2','--tmpfs','/tmp:rw,nosuid,nodev,size=512m','--mount',`type=volume,src=${prefix}-worker-home,dst=/home/node`,'-e','HOME=/home/node','-e','NPM_CONFIG_PREFIX=/home/node/.local','-e','NPM_CONFIG_CACHE=/home/node/.local/.npm-cache','-e','NPM_CONFIG_USERCONFIG=/dev/null','-e','PATH=/home/node/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',...['HTTP_PROXY','HTTPS_PROXY','ALL_PROXY','http_proxy','https_proxy','all_proxy'].flatMap(key=>['-e',key+'=']),'--entrypoint',args[0],image,...args.slice(1)];
+export function runtimeInstallerArguments({name,prefix,image=IMAGE,args,input=false,network='bridge'}){
+ return ['run','--rm',...reliabilityArguments,...(input?['-i']:[]),'--name',name,'--label','app=dingtu-installer','--network',network,'--user','1000:1000','--read-only','--cap-drop','ALL','--security-opt','no-new-privileges','--pids-limit','128','--memory','2g','--cpus','2','--tmpfs','/tmp:rw,nosuid,nodev,size=512m','--mount',`type=volume,src=${prefix}-worker-home,dst=/home/node`,'-e','HOME=/home/node','-e','NPM_CONFIG_PREFIX=/home/node/.local','-e','NPM_CONFIG_CACHE=/home/node/.local/.npm-cache','-e','NPM_CONFIG_USERCONFIG=/dev/null','-e','PATH=/home/node/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',...['HTTP_PROXY','HTTPS_PROXY','ALL_PROXY','http_proxy','https_proxy','all_proxy'].flatMap(key=>['-e',key+'=']),'--entrypoint',args[0],image,...args.slice(1)];
+}
+// Direct tasks have their own network, PID and /tmp namespaces; never attach bridge to the proxy worker.
+export function directTaskArguments({prefix,name,image,projectMounts=[],task,command,args=[]}){
+ const run=runtimeInstallerArguments({name,prefix,image,input:true,network:prefix+'-direct-egress',args:['node','/opt/dingtu/exec.mjs',task,command,...args]});
+ run[run.indexOf('app=dingtu-installer')]='app=dingtu-direct';
+ run.splice(run.indexOf('--entrypoint'),0,'--label','io.kuneco.environment='+prefix,'--workdir','/workspace','--mount',`type=volume,src=${prefix}-worker-work,dst=/workspace`,...projectMounts.flatMap(m=>['--mount',`type=bind,src=${m.source},dst=${m.target}`]),'-e','NO_PROXY=*','-e','no_proxy=*','-e','LANG=C.UTF-8','-e','LC_ALL=C.UTF-8');
+ return run;
 }
 export class DockerEnvironments {
  constructor({directory,sourceRoot,encrypt,decrypt,defaultLocalEnabled=false}){Object.assign(this,{directory,sourceRoot,encrypt,decrypt,defaultLocalEnabled});this.context='colima-dingtu';this.endpoint='unix://'+path.join(homedir(),'.colima','dingtu','docker.sock');this.busy=false;}
@@ -196,8 +203,9 @@ export class DockerEnvironments {
  async forgetLocal(owner,name){const data=await this.load(owner);if(data.localEnabled===false || name!==(data.localName || '本机环境'))throw new Error('请输入完整且一致的环境名称');data.localEnabled=false;if(!data.activeId)data.activeId=data.environments[0]?.id || null;await this.save(owner,data);}
  async deleteResources(owner,id,name){
   const {item,prefix}=await this.get(owner,id);if(name!==item.name)throw new Error('请输入完整且一致的环境名称');if(item.external)return;
+  await this.stopDirectTasks(prefix);
   // List first so unavailable engines and removal failures cannot look like successful deletion.
-  for(const [kind,names] of [['container',[prefix+'-worker',prefix+'-gateway']],['network',[prefix+'-private']],['volume',[prefix+'-worker-home',prefix+'-worker-work']]]){
+  for(const [kind,names] of [['container',[prefix+'-worker',prefix+'-gateway']],['network',[prefix+'-private',prefix+'-direct-egress']],['volume',[prefix+'-worker-home',prefix+'-worker-work']]]){
    const existing=new Set((await this.command([kind,'ls',...(kind==='container'?['-a']:[]),'--format','{{.Name'+(kind==='container'?'s':'')+'}}'])).split('\n'));
    for(const name of names)if(existing.has(name))await this.command([kind,'rm',...(kind==='container'?['-f']:[]),name]);
   }
@@ -241,7 +249,12 @@ export class DockerEnvironments {
  }
  async rpc(owner,id,action,value){const {prefix}=await this.get(owner,id);const raw=await this.command(['exec','-i',prefix+'-gateway','node','/opt/dingtu/control.mjs'],{input:JSON.stringify({action,value})});return JSON.parse(raw);}
  async start(owner,id){const {item}=await this.get(owner,id);if(item.external){await this.command(['start',item.external.id],{endpoint:item.external.endpoint});return this.state(owner);}const adapter=await this.connect(owner,id,{protocol:'http',host:'192.0.2.1',port:1,username:'',password:''},null);await adapter.startWorker();return this.state(owner);}
- async stop(owner,id){const {prefix,item}=await this.get(owner,id);if(item.external){await this.command(['stop','-t','3',item.external.id],{endpoint:item.external.endpoint});return this.state(owner);}const names=new Set((await this.command(['ps','-a','--format','{{.Names}}'])).split('\n'));for(const suffix of ['worker','gateway']){const name=prefix+'-'+suffix;if(!names.has(name))continue;await this.command(['stop','-t','5',name]);if((await this.command(['inspect','--format','{{.State.Running}}',name]))!=='false')throw new Error('容器未能停止，请重试');}return this.state(owner);}
+ async stopDirectTasks(prefix){
+  await Promise.all([...(this.directTasks?.values() || [])].filter(task=>task.prefix===prefix).map(task=>task.cancel()));
+  const ids=(await this.command(['ps','-aq','--filter','label=app=dingtu-direct','--filter','label=io.kuneco.environment='+prefix])).split('\n').filter(id=>/^[a-f0-9]+$/.test(id));
+  for(const id of ids)await this.command(['stop','-t','3',id]);
+ }
+ async stop(owner,id){const {prefix,item}=await this.get(owner,id);if(item.external){await this.command(['stop','-t','3',item.external.id],{endpoint:item.external.endpoint});return this.state(owner);}await this.stopDirectTasks(prefix);const names=new Set((await this.command(['ps','-a','--format','{{.Names}}'])).split('\n'));for(const suffix of ['worker','gateway']){const name=prefix+'-'+suffix;if(!names.has(name))continue;await this.command(['stop','-t','5',name]);if((await this.command(['inspect','--format','{{.State.Running}}',name]))!=='false')throw new Error('容器未能停止，请重试');}return this.state(owner);}
  async connect(owner,id,config,expectedIp,onVerified){
   const {item}=await this.get(owner,id);if(item.external)throw new Error('已有容器使用原网络，请使用应用代理连接');const {prefix,name,network}=await this.ensureGateway(owner,id);
   // Give the container service time to bind without silently retrying a proxy request.
@@ -300,24 +313,33 @@ export class DockerEnvironments {
  }if(!RUNTIME_INSTALL_COMMANDS[engine])throw new Error('未知运行时');await this.runRuntimeInstaller(owner,id,['bash','-o','pipefail','-c',RUNTIME_INSTALL_COMMANDS[engine]]);await this.exec(owner,id,[RUNTIME_CATALOG[engine].command,'--version']);return saveMetadata();}
  async directChatSpawner(owner,id){
   const {prefix,item}=await this.get(owner,id);if(item.external)return this.externalSpawner(owner,id,item,{direct:true});
-  const binary=await this.binary('docker'),worker=prefix+'-worker';
-  const dns=await this.command(['exec',prefix+'-gateway','node','-e',engineDNSResolver]);
-  if(!/^[0-9a-fA-F:.]+$/.test(dns))throw new Error('容器引擎DNS无效');
-  const networks=JSON.parse(await this.command(['inspect','--format','{{json .NetworkSettings.Networks}}',worker]));
-  if(!networks.bridge)await this.command(['network','connect','--gw-priority','1','bridge',worker]);
-  await this.command(['exec','--user','0',worker,'sh','-eu','-c',directChatNetworkSetup,'dingtu-direct',dns]);
-  await this.command(['exec','-d','--user','1000:'+DIRECT_CHAT_GID,worker,'node','-e',directDNSRelay,dns]);
-  await this.command(['exec','--user','1000:'+DIRECT_CHAT_GID,worker,'node','-e',directDNSReady]);
+  const binary=await this.binary('docker'),image=await workerImage(this,item.imageName || LEGACY_IMAGE);await ensureDirectNetwork(this,prefix);
   return ({command,args=[],signal,cwd='/workspace'})=>{
    if(signal?.aborted)throw new Error('请求已取消');const task=randomUUID();
-   const environment=['HTTP_PROXY','HTTPS_PROXY','ALL_PROXY','http_proxy','https_proxy','all_proxy'].flatMap(key=>['-e',key+'=']).concat(['-e','NO_PROXY=*','-e','no_proxy=*']);
-   const child=spawn(binary,['--host',this.endpoint,'exec','-i','--user','0','--workdir','/workspace','-e','LANG=C.UTF-8','-e','LC_ALL=C.UTF-8',...environment,worker,'setpriv','--reuid=1000','--regid='+DIRECT_CHAT_GID,'--clear-groups','--bounding-set=-all','node','/opt/dingtu/exec.mjs',task,command,...args],{stdio:['pipe','pipe','pipe'],env:{...process.env,DOCKER_HOST:'',DOCKER_CONTEXT:this.context}});
-   const kill=child.kill.bind(child);child.kill=(type='SIGTERM')=>{void this.exec(owner,id,['node','-e',"const fs=require('fs'),p='/tmp/dingtu-'+process.argv[1];fs.writeFileSync(p+'.cancel','',{mode:0o600});try{process.kill(Number(fs.readFileSync(p,'utf8')),'SIGTERM')}catch{}",task]).finally(()=>kill(type)).catch(()=>{});return true;};
+   const worker=prefix+'-direct-'+task;
+   const run=directTaskArguments({prefix,name:worker,image,projectMounts:item.projectMounts || [],task,command,args});
+   const child=spawn(binary,['--host',this.endpoint,...run],{stdio:['pipe','pipe','pipe'],env:{...process.env,DOCKER_HOST:'',DOCKER_CONTEXT:this.context}});
+   const kill=child.kill.bind(child);let closed=false,cancelling;
+   const cancel=()=>cancelling ||= (async()=>{
+    // Do not kill the Docker client before creation finishes: that could leave an orphan task.
+    const deadline=Date.now()+15000;
+    while(!closed && Date.now()<deadline){
+     let container;try{container=JSON.parse(await this.command(['inspect','--format','{{json .}}',worker],{timeout:3000}));}catch{}
+     if(container?.Id){if(container.Config?.Labels?.app!=='dingtu-direct'||container.Config?.Labels?.['io.kuneco.environment']!==prefix)throw new Error('直连任务归属不匹配，已保留');try{await this.command(['stop','-t','3',container.Id]);}catch(error){if(await this.command(['ps','-aq','--filter','id='+container.Id]))throw error;return;}
+      // Also remove a created-but-not-yet-started container, closing the Docker start/cancel race.
+      try{await this.command(['rm','-f',container.Id]);}catch(error){if(await this.command(['ps','-aq','--filter','id='+container.Id]))throw error;}return;}
+     await new Promise(r=>setTimeout(r,100));
+    }
+    if(!closed)throw new Error('直连任务取消超时，请检查容器引擎');
+   })();
+   this.directTasks ||= new Map();this.directTasks.set(task,{prefix,cancel});
+   child.once('close',()=>{closed=true;this.directTasks.delete(task);});
+   child.kill=(type='SIGTERM')=>{void cancel().then(()=>kill(type)).catch(error=>{child.emit('error',error);});return true;};
    const abort=()=>child.kill();signal?.addEventListener('abort',abort,{once:true});child.once('close',()=>signal?.removeEventListener('abort',abort));return child;
   };
  }
 
- async spawner(owner,id){const {prefix,item}=await this.get(owner,id);if(item.external)throw new Error('已有容器无法保证全程代理隔离，请使用Kuneco创建的容器进行代理对话，或新建直连对话');const binary=await this.binary('docker');const proxy=await this.exec(owner,id,['node','-e',"try{process.stdout.write(require('fs').readFileSync('/tmp/dingtu-chat-proxy','utf8'))}catch{}"]);const proxyEnvironment=proxy?['HTTP_PROXY','HTTPS_PROXY','ALL_PROXY','http_proxy','https_proxy','all_proxy'].flatMap(key=>['-e',key+'='+proxy]):[];return ({command,args,signal,cwd='/workspace'})=>{
+ async spawner(owner,id){const {prefix,item}=await this.get(owner,id);if(item.external)throw new Error('已有容器无法保证全程代理隔离，请使用Kuneco创建的容器进行代理对话，或新建直连对话');const binary=await this.binary('docker');const proxy=await this.exec(owner,id,['node','-e',"try{process.stdout.write(require('fs').readFileSync('/tmp/dingtu-chat-proxy','utf8'))}catch{}"]);if(!proxy)throw new Error('当前环境代理尚未就绪，无法启动代理任务');const proxyEnvironment=proxy?['HTTP_PROXY','HTTPS_PROXY','ALL_PROXY','http_proxy','https_proxy','all_proxy'].flatMap(key=>['-e',key+'='+proxy]):[];return ({command,args,signal,cwd='/workspace'})=>{
   if(signal?.aborted)throw new Error('请求已取消');const task=randomUUID();
   const child=spawn(binary,['--host',this.endpoint,'exec','-i','--user','1000:1000','--workdir','/workspace','-e','LANG=C.UTF-8','-e','LC_ALL=C.UTF-8',...proxyEnvironment,prefix+'-worker','node','/opt/dingtu/exec.mjs',task,command,...args],{stdio:['pipe','pipe','pipe'],env:{...process.env,DOCKER_HOST:'',DOCKER_CONTEXT:this.context}});
   const kill=child.kill.bind(child);child.kill=(type='SIGTERM')=>{void this.exec(owner,id,['node','-e',"const fs=require('fs'),p='/tmp/dingtu-'+process.argv[1];fs.writeFileSync(p+'.cancel','',{mode:0o600});try{process.kill(Number(fs.readFileSync(p,'utf8')),'SIGTERM')}catch{}",task]).finally(()=>kill(type)).catch(()=>{});return true;};

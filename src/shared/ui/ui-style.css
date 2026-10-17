@@ -2009,3 +2009,15 @@ wa-switch{--wa-form-control-activated-color:var(--ink)}
 .environment-reliability{min-width:0}
 .environment-reliability>.preference-heading{margin:0;font-size:14px;line-height:20px}
 .environment-reliability>.settings-section-description{margin:var(--settings-title-description-gap) 0 var(--settings-section-content-gap);font-size:12px;line-height:20px;color:var(--muted)}
+
+/* Environment content: grouped facts, bounded readable width and consistent section spacing. */
+.environments-body .environment-expanded{width:100%;max-width:1120px;margin-inline:auto;box-sizing:border-box}
+.environment-network-facts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));margin:0;border:1px solid var(--line);border-radius:12px;background:var(--surface);overflow:hidden}
+.environment-network-facts>div{min-width:0;padding:12px 16px;display:flex;flex-direction:column;gap:4px;font-size:13px;line-height:20px}
+.environment-network-facts dt{color:var(--muted)}
+.environment-network-facts dd{margin:0;overflow-wrap:anywhere}
+.environment-network-facts>div:nth-child(n+3){border-top:1px solid var(--line)}
+.environment-inline-details .environment-inline-runtimes h3{margin:0;font-size:14px;line-height:20px}
+.environment-inline-details .environment-runtimes-hint{margin:var(--settings-title-description-gap) 0 var(--settings-section-content-gap);line-height:20px}
+.environment-container-identifiers strong{overflow-wrap:anywhere}
+@media(max-width:900px){.environment-network-facts{grid-template-columns:1fr}.environment-network-facts>div:nth-child(n+2){border-top:1px solid var(--line)}}

@@ -1,4 +1,4 @@
-import {containerDisplayRows} from '../features/environments/container-display-rows.mjs';
+import {containerDisplayRows,networkDisplayRows} from '../features/environments/container-display-rows.mjs';
 import {mountMessageActions,openMessageEditor} from '../features/chat/message-actions.mjs';
 import {mountNotificationSettings} from '../features/notifications/notification-settings.mjs';
 import {generatedAvatar,runtimeAccountAvatar,setAccountAvatar} from '../vendor/generated-avatar.js';
@@ -1640,12 +1640,20 @@ async function renderEnvironmentCard(row,id){
    ]:[])
   ]){if(value===null)continue;const term=document.createElement('dt'),description=document.createElement('dd');term.textContent=label;description.textContent=value;if(date){description.dataset.environmentDate=date;description.dataset.environmentRecent=String(label==='最近检测');description.textContent=displayEnvironmentDate(date,label==='最近检测');description.title=displayDate(date);}const pair=document.createElement('div');if(label==='基础镜像来源')pair.className='environment-fact-wide';pair.append(term,description);facts.append(pair);}
   const runtimes=document.createElement('div');runtimes.className='environment-inline-runtimes';
-  const title=document.createElement('h3');title.textContent='运行时';const count=document.createElement('span');count.className='environment-runtime-count muted';count.textContent=detail.runtimes.length+' 个运行时';title.append(count);const hint=document.createElement('p');hint.className='environment-runtimes-hint muted';hint.textContent='此环境中已检测到的运行时、CLI 版本及支持的模型。';runtimes.append(title,hint);
+  const title=document.createElement('h3');title.className='preference-heading';title.textContent='运行时';const count=document.createElement('span');count.className='environment-runtime-count muted';count.textContent=detail.runtimes.length+' 个运行时';title.append(count);const hint=document.createElement('p');hint.className='environment-runtimes-hint settings-section-description muted';hint.textContent='此环境中已检测到的运行时、CLI 版本及支持的模型。';runtimes.append(title,hint);
   if(detail.runtimes.length){
    const table=document.createElement('app-table');
    renderRuntimeTable(table,detail.runtimes,{columns:[{key:'name',label:'运行时',width:'145px'},{key:'version',label:'CLI 版本',width:'175px'},{key:'models',label:'模型'}],actions:false,onOpen:runtime=>{if(owner!==accountState.user?.id || id!==dockerEnvironmentState.activeId)return;switchPage('runtime');openRuntimeDetails(runtimeRegistry.runtimes.find(entry=>entry.id===runtime.id) || runtime);}});runtimes.append(table);
   }else{const empty=document.createElement('p');empty.className='environment-runtime-empty muted';empty.textContent='尚未配置运行时。'+(id===dockerEnvironmentState.activeId?'请前往「运行时」配置。':'切换到此环境后，请前往「运行时」配置。');runtimes.append(empty);}
   details.append(facts);
+  if(!local){
+   const section=document.createElement('section');section.className='environment-reliability environment-network';
+   const heading=document.createElement('h3');heading.className='preference-heading';heading.textContent='网络与防火墙';
+   const description=document.createElement('p');description.className='settings-section-description';description.textContent='显示本次读取的实际配置。防火墙检查与代理出口核验独立，检查失败不会重启代理。';
+   const facts=document.createElement('dl');facts.className='environment-network-facts';
+   for(const entry of networkDisplayRows(detail.reliability?.network,{external:detail.external})){const pair=document.createElement('div'),label=document.createElement('dt'),value=document.createElement('dd');label.textContent=entry.label;value.textContent=entry.value;pair.append(label,value);facts.append(pair);}
+   section.append(heading,description,facts);details.append(section);
+  }
   if(!local){
    const section=document.createElement('section');section.className='environment-reliability';
    const heading=document.createElement('h3');heading.className='preference-heading';heading.textContent='容器状态与保障';
