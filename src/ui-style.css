@@ -641,8 +641,6 @@ app-button.content-tab-pin::part(base),app-button.content-tab-close::part(base){
 #deleteEnvironmentExpected{padding:3px 6px;border-radius:4px;background:var(--hover);overflow-wrap:anywhere}
 #deleteEnvironmentError{color:#d34e4e;font-size:12px;line-height:1.5;margin:10px 0 0}
 #deleteEnvironmentError:empty{display:none}
-#confirmDeleteEnvironment::part(base){color:#d34e4e;background:#d34e4e12;border-color:transparent}
-#confirmDeleteEnvironment:not([disabled]):hover::part(base){color:#fff;background:#d34e4e}
 .environment-clickable{cursor:pointer;transition:border-color .12s,background .12s}
 .environment-clickable:hover{background:var(--hover)}
 .environment-clickable [role=app-button]:focus-visible{outline:2px solid var(--muted);outline-offset:6px;border-radius:4px}
@@ -689,7 +687,7 @@ app-button.content-tab-pin::part(base),app-button.content-tab-close::part(base){
 #environmentResultBadge[variant=success]::part(badge){background:color-mix(in srgb,var(--success) 12%,var(--canvas));color:var(--success)}
 #environmentResultBadge[variant=danger]::part(badge){background:color-mix(in srgb,#d34e4e 12%,var(--canvas));color:#d34e4e}
 .settings-content:has(#verify:not(.hidden)) .settings-page-heading,
-.settings-content:has(#verify:not(.hidden)) .settings-body{max-width:1052px;margin-inline:auto}
+.settings-content:has(#verify:not(.hidden)) .settings-body{max-width:var(--settings-form-max-width);margin-inline:auto}
 .settings-page-heading #verify{margin-left:auto;flex:none}
 .proxy-status-panel{padding:20px 0 24px;margin-bottom:24px;border-bottom:1px solid var(--line)}
 .proxy-status-heading{display:flex;align-items:center;gap:12px}.proxy-status-heading>strong{font-size:14px}
@@ -730,11 +728,11 @@ app-button.content-tab-pin::part(base),app-button.content-tab-close::part(base){
 .sidebar-collapsed .sidebar nav>.nav::part(label){justify-content:flex-start}
 #environmentTrigger,.sidebar-collapsed #environmentTrigger{width:100%;margin-inline:0}
 #environmentTrigger::part(base){transition:padding var(--sidebar-motion-duration) var(--sidebar-motion-easing)}
-.sidebar-collapsed #environmentTrigger::part(base){width:100%;min-width:0;padding-inline:12px;justify-content:flex-start}
-.sidebar-collapsed #environmentTrigger::part(label){justify-content:flex-start}
+.sidebar-collapsed #environmentTrigger::part(base){width:100%;min-width:0;padding-inline:6px;justify-content:center}
+.sidebar-collapsed #environmentTrigger::part(label){justify-content:center}
 #accountMenu{transition:margin var(--sidebar-motion-duration) var(--sidebar-motion-easing)}
 #accountTrigger::part(base){transition:padding var(--sidebar-motion-duration) var(--sidebar-motion-easing)}
-.sidebar-collapsed #accountTrigger::part(base){width:100%;padding-inline:6px;justify-content:flex-start}
+.sidebar-collapsed #accountTrigger::part(base){box-sizing:border-box;width:40px;height:40px;min-height:40px;padding:6px;justify-content:center}
 .sidebar-collapsed #accountTrigger::part(label){justify-content:flex-start}
 @media(prefers-reduced-motion:reduce){.sidebar nav>.nav::part(base),#environmentTrigger::part(base),#accountTrigger::part(base),#accountMenu{transition:none}}
 
@@ -1541,8 +1539,8 @@ app-button.retry-action[loading] wa-icon,app-button.retry-action[aria-busy=true]
 .theme-segments app-button::part(label){justify-content:center;white-space:nowrap}
 @media(max-width:700px){.settings-panel[data-panel="preferences"] #languageSelect,.settings-panel[data-panel="preferences"] .theme-segments{width:200px;flex-basis:200px}}
 
-.settings-content:has(.settings-environment:not(.hidden)) .settings-page-heading,
-.settings-content:has(.settings-environment:not(.hidden)) .settings-body{max-width:none;width:100%}
+/* Keep settings content compact when navigation is collapsed. */
+.settings-content:has([data-panel=preferences]:not(.hidden),[data-panel=environment]:not(.hidden),[data-panel=proxy]:not(.hidden)) :is(.settings-page-heading,.settings-body){max-width:var(--settings-form-max-width);width:100%;box-sizing:border-box;margin-inline:auto}
 .settings-environment .environment-details{display:block;margin:0;overflow:hidden;font-size:12px}
 .settings-environment .system-setting-row{display:grid;grid-template-columns:minmax(140px,1fr) minmax(0,230px);align-items:center;gap:24px;min-height:64px;padding:18px 20px;box-sizing:border-box}
 .settings-environment .system-setting-row+.system-setting-row{border-top:1px solid var(--line)}
@@ -1922,3 +1920,6 @@ body.dark{--credential-status-color:#b59ade}
 .sidebar-collapsed .sidebar nav>.nav::part(base){height:34px!important;min-height:34px!important;max-height:34px!important;aspect-ratio:auto}
 
 .file-picker-entries>.file-picker-empty{width:100%;height:100%;min-height:0;box-sizing:border-box}
+
+@container (max-width:480px){.settings-panel[data-panel="preferences"] .preference-row{display:grid;grid-template-columns:1fr;gap:12px}.settings-panel[data-panel="preferences"] :is(#languageSelect,.theme-segments){max-width:100%}}
+.settings-content{container-type:inline-size;--settings-form-max-width:832px}
