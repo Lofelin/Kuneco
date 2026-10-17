@@ -17,6 +17,7 @@ async function fixture(options = {}) {
   const remotePorts = new Set(), targetPorts = [],exitBySocket=new WeakMap();
   const sockets = new Set();
   const target = http.createServer((req, res) => { hits++;if(options.respond?.(req,res))return;if(!exitBySocket.has(req.socket))exitBySocket.set(req.socket,exitIp);const visibleIp=options.stickyExit?exitBySocket.get(req.socket):exitIp; targetPorts.push(req.socket.remotePort); forwardedAuth = req.headers['proxy-authorization']; if (req.url === '/bad-probe') { res.writeHead(503); res.end(); return; } if(req.url.startsWith('/localized-region')){const chinese=new URL(req.url,'http://fixture.invalid').searchParams.get('lang')==='zh-CN';res.end(JSON.stringify({ip:visibleIp,country:'US',city:chinese?'华盛顿':'Washington',region:chinese?'哥伦比亚特区':'District of Columbia'}));return;} if(req.url.startsWith('/region')){res.end(`ip=${req.url==='/region-wrong'?'203.0.113.99':visibleIp}\nloc=US\n`);return;}res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ ip: visibleIp })); });
+  if(options.longUpload)target.requestTimeout=0;
   const targetPort = await listen(target);
   const upstream = http.createServer();
   upstream.on('connection', socket => { sockets.add(socket); socket.on('error', () => {}); socket.once('close', () => sockets.delete(socket)); });
@@ -576,4 +577,66 @@ for(const engine of ['native','gost'])test(`${engine}: slow upload and downstrea
   try{await until(()=>f.gateway.status.capacity.forwarding.responseTimeouts.downstream===1);await until(()=>f.gateway.status.capacity.forwarding.active===0);}finally{stuck.destroy();}
   assert.equal(f.gateway.status.capacity.forwarding.responseTimeouts.body,0);
  }finally{await f.cleanup();}
+});
+
+for(const engine of ['native','gost'])test(`${engine}: inbound deadlines, hop headers, Expect and early rejection`,engine==='gost'?gostTest:{},async()=>{
+ let received,uploads=0;
+ const f=await fixture({gostBinary:engine==='gost'?gostBinary:null,respond(req,res){
+  if(req.url==='/headers'){received=req.headers;res.writeHead(200,{'Connection':'x-private','x-private':'secret','keep-alive':'timeout=1','x-public':'ok','set-cookie':['a=1','b=2']});res.end('ok');return true;}
+  if(req.url==='/upload'){uploads++;received=req.headers;req.resume();req.on('end',()=>res.end('uploaded'));return true;}
+  if(req.url==='/early'){uploads++;res.writeHead(413,{'content-length':String(65536)});let n=0;const timer=setInterval(()=>{res.write(Buffer.alloc(4096,120));if(++n===16){clearInterval(timer);res.end();}},10);res.once('close',()=>clearInterval(timer));return true;}
+ }});
+ const run=(route,headers={},body='',auth=true)=>new Promise((resolve,reject)=>{
+  let continues=0;
+  const r=http.request({host:'127.0.0.1',port:f.gateway.port,path:new URL(route,f.url).href,method:'POST',headers:{...(auth?{'proxy-authorization':`Basic ${Buffer.from(`workspace:${f.gateway.token}`).toString('base64')}`}:{ }),...headers}},res=>{
+   let data='';res.on('data',c=>data+=c);res.on('end',()=>resolve({status:res.statusCode,headers:res.headers,data,continues}));res.on('error',reject);
+  });r.on('error',reject);r.setTimeout(3000,()=>r.destroy(new Error('fixture timeout')));
+  if(headers.Expect){r.on('continue',()=>{continues++;r.end(body);});r.flushHeaders();}else r.end(body);
+ });
+ try{
+  await f.gateway.verify(f.url);
+  assert.equal(f.gateway.server.requestTimeout,0);assert.equal(f.gateway.server.headersTimeout,60000);
+  const h=await run('/headers',{'Connection':'x-private','x-private':'secret','keep-alive':'timeout=1','x-public':'ok'});
+  assert.equal(h.status,200);assert.equal(received['x-private'],undefined);assert.equal(received['keep-alive'],undefined);assert.equal(received['x-public'],'ok');assert.equal(h.headers['x-private'],undefined);assert.equal(h.headers['x-public'],'ok');assert.deepEqual(h.headers['set-cookie'],['a=1','b=2']);
+  const ok=await run('/upload',{Expect:'100-continue','Content-Length':'4'},'data');assert.equal(ok.continues,1);assert.equal(ok.data,'uploaded');assert.equal(received.expect,undefined);
+  const before=uploads,tunnels=f.tunnels;
+  const unauthorized=await run('/upload',{Expect:'100-continue','Content-Length':'4'},'data',false);assert.equal(unauthorized.status,407);assert.equal(unauthorized.continues,0);assert.equal(uploads,before);assert.equal(f.tunnels,tunnels);
+  f.gateway.forwarding.limit=1;f.gateway.forwarding.capacity=0;
+  const release=await f.gateway.forwarding.acquire();
+  try{const busy=await run('/upload',{Expect:'100-continue','Content-Length':'4'},'data');assert.equal(busy.status,503);assert.equal(busy.continues,0);assert.equal(f.tunnels,tunnels);}finally{release();}
+  const unsupported=await run('/upload',{Expect:'unknown'});assert.equal(unsupported.status,417);assert.equal(unsupported.continues,0);assert.equal(f.tunnels,tunnels);
+  const early=await new Promise((resolve,reject)=>{
+   const r=http.request({host:'127.0.0.1',port:f.gateway.port,path:new URL('/early',f.url).href,method:'POST',headers:{'proxy-authorization':`Basic ${Buffer.from(`workspace:${f.gateway.token}`).toString('base64')}`,'content-length':'1000000'}},res=>{let data='';res.on('data',c=>data+=c);res.on('end',()=>{resolve({status:res.statusCode,bytes:data.length,connection:res.headers.connection});r.destroy();});res.on('error',reject);});r.on('error',reject);r.write('partial');
+  });
+  assert.deepEqual(early,{status:413,bytes:65536,connection:'close'});assert.equal(uploads,before+1);
+  await waitFor(()=>f.gateway.status.capacity.forwarding.active===0);assert.equal(f.gateway.status.state,'ready');
+ }finally{await f.cleanup();}
+});
+
+// Opt-in real wall-clock coverage: crosses Node's former 300-second receipt limit.
+test('sustained upload crosses five-minute inbound deadline on both engines',{skip:process.env.KUNECO_LONG_UPLOAD_TEST!=='1',timeout:340000},async()=>{
+ await Promise.all(['native','gost'].map(async engine=>{
+  if(engine==='gost')assert.ok(existsSync(gostBinary),'GOST binary required for long acceptance');
+  const f=await fixture({longUpload:true,gostBinary:engine==='gost'?gostBinary:null,respond(req,res){if(req.url!=='/long')return false;let bytes=0;req.on('data',c=>bytes+=c.length);req.on('end',()=>res.end(String(bytes)));return true;}});
+  try{
+   await f.gateway.verify(f.url);const start=Date.now();
+   const result=await new Promise((resolve,reject)=>{
+    const r=http.request({host:'127.0.0.1',port:f.gateway.port,path:new URL('/long',f.url).href,method:'POST',headers:{'proxy-authorization':`Basic ${Buffer.from(`workspace:${f.gateway.token}`).toString('base64')}`}},res=>{let data='';res.on('data',c=>data+=c);res.on('end',()=>resolve({status:res.statusCode,data}));res.on('error',reject);});
+    let n=0;const tick=setInterval(()=>{r.write('x');if(++n===310){clearInterval(tick);r.end();}},1000);r.on('error',e=>{clearInterval(tick);reject(e);});
+   });
+   assert.ok(Date.now()-start>=300000);assert.deepEqual(result,{status:200,data:'310'});assert.equal(f.gateway.status.state,'ready');
+  }finally{await f.cleanup();}
+ }));
+});
+
+test('incomplete inbound headers remain bounded with receipt total disabled',{skip:process.env.KUNECO_LONG_UPLOAD_TEST!=='1',timeout:100000},async()=>{
+ const g=await new ProxyGateway({protocol:'http',host:'127.0.0.1',port:9}).start();let client;
+ try{
+  const result=await new Promise((resolve,reject)=>{
+   let data='';client=net.connect(g.port,'127.0.0.1',()=>client.write('POST http://example.invalid/ HTTP/1.1\r\nHost: example.invalid\r\n'));
+   client.on('data',c=>data+=c);client.on('error',reject);client.on('close',()=>resolve(data));
+  });
+  assert.equal(g.forwarding.active,0);assert.equal(g.forwarding.queue.length,0);assert.equal(g.server.requestTimeout,0);
+  assert.ok(!result || result.includes('408')); // clientError intentionally closes before admission.
+ }finally{client?.destroy();await g.stop();}
 });
