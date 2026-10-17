@@ -1,0 +1,96 @@
+import assert from 'node:assert/strict';
+import {mkdir,writeFile,readFile} from 'node:fs/promises';
+import path from 'node:path';
+
+export async function verifyWorkspace(ctx,verifyBrowser){
+ const {evaluate:e,until,client,temp,proxyPort,getBrowserRequests,getExitRequests,setExitIP,accountProfiles,captureUI}=ctx;
+ const click=selector=>e(`document.querySelector(${JSON.stringify(selector)}).click()`);
+ const setting=async key=>{await e("document.getElementById('accountMenu').open=true");await e("new Promise(resolve=>requestAnimationFrame(resolve))");await click('#accountSettings');await until(()=>e("!document.getElementById('page-overview').classList.contains('hidden')"));await e("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");await click(`[data-setting=${key}]`);await until(()=>e(`document.querySelector('.settings-panel[data-panel=${key}]').getBoundingClientRect().height>0`));};
+ const state=()=>e('window.workspace.state()');
+ const ready=()=>until(()=>e("!document.body.classList.contains('environment-onboarding') && !document.body.classList.contains('auth-required')"));
+ await ready();await mkdir('artifacts',{recursive:true});
+ assert.equal(await e("typeof workspace.notification"),'function','preload bridge loads from new path');
+ assert.equal(await e("document.querySelectorAll('button,input:not([type=file][hidden]),select,textarea,dialog').length"),0,'shared controls only');
+ assert.ok(await e("customElements.get('app-button') && customElements.get('app-dialog') && customElements.get('app-table')"));
+ await e(`document.fonts.load('14px "Inter Variable"')`);
+ assert.ok(await e(`document.fonts.check('14px "Inter Variable"')`));
+ assert.equal((await e('workspace.runtimeInfo()')).runtimes.length,0,'no implicit runtime registration');
+ assert.ok(await e("workspace.newSession({engine:'codex'}).then(()=>false,()=>true)"));
+ const runtimes=await e('workspace.runtimeInfo({detect:true})');assert.ok(runtimes.runtimes.some(r=>r.id==='codex'));
+ await click('[data-page=runtime]');await until(()=>e("document.querySelector('#configuredRuntimeList')?.textContent.includes('Codex')"));
+ await click('[data-page=cc]');await until(()=>e("!document.getElementById('railNewSession').disabled"));
+ await click('#railNewSession');await until(()=>e("document.getElementById('newSessionDialog').open"));
+ await e("document.getElementById('runtimeEngine').value='codex';document.getElementById('runtimeEngine').dispatchEvent(new Event('change'))");
+ await click('#cancelNewSession');await until(()=>e("!document.getElementById('newSessionDialog').open"));
+ assert.equal((await state()).aiSessions.length,0,'cancel does not create a session');
+ await click('#railNewSession');await until(()=>e("document.getElementById('newSessionDialog').open"));
+ await e("document.getElementById('runtimeEngine').value='codex';document.getElementById('runtimeEngine').dispatchEvent(new Event('change'))");
+ await click('#createNewSession');await until(async()=>(await state()).aiSessions.length===1);
+ assert.equal((await state()).selectedEngine,'codex');assert.equal((await state()).project,'');
+ const tabs=await e("document.querySelectorAll('.content-tab').length");await click('#newContentTab');
+ assert.equal(await e("document.querySelectorAll('.content-tab').length"),tabs+1);assert.equal((await state()).aiSessions.length,1,'blank tab is not a backend session');
+ await click('.content-tab.active .content-tab-close');
+ await until(()=>e(`document.querySelectorAll('.content-tab').length===${tabs}`));
+ for(const key of ['profile','preferences','notifications','proxy','activity','browser','environment']){
+  await setting(key);
+  const gaps=await e(`(()=>{const p=document.querySelector('.settings-panel[data-panel=${key}]');return [...p.querySelectorAll('.preference-heading,.profile-section-heading')].map(h=>{if(h.parentElement.classList.contains('proxy-config-toolbar'))h=h.parentElement;const n=h.nextElementSibling;return n?{gap:n.getBoundingClientRect().top-h.getBoundingClientRect().bottom,description:n.classList.contains('settings-section-description'),after:n.classList.contains('settings-section-description')?n.nextElementSibling.getBoundingClientRect().top-n.getBoundingClientRect().bottom:null}:null}).filter(Boolean)})()`);
+  for(const g of gaps){assert.ok(Math.abs(g.gap-(g.description?4:8))<1,key+JSON.stringify(g));if(g.description)assert.equal(g.after,8);}
+ }
+ await setting('preferences');await e("document.getElementById('themeSelect').value='dark';document.getElementById('themeSelect').dispatchEvent(new Event('change'))");
+ assert.ok(await e("document.body.classList.contains('dark') && localStorage.getItem('ui-theme')==='dark'"));
+ await e("document.getElementById('themeSelect').value='light';document.getElementById('themeSelect').dispatchEvent(new Event('change'))");
+ await setting('notifications');assert.equal(await e("document.getElementById('notificationScopeBadge').textContent"),'当前账号 · 本设备');
+ await e("document.querySelector('[data-notification=chat]').shadowRoot.querySelector('input').click()");
+ assert.equal(await e("document.querySelector('[data-notification=chat]').checked"),false);
+ await client.call('Page.reload');await until(()=>e("performance.getEntriesByName('chat-records-ready').length>0"));await setting('notifications');
+ assert.equal(await e("document.querySelector('[data-notification=chat]').checked"),false,'notification preference survives document reload');
+ await e("document.querySelector('[data-notification=chat]').shadowRoot.querySelector('input').click()");
+ // Environment gate must protect IPC, not only disabled UI controls.
+ assert.equal((await e("workspace.environmentCheck({timeZone:'Asia/Shanghai',languages:['en-US']})")).allowed,false);
+ assert.ok(await e("document.getElementById('environmentGate').open"));
+ assert.ok(await e("workspace.connect({protocol:'http',host:'127.0.0.1',port:1234},false).then(()=>false,()=>true)"));
+ assert.equal((await e("workspace.environmentCheck({timeZone:'America/New_York',languages:['en-US']})")).allowed,true);
+ await until(()=>e("!document.getElementById('environmentGate').open"));
+ // The current import flow lives inside the proxy dialog, with parse/select/connect steps.
+ await setting('proxy');await click('#openProxyDialog');await until(()=>e("document.getElementById('proxyDialog').open"));
+ await click('[data-proxy-method=paste]');
+ const csv=`Host,Port,User,Pass\n127.0.0.1,1,other,hidden\n127.0.0.1,${proxyPort},demo,secret\n`;
+ await e(`document.getElementById('importText').value=${JSON.stringify(csv)};document.getElementById('importText').dispatchEvent(new Event('input'))`);
+ await click('#connect');await until(()=>e("document.querySelectorAll('#importEntries wa-radio').length===2"));
+ assert.ok(await e("!document.getElementById('importEntries').textContent.includes('secret')"));
+ assert.equal(getExitRequests(),0,'parsing must not connect');
+ await e("document.getElementById('importEntries').value='1'");await click('#connect');
+ await until(()=>e("!document.getElementById('proxyImportResult').classList.contains('hidden')"));
+ assert.equal(getExitRequests(),0,'selecting a draft must not connect');
+ await click('#connect');await until(async()=>(await state()).network.state==='ready');
+ await until(()=>e("!document.getElementById('proxyDialog').open"));
+ assert.ok(getExitRequests()>0);assert.equal((await state()).network.ip,'203.0.113.23');
+ await click('[data-page=browser]');await e("document.getElementById('address').value='http://fixture.invalid/page';document.getElementById('navigate').click()");
+ await until(()=>getBrowserRequests()>0);
+ await verifyBrowser();
+ // Address editing must survive asynchronous browser loading.
+ await e("document.getElementById('address').focus();document.getElementById('address').value='draft';document.getElementById('address').dispatchEvent(new Event('input'))");
+ const requests=getBrowserRequests();await e("workspace.browser('reload')");await until(()=>getBrowserRequests()>requests);
+ assert.equal(await e("document.getElementById('address').value"),'draft');
+ await e("document.getElementById('address').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));document.getElementById('address').blur()");
+ await e('workspace.disconnect()');await until(async()=>(await state()).network.state==='blocked');
+ const before=getBrowserRequests();assert.ok(await e("workspace.browser('navigate','http://fixture.invalid/blocked').then(()=>false,()=>true)"));assert.equal(getBrowserRequests(),before);
+ const pins=JSON.parse(await readFile(path.join(temp,'egress-pins.json'),'utf8'));assert.ok(Object.values(pins).includes('203.0.113.23'));
+ setExitIP('203.0.113.99');const config={protocol:'http',host:'127.0.0.1',port:proxyPort,username:'demo',password:'secret'};
+ const changed=await e(`workspace.connect(${JSON.stringify(config)},false)`);assert.equal(changed.state,'blocked','changed egress must be rejected');setExitIP('203.0.113.23');
+ // Two fixture accounts exercise isolation without real credentials, Docker or providers.
+ const login=async username=>{await e(`workspace.accountLogin(${JSON.stringify({username,password:'fixture-password',confirmPassword:'fixture-password'})})`);await until(()=>e("document.getElementById('accountName').textContent.startsWith('测试用户')"));};
+ await login('layout-one');assert.equal((await state()).aiSessions.length,0,'guest sessions do not leak into account');
+ await setting('notifications');await e("document.querySelector('[data-notification=network]').shadowRoot.querySelector('input').click()");
+ assert.equal(await e("document.querySelector('[data-notification=network]').checked"),false);
+ await setting('preferences');await e("document.getElementById('languageSelect').value='en-US';document.getElementById('languageSelect').dispatchEvent(new Event('change'))");
+ await until(()=>accountProfiles.get('fixture-account-1')?.language==='en-US');
+ await e('workspace.accountLogout()');await login('layout-two');
+ await setting('notifications');assert.equal(await e("document.querySelector('[data-notification=network]').checked"),true,'account B has independent preferences');
+ assert.equal((await e('workspace.runtimeInfo()')).runtimes.length,0,'runtime registry does not leak between accounts');
+ await e('workspace.accountLogout()');await login('layout-one');await setting('notifications');
+ assert.equal(await e("document.querySelector('[data-notification=network]').checked"),false,'account A preference restored');
+ assert.equal(await e('document.documentElement.lang'),'en-US','account language restored');
+ const screenshot=await captureUI();await writeFile('artifacts/desktop-full-workspace.png',Buffer.from(screenshot.data,'base64'));
+ console.log('PASS current workspace: runtime/session, settings spacing, theme, notifications, gate, import, proxy pinning and account isolation');
+}

@@ -1,0 +1,21 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {JSDOM} from 'jsdom';
+import {mountLearningAutomation} from '../../../src/features/automation/learning-ui.mjs';
+test('template dialog filters library, switches trigger fields and saves runtime and schedule',async()=>{
+ const dom=new JSDOM('<section id="page-automation"></section>');globalThis.document=dom.window.document;globalThis.MutationObserver=dom.window.MutationObserver;
+ let saved;const api={onEvent(){},async learningAutomation(action,value){if(action==='create')saved=value;return[];}};mountLearningAutomation(api,()=>({name:'测试环境',runtimes:[{id:'cc',name:'Claude Code'},{id:'codex',name:'Codex'}]}));const $=id=>document.getElementById(id);
+ for(const id of ['learningCancel','learningSave']){assert.ok($(id).classList.contains('content-action'));assert.ok($(id).querySelector('wa-icon[slot=start]'));}assert.ok($('learningSave').classList.contains('primary'));assert.equal($('learningDialog').querySelectorAll('input,select').length,0);assert.equal($('learningName').localName,'wa-input');assert.equal($('learningEngine').localName,'wa-select');assert.ok($('learningEngine').hasAttribute('required'));assert.equal($('learningEngine').getAttribute('label'),'运行时');$('learningTemplate').click();assert.equal($('learningDialog').open,true);assert.equal($('learningQuestions').children.length,28);assert.equal($('learningLanguage').value,'zh');assert.equal($('learningFilter').value,'zh');$('learningFilter').value='zh';$('learningFilter').dispatchEvent(new dom.window.Event('change'));assert.equal($('learningQuestions').children.length,28);assert.match($('learningQuestions').textContent,/明确学习目标/);
+ $('learningInterval').click();assert.equal($('learningFixedFields').hidden,true);assert.equal($('learningIntervalFields').hidden,false);$('learningName').value='我的定时对话';$('learningEngine').value='codex';$('learningRepeat').value='weekdays';$('learningRepeat').dispatchEvent(new dom.window.Event('change'));$('learningSave').click();await new Promise(r=>setTimeout(r,0));assert.equal(saved.name,'我的定时对话');assert.equal(saved.engine,'codex');assert.equal(saved.schedule.mode,'interval');assert.deepEqual(saved.schedule.days,[1,2,3,4,5]);assert.equal($('learningDialog').open,false);
+ dom.window.close();
+});
+
+test('new automation follows the current settings language on each open',async()=>{
+ const dom=new JSDOM('<section id="page-automation"></section>');globalThis.document=dom.window.document;globalThis.MutationObserver=dom.window.MutationObserver;let language='en-US';
+ mountLearningAutomation({onEvent(){},async learningAutomation(){return[];}},()=>({language}));const $=id=>document.getElementById(id);
+ $('learningTemplate').click();assert.equal($('learningLanguage').value,'en');assert.equal($('learningFilter').value,'en');assert.equal($('learningQuestions').children.length,28);
+ language='zh-CN';$('learningTemplate').click();assert.equal($('learningLanguage').value,'zh');assert.equal($('learningFilter').value,'zh');assert.match($('learningQuestions').textContent,/明确学习目标/);await new Promise(r=>setTimeout(r,0));dom.window.close();
+});
+
+test('runtime choices follow current environment and carry icons, empty list blocks creation',async()=>{
+ const dom=new JSDOM('<section id="page-automation"></section>');globalThis.document=dom.window.document;globalThis.MutationObserver=dom.window.MutationObserver;let runtimes=[{id:'codex',name:'Codex'},{id:'doubao',name:'Doubao'}];
+ mountLearningAutomation({onEvent(){},async learningAutomation(){return[];}},()=>({runtimes}));const $=id=>document.getElementById(id);$('learningTemplate').click();assert.equal($('learningEngine').querySelectorAll('wa-option').length,2);assert.equal($('learningEngine').querySelectorAll('wa-option')[1].disabled,true);assert.equal($('learningEngine').value,'codex');assert.ok($('learningEngine').querySelector('wa-option wa-icon[slot=start]'));assert.ok($('learningEngine').querySelector(':scope > wa-icon[slot=start]'));runtimes=[];$('learningTemplate').click();assert.equal($('learningEngine').disabled,true);assert.equal($('learningSave').disabled,true);assert.equal($('learningRuntimeStatus').hidden,false);await new Promise(r=>setTimeout(r,0));dom.window.close();
+});

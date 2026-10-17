@@ -91,10 +91,14 @@ scripts/    Build and development utilities
 test/       Automated tests and acceptance scripts
 ```
 
-Read [AGENTS.md](AGENTS.md) before changing shared components or application behavior. Earlier implementation details and acceptance notes are preserved in [historical notes (Chinese)](docs/legacy-notes.zh-CN.md); they describe work at different stages, not a current release guarantee.
+Read [AGENTS.md](AGENTS.md) before changing shared components or application behavior. Earlier implementation details and acceptance notes are preserved in [historical notes (Chinese)](docs/archive/legacy-notes.zh-CN.md); they describe work at different stages, not a current release guarantee.
 
 ## Where this is heading
 
 Kuneco is growing toward a shared workspace for AI agents across platforms. Cross-agent collaboration remains a direction for the project, rather than a promise that every integration is available today.
 
 If you find a bug or have an idea, [open an issue](https://github.com/Lofelin/Kuneco/issues) with what you were trying to do, your environment, and what happened. Please remove credentials and private conversation data from logs before sharing them.
+
+## Repository layout / 仓库组织
+
+See [directory responsibilities and dependency rules](docs/architecture/repository-layout.md).

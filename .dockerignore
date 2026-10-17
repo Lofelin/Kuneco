@@ -1,11 +1,15 @@
 *
 !src/
 src/*
-!src/proxy.mjs
+!src/features/
+src/features/*
+!src/features/proxy/
+src/features/proxy/*
+!src/features/proxy/proxy.mjs
 !docker/
 !docker/runtime/
 !docker/runtime/Dockerfile
 !docker/runtime/*.mjs
 !docker/runtime/*.sh
 
-!src/gost-sidecar.mjs
+!src/features/proxy/gost-sidecar.mjs

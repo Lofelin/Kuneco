@@ -1,5 +1,20 @@
 # 项目约束
 
+## 仓库组织
+
+- 所有新增文件遵循 `docs/architecture/repository-layout.md`。源码按 `src/features/<能力>/`、`src/shared/`、`src/app/` 归属，禁止重新平铺到 src 根目录；根目录仅保留文档入口 `src/index.html`。
+- 构建/安装/评测脚本分别进入 `scripts/build/`、`scripts/setup/`、`scripts/benchmarks/`；测试按 `test/unit/<能力>/`、`test/e2e/`、`test/integration/`、`test/live/` 分类。文档按 architecture、operations、archive 分类；原生代码按平台分类。
+- 迁移必须同步导入、资源、构建、容器、测试及文档引用；全局组件契约检查必须递归扫描源码并排除生成产物。禁止留下旧路径转发壳或迁移运行数据。
+
+
+## 设置页分组间距
+
+- 所有设置页（含新增页面、静态与动态生成内容）统一复用 `src/shared/ui/ui-style.css` 的设置分组间距 tokens，禁止页面另设一套标题/说明外边距。
+- 有说明的分组：标题到说明实际距离为 4px，说明到卡片、表单或其他内容实际距离为 8px；说明统一使用 `.settings-section-description`，标题使用 `.preference-heading`。
+- 无说明的分组：标题到内容实际距离为 8px。带操作按钮的标题工具栏及个人资料分组标题遵守相同规则。
+- 页面顶部标题区到正文仍保持统一 28px；上述 4px/8px 指正文内分组间距，不改变分组之间的间距或卡片内部行距。
+- 禁止叠加标题默认 margin、说明 margin 与容器 gap；新增嵌套 section 也必须符合规则。验收须在重启后的实际页面测量元素边界距离，覆盖所有设置页、有/无说明、带操作按钮标题与动态分组，不能仅检查 CSS 声明。
+
 ## 弹窗布局
 
 - 所有弹窗与图片/文件预览统一使用 `app-dialog` 的全局背景遮罩：`--app-modal-backdrop-color: rgb(160 165 175 / 18%)`、`--app-modal-backdrop-filter: blur(4px)`，以添加运行时弹窗为视觉标准。遮罩仅由组件真实 `dialog::backdrop` 绘制一次，禁止页面覆盖遮罩颜色、透明度或模糊值。
@@ -9,7 +24,7 @@
 - 所有弹窗的顶部标题区与内容区之间必须有横向分隔线，底部操作区与内容区之间也必须有横向分隔线。
 - 标题区和底部操作区的分隔线必须横贯弹窗内宽、与弹窗左右边缘对齐，不得缩在内容内边距中；按钮仍保留内边距。
 - 分隔线统一使用 `1px solid var(--line)`，适配浅色与深色主题，并保留标题、内容、按钮与分隔线之间的间距。
-- 所有弹窗必须使用 `app-dialog`（`src/app-dialog.mjs`），由组件统一管理标题、正文、底部操作区、分隔线、间距与滚动。禁止直接使用 `wa-dialog` 或原生 `dialog` 新建业务弹窗。
+- 所有弹窗必须使用 `app-dialog`（`src/shared/ui/app-dialog.mjs`），由组件统一管理标题、正文、底部操作区、分隔线、间距与滚动。禁止直接使用 `wa-dialog` 或原生 `dialog` 新建业务弹窗。
 - 自定义标题使用 `slot="label"`，关闭按钮使用 `slot="header-actions"` 并设置 `custom-close`；底部操作必须放入直接子级 `slot="footer"`，表单提交按钮通过 `form` 属性关联表单。禁止页面自行实现标题/操作区或使用负边距修补分隔线。
 - 内容区域滚动时，标题和底部操作边界应清晰；不得通过局部覆盖移除分隔线。无底部操作区的弹窗不添加空操作区。
 - 新增或调整弹窗时，同时检查标准标题、自定义标题、标准 footer 与自定义操作区，确保无遗漏、重复边框或拥挤间距。
@@ -54,9 +69,9 @@
 
 ## 按钮图标与文案间距
 
-- 所有业务按钮必须使用全局 `app-button`（`src/app-button.mjs`），静态模板、动态弹窗和工厂统一引用；禁止直接新建 `wa-button` 或原生 `button` 业务入口。组件库内部原生按钮由组件自身管理，不属于业务入口。
+- 所有业务按钮必须使用全局 `app-button`（`src/shared/ui/app-button.mjs`），静态模板、动态弹窗和工厂统一引用；禁止直接新建 `wa-button` 或原生 `button` 业务入口。组件库内部原生按钮由组件自身管理，不属于业务入口。
 - 图文间距、标准文字按钮左右内边距、透明状态、加载与键盘行为由 `app-button` 统一管理。禁止页面复制一套按钮基础样式。纯图标按钮沿用既定尺寸；卡片、图片缩略图和分段选择等特殊结构使用组件支持的 `layout="custom"` 并仅调整布局，不能另建按钮实现。
-- 新增入口需通过 `test/app-button-contract.test.mjs` 组件引用检查，以及真实组件的表单、加载状态和实际内容边界验收。
+- 新增入口需通过 `test/unit/shared/app-button-contract.test.mjs` 组件引用检查，以及真实组件的表单、加载状态和实际内容边界验收。
 
 - 所有文字按钮（含静态、动态、弹窗、引导页及主内容操作）左右内边距统一使用 `--button-padding-inline:6px`，图标和文字距按钮左右内缘均保留同等留白。图文间距与左右内边距是独立约束，必须同时满足。内容放不下时允许按钮按标准内边距获得所需最小宽度，禁止固定宽度挤压文字、减少内边距或造成溢出；纯图标按钮及明确设计的全宽按钮保留既有几何。
 
@@ -92,22 +107,22 @@
 
 ## 全局表格组件
 
-- 所有数据表格统一使用 `app-table` 容器及 `src/app-table.mjs` 的 `renderAppTable`，样式只由 `src/app-table.css` 管理。运行时管理、环境运行时、连接记录及聊天 Markdown 表格均遵守此约束。
+- 所有数据表格统一使用 `app-table` 容器及 `src/shared/ui/app-table.mjs` 的 `renderAppTable`，样式只由 `src/shared/ui/app-table.css` 管理。运行时管理、环境运行时、连接记录及聊天 Markdown 表格均遵守此约束。
 - 页面仅提供列配置（字段、标题、宽度及单元格内容）、数据、空状态、行激活回调和操作菜单；禁止另建原生 table 或 div/grid 表格、复制表头/行 DOM、维护页面专用表格基础样式或键盘/点击事件。列数、最小宽度和是否显示操作菜单通过组件参数配置。
 - 表头、行高、内边距、边框、圆角、滚动、悬停浅灰背景、键盘浅蓝焦点与操作区事件隔离由组件统一负责。不得通过业务按钮包裹整行实现跳转，不得改变原有列内容及对齐。
 - 只读表格不绑定行激活；可点击行统一支持点击、Enter 和空格，单元格中的链接与操作菜单不得触发行跳转。空表显示跨列空状态，长内容换行、窄窗口横向滚动，保持表头与内容列对齐。
 - Markdown 先净化，再由 `adoptAppTables` 纳入同一组件，保留原生表格语义、链接和对齐；禁止为聊天回复另写表格样式。
-- 新增或修改表格必须通过 `test/app-table.test.mjs` 和 `test/app-table-contract.test.mjs`，并在重启后检查表头与内容对齐、长内容、空态、窄窗口、悬停/移出、键盘焦点、行跳转和菜单隔离。新增表格只能配置或扩展全局组件，禁止独立实现。
+- 新增或修改表格必须通过 `test/unit/shared/app-table.test.mjs` 和 `test/unit/shared/app-table-contract.test.mjs`，并在重启后检查表头与内容对齐、长内容、空态、窄窗口、悬停/移出、键盘焦点、行跳转和菜单隔离。新增表格只能配置或扩展全局组件，禁止独立实现。
 
 ## 全局删除按钮
 
 - 所有删除、移除、卸载等破坏性操作统一使用 `app-button variant="danger"`，配合 `trash-2` 语义图标（`slot="start"`）；删除菜单项使用 `wa-dropdown-item variant="danger"` 与 `slot="icon"`。覆盖页面、弹窗和动态生成的自动化、运行时、环境入口。
 - 默认状态为浅红底、红色文字和图标；仅悬停或按下时使用实红底、白色文字和图标，移出后立即恢复浅红状态。不得默认显示实红底白字；键盘聚焦保留统一浅蓝焦点提示，不得把聚焦状态当作悬停实红状态。
-- 颜色统一复用 `--delete-foreground`、`--delete-background`、`--delete-hover-background`、`--delete-hover-foreground`；按钮样式由 `src/app-button.mjs` 管理，菜单复用同一组全局 tokens。禁止页面添加另一套删除配色或以 `primary`、`appearance="plain"`、`layout="custom"` 绕过规则。
+- 颜色统一复用 `--delete-foreground`、`--delete-background`、`--delete-hover-background`、`--delete-hover-foreground`；按钮样式由 `src/shared/ui/app-button.mjs` 管理，菜单复用同一组全局 tokens。禁止页面添加另一套删除配色或以 `primary`、`appearance="plain"`、`layout="custom"` 绕过规则。
 - 禁用及加载时保持浅红语义且不响应悬停变色。验收覆盖默认、悬停、按下、移出、键盘聚焦与失焦、禁用和加载，检查图标与文字同色，并覆盖深浅主题、静态与动态入口。验收不得执行真实删除。
 
 ## 全局账号头像
 
-- 所有生成头像统一复用 `src/generated-avatar.mjs` 的 DiceBear Thumbs 本地生成方式，与账号密码注册头像一致；禁止首字母、随机色块或另建生成算法。覆盖账号菜单、个人资料、运行时列表与详情，以及未来新增入口。运行时品牌图标不属于账号头像。
+- 所有生成头像统一复用 `src/shared/ui/generated-avatar.mjs` 的 DiceBear Thumbs 本地生成方式，与账号密码注册头像一致；禁止首字母、随机色块或另建生成算法。覆盖账号菜单、个人资料、运行时列表与详情，以及未来新增入口。运行时品牌图标不属于账号头像。
 - 优先显示上传或第三方真实头像；缺失、获取失败或图片加载失败时回退生成头像。使用稳定账号 ID（运行时缺少 ID 时使用提供方与账号名）作为种子，同一账号在列表与详情保持一致，不随刷新随机变化。未登录使用统一访客种子。
 - 生成过程完全在本地完成，不将账号信息发送给外部头像服务；复用同一风格与缓存。验收覆盖真实头像、缺失头像、加载失败和同账号跨入口一致性。

@@ -91,10 +91,14 @@ scripts/    构建与开发工具
 test/       自动化测试与验收脚本
 ```
 
-修改共享组件或应用行为前，请阅读 [AGENTS.md](AGENTS.md)。此前的实现细节和验收记录保留在[历史技术记录](docs/legacy-notes.zh-CN.md)中，记录对应不同开发阶段，不作为当前版本的完整能力保证。
+修改共享组件或应用行为前，请阅读 [AGENTS.md](AGENTS.md)。此前的实现细节和验收记录保留在[历史技术记录](docs/archive/legacy-notes.zh-CN.md)中，记录对应不同开发阶段，不作为当前版本的完整能力保证。
 
 ## 接下来的方向
 
 Kuneco 希望成为不同平台 AI 智能体共同工作的空间。跨智能体协作是项目持续探索的方向，具体接入能力会逐步完善。
 
 遇到问题或有新想法，欢迎[提交 Issue](https://github.com/Lofelin/Kuneco/issues)，说说你想完成什么、使用的环境，以及实际发生了什么。分享日志前，请移除凭据和私人对话内容。
+
+## Repository layout / 仓库组织
+
+See [directory responsibilities and dependency rules](docs/architecture/repository-layout.md).
