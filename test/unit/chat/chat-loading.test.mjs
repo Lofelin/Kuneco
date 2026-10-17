@@ -1,3 +1,4 @@
+import {mountMessageActions} from '../../../src/features/chat/message-actions.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
@@ -6,7 +7,7 @@ const source=readFileSync(new URL('../../../src/app/renderer.js',import.meta.url
 test('only a newly submitted pending reply shows loading; restored empty messages do not',()=>{
  const {window}=new JSDOM('<div id="chat"></div>');
  const start=source.indexOf('function bubble('),end=source.indexOf("$('chat').addEventListener",start);
- const bubble=new Function('document','$','selectedEngine','RUNTIME_CATALOG','updateChatMessage',source.slice(start,end)+';return bubble;')(window.document,id=>window.document.getElementById(id),'codex',{codex:{name:'Codex'}},(node,text)=>{node.dataset.rawText=text;node.textContent=text;});
+ const bubble=new Function('document','$','selectedEngine','RUNTIME_CATALOG','updateChatMessage','mountMessageActions',source.slice(start,end)+';return bubble;')(window.document,id=>window.document.getElementById(id),'codex',{codex:{name:'Codex'}},(node,text)=>{node.dataset.rawText=text;node.textContent=text;},mountMessageActions);
  assert.equal(bubble('assistant','').classList.contains('reply-loading'),false);
  assert.equal(bubble('assistant','', 'codex',true).getAttribute('role'),'status');
  assert.equal(bubble('assistant','正文').textContent,'正文');

@@ -1,3 +1,4 @@
+import {mountMessageActions,openMessageEditor} from '../features/chat/message-actions.mjs';
 import {mountNotificationSettings} from '../features/notifications/notification-settings.mjs';
 import {generatedAvatar,runtimeAccountAvatar,setAccountAvatar} from '../vendor/generated-avatar.js';
 import {restoredChatStatus} from '../features/chat/chat-status.mjs';
@@ -584,18 +585,31 @@ function setNetwork(status) {
   if(status.state==='ready' && page==='browser')void action(()=>api.browser('open'));
   bounds();
 }
-function bubble(role, text, engine = selectedEngine, pending = false, images = [], reasoning = null) {
+function bubble(role, text, engine = selectedEngine, pending = false, images = [], reasoning = null, createdAt = null) {
   $('chatEmpty')?.remove();
+  if(role==='assistant' && pending && !createdAt)createdAt=new Date().toISOString();
   const block = document.createElement('div'); block.className = `bubble ${role}`;
   const label = document.createElement('div'); label.className = 'bubble-label'; label.textContent = role === 'user' ? '你' : role === 'error' ? '请求状态' : (RUNTIME_CATALOG[engine]?.name || engine);
-  const content = document.createElement('div');if(role==='assistant'){updateChatMessage(content,text);if(pending && !text){content.classList.add('reply-loading');content.setAttribute('role','status');content.setAttribute('aria-label','正在等待回复');content.textContent='';}}else{content.dataset.rawText=text;content.textContent=text;}
+  const content = document.createElement('div');content.className='message-content';if(createdAt)block.messageCreatedAt=createdAt;if(role==='assistant'){updateChatMessage(content,text);if(pending && !text){content.classList.add('reply-loading');content.setAttribute('role','status');content.setAttribute('aria-label','正在等待回复');content.textContent='';}}else{content.dataset.rawText=text;content.textContent=text;}
   if(role==='user' && images.length){
     block.classList.add('has-images');block.messageImages=images.map(image=>({...image}));
     const gallery=document.createElement('div');gallery.className='message-images';
     for(const image of block.messageImages){const button=document.createElement('app-button');button.setAttribute('layout','custom');button.type='button';button.className='message-image';button.setAttribute('aria-label','预览图片 '+(image.name || '图片'));const thumbnail=document.createElement('img');thumbnail.src=image.dataURL || image.url;thumbnail.alt=image.name || '图片';button.append(thumbnail);button.onclick=()=>deepseekComposer.showPreview(image);gallery.append(button);}
     block.append(gallery);if(!text.trim())content.hidden=true;
   }
-  if(role==='error')block.append(label); block.append(content);if(reasoning && (reasoning.text || reasoning.activities?.length || Number.isFinite(reasoning.durationMs)))reasoningView(content,{...reasoning,complete:true},updateChatMessage); $('chat').append(block); $('chat').scrollTop = $('chat').scrollHeight; return content;
+  if(role==='error')block.append(label); block.append(content);if(reasoning && (reasoning.text || reasoning.activities?.length || Number.isFinite(reasoning.durationMs)))reasoningView(content,{...reasoning,complete:true},updateChatMessage); if(role==='user')mountMessageActions(block,{text,createdAt,onCopy:value=>void action(()=>navigator.clipboard.writeText(value)),canEdit:()=>{if(busy){toast('请先停止当前回复','chat');return false;}return true;},onEdit:()=>{
+   const owner=chatOwnerID,conversation=activeChatId,environment=dockerEnvironmentState.activeId;
+   openMessageEditor(block,{text,onSend:async value=>{
+    if(owner!==chatOwnerID || conversation!==activeChatId || environment!==dockerEnvironmentState.activeId)throw new Error('对话已变化，请重新编辑');
+    if(busy)throw new Error('请先停止当前回复');
+    const attachments=(block.messageImages || []).map(image=>({...image}));
+    if(!value.trim() && !attachments.length)throw new Error('请输入消息内容');
+    const message=['deepseek','codex'].includes(selectedEngine)?{text:value.trim(),images:attachments,thinking:deepseekComposer.payload('').thinking}:value.trim();
+    await sendChatMessage(message);
+   }});
+  }});
+  if(role==='assistant')mountMessageActions(block,{text:()=>content.dataset.rawText || '',createdAt,onCopy:value=>void action(()=>navigator.clipboard.writeText(value))});
+  $('chat').append(block); $('chat').scrollTop = $('chat').scrollHeight; return content;
 }
 $('chat').addEventListener('click',event=>{
  const link=event.target.closest?.('.markdown-body a');if(!link)return;event.preventDefault();
@@ -966,7 +980,19 @@ $('prompt').addEventListener('keydown',event=>{if(event.key==='Enter' && !event.
 $('toggleSidebar').onclick=()=>{sidebarCollapsed=!sidebarCollapsed;document.body.classList.toggle('sidebar-collapsed',sidebarCollapsed);$('toggleSidebar').setAttribute('aria-label',sidebarCollapsed?'展开导航':'收起导航');document.querySelectorAll('.primary-nav-tooltip').forEach(tip=>{tip.disabled=!sidebarCollapsed;if(!sidebarCollapsed)tip.open=false;});try{localStorage.setItem('sidebar-collapsed',String(sidebarCollapsed));}catch{}bounds();};
 async function goHistory(offset){const next=navigationIndex+offset;if(next<0 || next>=navigationHistory.length)return;const target=navigationHistory[next];historyRestoring=true;try{if(target.page==='cc' && target.sessionId && target.sessionId!==activeChatId){saveChatView();const item=chatSessions.find(item=>item.id===target.sessionId);if(item){const version=++chatRestoreVersion;const value=await api.selectSession(item.id,{deferAuth:true,viewed:true});if(version===chatRestoreVersion)applySession(value,item);}}else switchPage(target.page);navigationIndex=next;$('appBack').disabled=next<=0;$('appForward').disabled=next>=navigationHistory.length-1;}finally{historyRestoring=false;}}
 $('appBack').onclick=()=>void action(()=>goHistory(-1));$('appForward').onclick=()=>void action(()=>goHistory(1));
-$('chatForm').onsubmit = event => { event.preventDefault(); void action(async () => { const text = $('prompt').value.trim();const message=['deepseek','codex'].includes(selectedEngine)?deepseekComposer.payload(text):text; if (!text && !(message.images?.length)) return; const submittedChatId=activeChatId;try{await api.cc(message);}catch(error){const failed=chatSessions.find(item=>item.id===submittedChatId);if(failed)failed.chatStatus='failed';renderSessionList();saveChatView();throw error;}const item=chatSessions.find(item=>item.id===activeChatId);if(item && item.title==='新会话'){item.title=text.slice(0,28);renderSessionList();} bubble('user',text,selectedEngine,false,message.images || [],message.reasoning);if(['deepseek','codex'].includes(selectedEngine))deepseekComposer.clear(); reply = bubble('assistant', '', selectedEngine, true);if(['deepseek','codex'].includes(selectedEngine))reasoningView(reply,{kind:selectedEngine==='codex'?'process':'thinking'},updateChatMessage); $('prompt').value = '';saveChatView(); }); };
+async function sendChatMessage(message,{clearComposer=false}={}){
+ const text=typeof message==='string'?message:message.text;
+ if(!text && !(message.images?.length))return;
+ const submittedChatId=activeChatId;
+ try{await api.cc(message);}catch(error){const failed=chatSessions.find(item=>item.id===submittedChatId);if(failed)failed.chatStatus='failed';renderSessionList();saveChatView();throw error;}
+ const item=chatSessions.find(item=>item.id===activeChatId);if(item && item.title==='新会话'){item.title=text.slice(0,28);renderSessionList();}
+ bubble('user',text,selectedEngine,false,message.images || [],message.reasoning,new Date().toISOString());
+ if(clearComposer){if(['deepseek','codex'].includes(selectedEngine))deepseekComposer.clear();$('prompt').value='';}
+ reply=bubble('assistant','',selectedEngine,true);if(['deepseek','codex'].includes(selectedEngine))reasoningView(reply,{kind:selectedEngine==='codex'?'process':'thinking'},updateChatMessage);
+ saveChatView();
+}
+$('chatForm').onsubmit=event=>{event.preventDefault();void action(async()=>{const text=$('prompt').value.trim();const message=['deepseek','codex'].includes(selectedEngine)?deepseekComposer.payload(text):text;await sendChatMessage(message,{clearComposer:true});});};
+
 function applyChatMerge(data){if(data.owner!==chatOwnerID)return;
    try{
     const local={sessions:chatSessions.map(({nodes,creationOrder,...item})=>item),views:chatViewData()};
@@ -979,7 +1005,7 @@ function applyChatMerge(data){if(data.owner!==chatOwnerID)return;
      const current=chatViewData().find(view=>view.id===item.id);
      if(view && JSON.stringify(view.messages)!==JSON.stringify(current?.messages)){
       const previous=Array.from($('chat').childNodes);item.nodes=[];
-      for(const message of view.messages || []){if(message.role==='assistant' && !message.text?.trim() && !message.reasoning?.text && !message.reasoning?.activities?.length && !Number.isFinite(message.reasoning?.durationMs))continue;const content=bubble(message.role,message.text,item.engine,false,message.images || [],message.reasoning);item.nodes.push(content.parentNode);}
+      for(const message of view.messages || []){if(message.role==='assistant' && !message.text?.trim() && !message.reasoning?.text && !message.reasoning?.activities?.length && !Number.isFinite(message.reasoning?.durationMs))continue;const content=bubble(message.role,message.text,item.engine,false,message.images || [],message.reasoning,message.createdAt);item.nodes.push(content.parentNode);}
       $('chat').replaceChildren(...(item.id===activeChatId?item.nodes:previous));
      }
      if(view)Object.assign(item,{title:view.title,pinned:view.pinned,chatStatus:view.chatStatus});
@@ -1276,7 +1302,7 @@ async function restoreChats(state){
  chatRestoring=false;defaultModel=state.defaultCodexModel || null;chatOwnerID=state.chatOwner || null;chatEnvironmentID=state.containerId || null;chatSessions=[];activeChatId=null;$('chat').replaceChildren();runtimeRegistry=state.runtimeRegistry || {runtimes:[]};
  if(!runtimeRegistry.runtimes.some(item=>supportsChat(item.id))){renderSessionList();renderChatAvailability();switchPage('cc');return;}
  let stored=state.chatViews || [];if(!chatOwnerID || state.chatImportLegacy){try{stored=JSON.parse(localStorage.getItem(state.chatImportLegacy?'ai-chat-views':'anonymous-chat-views') || '[]');}catch{}}
- for(const [creationOrder,value] of (state.aiSessions || []).entries()){const saved=stored.find(item=>item.id===value.id);const item={...value,creationOrder,pinned:Boolean(saved?.pinned || value.pinned),chatStatus:restoredChatStatus(saved),title:saved?.title || value.title || '新会话',nodes:[]};chatSessions.push(item);for(const message of saved?.messages || []){if(message.role==='assistant' && !message.text?.trim() && !message.reasoning?.text && !message.reasoning?.activities?.length && !Number.isFinite(message.reasoning?.durationMs))continue;if(['user','assistant','error'].includes(message.role) && typeof message.text==='string'){const content=bubble(message.role,message.text,value.engine,false,message.images || [],message.reasoning);item.nodes.push(content.parentNode);}}$('chat').replaceChildren();}
+ for(const [creationOrder,value] of (state.aiSessions || []).entries()){const saved=stored.find(item=>item.id===value.id);const item={...value,creationOrder,pinned:Boolean(saved?.pinned || value.pinned),chatStatus:restoredChatStatus(saved),title:saved?.title || value.title || '新会话',nodes:[]};chatSessions.push(item);for(const message of saved?.messages || []){if(message.role==='assistant' && !message.text?.trim() && !message.reasoning?.text && !message.reasoning?.activities?.length && !Number.isFinite(message.reasoning?.durationMs))continue;if(['user','assistant','error'].includes(message.role) && typeof message.text==='string'){const content=bubble(message.role,message.text,value.engine,false,message.images || [],message.reasoning,message.createdAt);item.nodes.push(content.parentNode);}}$('chat').replaceChildren();}
  const currentOwner=(await api.accountState()).user?.id || null;if(version!==chatRestoreVersion)return;if(currentOwner!==chatOwnerID){chatReloadPending=true;return;}
  const item=restoredChat(chatSessions,{environmentId:state.containerId || null,activeId:state.activeAISessionId});
  if(item){const selected=await api.selectSession(item.id,{deferAuth:true});if(version!==chatRestoreVersion)return;applySession(selected,item);}else{renderSessionList();renderChatAvailability();switchPage('cc');}

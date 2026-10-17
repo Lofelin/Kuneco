@@ -792,7 +792,8 @@ ipcMain.handle('workspace:project', guarded(async selected => {
   chosen=source;
  }
  if(owner!==account?.user?.id || environment!==activeContainerId || generation!==chatGeneration)throw new Error('账号或环境已变化，请重新选择');
- project=chosen;sessionId=undefined;codexSessionId=undefined;storeCurrentSession();await sessionSave;
+ // A working-directory change stays in this conversation; runtime resume receives the new cwd.
+ project=chosen;storeCurrentSession();await sessionSave;
  return project;
 }));
 ipcMain.handle('workspace:browserCookies', guarded(async (settings) => {

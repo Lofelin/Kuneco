@@ -29,7 +29,7 @@ test('reasoning renders expanded incrementally before the response finishes and 
 
 });
 test('DeepSeek waiting status is independent of deep thinking toggle and retains duration without reasoning text',async()=>{
- const source=await readFile(new URL('../../../src/app/renderer.js',import.meta.url),'utf8'),submit=source.split('\n').find(line=>line.startsWith("$('chatForm').onsubmit"));
+ const source=await readFile(new URL('../../../src/app/renderer.js',import.meta.url),'utf8'),submit=source.slice(source.indexOf('async function sendChatMessage('),source.indexOf('function applyChatMerge('));
  const dom=new JSDOM('<div id="chat"></div>');globalThis.document=dom.window.document;
  for(const engine of ['deepseek','codex']){
   const form={},prompt={value:'hello'},nodes=[],render=(node,text)=>node.textContent=text;
