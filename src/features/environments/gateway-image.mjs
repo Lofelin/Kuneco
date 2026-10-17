@@ -18,7 +18,7 @@ export async function gatewayImage(manager,baseImage,engine){
  try{
   for(let i=0;i<files.length;i++)await writeFile(path.join(dir,path.basename(files[i])),contents[i]);
   if(binary)await copyFile(binary,path.join(dir,'gost'));
-  await writeFile(path.join(dir,'Dockerfile'),`FROM ${baseImage}\nWORKDIR /opt/dingtu\nCOPY proxy.mjs gost-sidecar.mjs request-lifecycle.mjs gateway.mjs control.mjs ./\n${binary?'COPY gost /usr/local/bin/gost\nRUN chmod 755 /usr/local/bin/gost\n':''}`);
+  await writeFile(path.join(dir,'Dockerfile'),`FROM ${base.Id}\nWORKDIR /opt/dingtu\nCOPY proxy.mjs gost-sidecar.mjs request-lifecycle.mjs gateway.mjs control.mjs ./\n${binary?'COPY gost /usr/local/bin/gost\nRUN chmod 755 /usr/local/bin/gost\n':''}`);
   await manager.command(['build','-t',tag,dir],{timeout:120000});return tag;
  }finally{await rm(dir,{recursive:true,force:true});}
 }

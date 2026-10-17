@@ -49,3 +49,10 @@ for(const stage of ['inspect','stop','rename','start'])test(`worker invalidation
  assert.ok(!f.calls.some(a=>a[0]==='run'));
  if(stage!=='start')assert.ok(!f.calls.some(a=>a[0]==='start'));
 });
+
+for(const same of [false,true])test(`missing required mount blocks ${same?'reuse':'upgrade'} before mutations`,async()=>{
+ const f=fixture({same});const original=f.manager.command;
+ f.manager.command=async a=>{const value=await original(a);if(a.includes('{{json .}}')){const old=JSON.parse(value);old.Mounts=[];return JSON.stringify(old);}return value;};
+ await assert.rejects(ensureWorker(f.manager,f.options),/挂载/);
+ assert.ok(!f.calls.some(a=>['run','stop','rename','rm','start'].includes(a[0])));
+});

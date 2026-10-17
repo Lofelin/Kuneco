@@ -33,10 +33,7 @@ export async function ensureWorker(manager,options){
  try{return await pending;}finally{if(manager.workerPreparations.get(options.name)===pending)manager.workerPreparations.delete(options.name);}
 }
 async function replaceWorker(manager,{name,image,spec,args,assertCurrent}){
- assertCurrent();let old;
- try{old=JSON.parse(await manager.command(['inspect','--format','{{json .}}',name]));}catch(error){
-  const names=(await manager.command(['ps','-a','--format','{{.Names}}'])).split('\n');if(names.includes(name))throw error;
- }
+ assertCurrent();const old=await inspectContainer(manager,name);
  assertCurrent();
  if(old && old.Config?.Labels?.app!=='dingtu')throw new Error('容器归属不匹配，已停止升级');
  const validate=async()=>{
@@ -45,14 +42,14 @@ async function replaceWorker(manager,{name,image,spec,args,assertCurrent}){
   await manager.command(['exec',name,'test','-f','/tmp/kuneco-worker-ready']);assertCurrent();
  };
  const ready=async()=>{for(let i=0;;i++){try{await validate();return;}catch(error){assertCurrent();if(i===29)throw error;await new Promise(r=>setTimeout(r,100));}}};
- if(old?.Config?.Image===image && old.Config.Labels[SPEC_LABEL]===spec){
-  if(!old.State.Running){await manager.command(['start',name]);assertCurrent();}
-  await ready();return;
- }
  if(old){
   const mounts=old.Mounts || [];
   const expected=args.flatMap((v,i)=>v==='--mount'?[Object.fromEntries(args[i+1].split(',').map(part=>{const n=part.indexOf('=');return [part.slice(0,n),part.slice(n+1)];}))]:[]);
-  if(mounts.some(m=>!expected.some(e=>e.type===m.Type&&e.dst===m.Destination&&e.src===(m.Type==='volume'?m.Name:m.Source)&&m.RW!==false)))throw new Error('容器挂载与环境配置不一致，保留原容器，请先核对挂载');
+  if(expected.some(e=>!mounts.some(m=>e.type===m.Type&&e.dst===m.Destination&&e.src===(m.Type==='volume'?m.Name:m.Source)&&m.RW!==false)) || mounts.some(m=>!expected.some(e=>e.type===m.Type&&e.dst===m.Destination&&e.src===(m.Type==='volume'?m.Name:m.Source)&&m.RW!==false)))throw new Error('容器挂载与环境配置不一致，保留原容器，请先核对挂载');
+ }
+ if(old?.Config?.Image===image && old.Config.Labels[SPEC_LABEL]===spec){
+  if(!old.State.Running){await manager.command(['start',name]);assertCurrent();}
+  await ready();return;
  }
  const backup=name+'-upgrade-'+Date.now();let renamed=false,created=false,stopped=false;
  try{
@@ -67,4 +64,14 @@ async function replaceWorker(manager,{name,image,spec,args,assertCurrent}){
   throw error;
  }
  if(renamed)await manager.command(['rm',backup]);
+}
+
+// Inspection errors are not proof of absence. Confirm against the daemon before mutation.
+export async function inspectContainer(manager,name){
+ try{return JSON.parse(await manager.command(['inspect','--format','{{json .}}',name]));}
+ catch(error){
+  const names=(await manager.command(['ps','-a','--format','{{.Names}}'])).split('\n');
+  if(names.includes(name))throw error;
+  return null;
+ }
 }

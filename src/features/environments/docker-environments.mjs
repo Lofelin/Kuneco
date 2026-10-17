@@ -1,4 +1,4 @@
-import {SPEC_LABEL,reliabilityArguments,specHash,workerImage,ensureWorker,containerStatus} from './container-reliability.mjs';
+import {SPEC_LABEL,reliabilityArguments,specHash,workerImage,ensureWorker,containerStatus,inspectContainer} from './container-reliability.mjs';
 import {gatewayImage} from './gateway-image.mjs';
 import {DIRECT_CHAT_GID,directChatNetworkSetup,engineDNSResolver,directDNSRelay,directDNSReady} from '../chat/container-chat-network.mjs';
 import {ENVIRONMENT_ICONS,environmentIcon} from './environment-icons.mjs';
@@ -212,11 +212,17 @@ export class DockerEnvironments {
   }));return {...data,localEnabled:data.localEnabled!==false,localName:data.localName || '本机环境',environments,engine,activeId:data.activeId};
  }
  async ensureGateway(owner,id){
+  this.gatewayPreparations ||= new Map();const key=resourcePrefix(owner,id);
+  const previous=this.gatewayPreparations.get(key) || Promise.resolve();
+  const pending=previous.catch(()=>{}).then(()=>this.prepareGateway(owner,id));this.gatewayPreparations.set(key,pending);
+  try{return await pending;}finally{if(this.gatewayPreparations.get(key)===pending)this.gatewayPreparations.delete(key);}
+ }
+ async prepareGateway(owner,id){
   const {prefix,item}=await this.get(owner,id),name=prefix+'-gateway',network=prefix+'-private';
   const engine=process.env.KUNECO_PROXY_ENGINE || 'native';
   const image=await gatewayImage(this,item.imageName || LEGACY_IMAGE,engine);
   try{await this.command(['network','inspect',network]);}catch{await this.command(['network','create','--internal','--label','app=dingtu',network]);}
-  let existing;try{existing=JSON.parse(await this.command(['inspect','--format','{{json .}}',name]));}catch{}
+  const existing=await inspectContainer(this,name);
   if(existing && existing.Config?.Labels?.app!=='dingtu')throw new Error('容器归属不匹配，已停止升级');
   const privateIP=existing?.NetworkSettings?.Networks?.[network]?.IPAddress;
   const spec=specHash({version:1,image,role:'gateway'});
