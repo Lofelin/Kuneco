@@ -91,3 +91,14 @@ test('completed lifecycle cannot later abort a reusable connection or install li
  assert.equal(life.signal.aborted,false);assert.equal(notified,0);assert.equal(getEventListeners(life.signal,'abort').length,0);assert.equal(getEventListeners(external.signal,'abort').length,0);assert.equal(request.eventNames().length,0);assert.equal(life.cleanups.length,0);
  assert.equal(stats.snapshot()['probe.unassigned.success'].count,1);assert.equal(Object.keys(stats.snapshot()).length,1);
 });
+
+
+test('close before response rejects once and releases lifecycle hooks',async()=>{
+ const {RequestLifecycle,PerformanceStats}=await import('../../../src/features/proxy/request-lifecycle.mjs');
+ const {EventEmitter}=await import('node:events');
+ const stats=new PerformanceStats(),life=new RequestLifecycle({timings:stats.start('probe')}),request=new EventEmitter();
+ let rejected=0;life.rejectOnAbort(error=>{assert.equal(error.code,'REQUEST_CLOSED');rejected++;});life.bind(request);
+ request.emit('close');request.emit('close');
+ assert.equal(rejected,1);assert.equal(life.done,true);assert.equal(life.cleanups.length,0);assert.equal(request.eventNames().length,0);
+ assert.equal(stats.snapshot()['probe.unassigned.error'].count,1);
+});

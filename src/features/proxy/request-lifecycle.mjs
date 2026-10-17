@@ -63,6 +63,9 @@ export class RequestLifecycle {
     if(uploadSource||downstream){let written=request.socket?.bytesWritten||0,delivered=downstream?.socket?.bytesWritten||0;
       const interval=setInterval(()=>{const next=request.socket?.bytesWritten||0,out=downstream?.socket?.bytesWritten||0;if(this.phase==='upload'&&next>written)this.advance('upload');if(this.phase==='downstream'&&out>delivered)this.advance('downstream');written=next;delivered=out;},Math.max(10,Math.min(1000,this.timeouts.upload/4,this.timeouts.downstream/4)));this.cleanups.push(()=>clearInterval(interval));
     }
-    watch(request,'close',()=>{if(!responseSeen||!downstream||downstream.writableFinished)this.finish(downstream?.writableFinished?this.responseOutcome:'error');});watch(request,'error',error=>this.finish(requestOutcome(error)));
+    // An unsolicited upgrade has no normal response/end. Settle callers before
+    // close can clear their deadlines, and never leave its detached socket alive.
+    watch(request,'upgrade',(_response,socket)=>{socket.destroy();this.abort(Object.assign(new Error('不支持的响应协议升级'),{code:'REQUEST_UPGRADE_UNSUPPORTED'}));});
+    watch(request,'close',()=>{if(!responseSeen)this.abort(Object.assign(new Error('响应前连接已关闭'),{code:'REQUEST_CLOSED'}));else if(!downstream||downstream.writableFinished)this.finish(downstream?.writableFinished?this.responseOutcome:'error');});watch(request,'error',error=>this.finish(requestOutcome(error)));
   }
 }
