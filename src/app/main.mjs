@@ -1,3 +1,4 @@
+import {createToolApprovalBroker} from '../features/runtimes/tool-approval.mjs';
 import {sandboxHTML,artifactCSP} from '../features/chat/artifact-sandbox.mjs';
 import {usageDetails,recordArtifacts,insightView} from '../features/chat/chat-insights.mjs';
 import {readArtifact} from '../features/runtimes/artifact-read.mjs';
@@ -127,7 +128,7 @@ let environmentStatus = {allowed:false,reasons:['尚未完成系统环境检测'
 let fixtureEnvironment = fixtureMode && process.env.WORKSPACE_TEST_ENV ? JSON.parse(process.env.WORKSPACE_TEST_ENV) : null;
 let window, browser, gateway, healthTimer, project = '', sessionId, claudePath = '', codexPath = '', codexSessionId, selectedEngine = 'cc', codexModel = null, connecting = false;
 const runs=new ChatRuns();
-const approvals = new Map();
+const toolApprovals=createToolApprovalBroker();
 const browserTabs = new Map();
 let activeTabId, browserBounds = { x: 0, y: 0, width: 1, height: 1 }, browserVisible = false;
 let pendingImport = null;
@@ -339,8 +340,6 @@ async function findClaude() {
 }
 function abortRun(predicate=()=>true) {
   void runs.abortWhere(predicate);
-  for (const [, approval] of approvals) approval.resolve({ behavior: 'deny', message: '会话已取消或代理失效' });
-  approvals.clear();
 }
 async function stopGateway({preserveDirectChat=false}={}) {
   account?.closeConnections();
@@ -1070,10 +1069,7 @@ ipcMain.handle('workspace:aiAuth',guarded(async engine=>{if(!['cc','codex','deep
 ipcMain.handle('workspace:codexModel',guarded(async model=>{if(runs.size)throw new Error('请先停止当前请求');if(model!==null && (typeof model!=='string' || !/^[a-zA-Z0-9._:-]{1,100}$/.test(model)))throw new Error('无效模型名称');defaultCodexModel=model;await saveEnginePreference();return model;}));
 ipcMain.handle('workspace:codexInfo',guarded(async()=>{if(activeContainerId){try{return{available:true,version:await dockerEnvs.exec(dockerOwner(),activeContainerId,['codex','--version']),model:null,models:await currentCodexModels().catch(()=>[])};}catch{return{available:false};}}codexPath=await findExecutable('codex');if(!codexPath)return{available:false};try{const {stdout}=await exec(codexPath,['--version'],{timeout:10000,maxBuffer:4096});return{available:true,version:stdout.trim(),model:await readCodexModel(),models:await currentCodexModels()};}catch{return{available:true,version:'版本检测失败'};}}));
 ipcMain.handle('workspace:approval', guarded(async (id, allow) => {
-  const pending = approvals.get(id); if (!pending) throw new Error('授权请求已过期');
-  approvals.delete(id);
-  pending.resolve(allow ? { behavior: 'allow', updatedInput: pending.input } : { behavior: 'deny', message: '用户拒绝此次文件修改' });
-  return true;
+  return toolApprovals.decide(id,allow,{owner:account?.user?.id || null,environmentId:activeContainerId});
 }));
 ipcMain.handle('workspace:cc', guarded(async (prompt,rewind,chatId=activeAISessionId,requestId=randomUUID()) => {
   const generation=chatGeneration,requestOwner=account?.user?.id || null,environmentId=activeContainerId;
@@ -1146,7 +1142,7 @@ ipcMain.handle('workspace:cc', guarded(async (prompt,rewind,chatId=activeAISessi
         cwd: workingDirectory, pathToClaudeCodeExecutable: activeContainerId?'claude':claudePath, model:model || undefined,
         env: chatRuntimeEnvironment(requiresProxy?proxyEnvironment(process.env, owner.url):directChatEnvironment(process.env)), settingSources: ['user','project','local'],
         spawnClaudeCodeProcess: launch || createRestrictedCCSpawner({port:owner.port,canStart:()=>environmentStatus.allowed && gateway === owner && owner.status.state === 'ready' && !controller.signal.aborted}),
-        permissionMode: 'bypassPermissions',allowDangerouslySkipPermissions:true, abortController: controller, includePartialMessages: true,hooks:fileHooks,
+        permissionMode: 'default',canUseTool:(toolName,input,options)=>toolApprovals.request({toolName,input,...options,signal:controller.signal,scope:{owner:requestOwner,environmentId},emit:emitChat}), abortController: controller, includePartialMessages: true,hooks:fileHooks,
         resume: nativeSessionId,
       } });
       let streamed = false;const activityEvents=createClaudeActivityAdapter();
@@ -1166,7 +1162,7 @@ ipcMain.handle('workspace:cc', guarded(async (prompt,rewind,chatId=activeAISessi
         }
       }
     } catch (error) {
-      emitChat('ccError', {status:controller.signal.aborted?'stopped':'failed',message:controller.signal.aborted ? '请求已取消；未自动重放操作。' : (['codex','deepseek'].includes(engine) ? error.message : 'CC 调用失败，请检查本机登录、CLI兼容性及代理；不会转为直连。')});
+      emitChat('ccError', {...(!controller.signal.aborted&&error.recovery?{recovery:error.recovery}:{}),status:controller.signal.aborted?'stopped':'failed',message:controller.signal.aborted ? '请求已取消；未自动重放操作。' : (['codex','deepseek'].includes(engine) ? error.message : 'CC 调用失败，请检查本机登录、CLI兼容性及代理；不会转为直连。')});
     } finally {
       if(currentChat.contextPrefix && engine!=='deepseek'){currentChat.sessionId=undefined;currentChat.codexSessionId=undefined;if(activeAISessionId===currentChat.id){sessionId=undefined;codexSessionId=undefined;}}
       if(latestUsage!==null && currentChat && chatOwner===usageOwner && aiSessions.get(currentChat.id)===currentChat){

@@ -1,3 +1,8 @@
+@import "../../features/chat/chat-recovery.css";
+@import "../../features/chat/session-order.css";
+@import "../../features/chat/tool-approval-cards.css";
+@import "../../features/chat/image-gallery.css";
+@import "../../features/chat/code-blocks.css";
 @import "../../features/chat/chat-search.css";
 @import "../../features/chat/draft-persistence.css";
 @import "./app-table.css";

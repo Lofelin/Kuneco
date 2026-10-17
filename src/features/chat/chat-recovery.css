@@ -1,0 +1,4 @@
+.chat-recovery{padding:8px 0;font-size:12px;line-height:18px;color:var(--muted)}
+.chat-recovery[hidden]{display:none}
+.chat-recovery p{margin:0 0 4px;overflow-wrap:anywhere}
+.chat-recovery-detail{color:var(--muted)}

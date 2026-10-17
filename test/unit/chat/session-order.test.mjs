@@ -1,0 +1,2 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {orderedSessions,movePinned} from '../../../src/features/chat/session-order.mjs';
+test('manual pinned order precedes timestamps; normal chats remain recent first',()=>{const items=[{id:'a',pinned:true,updatedAt:'2026-01-03'},{id:'b',pinned:true,updatedAt:'2026-01-01'},{id:'c',updatedAt:'2026-01-04'}];assert.deepEqual(orderedSessions(items,['b','a']).map(x=>x.id),['b','a','c']);assert.deepEqual(movePinned(['b','a'],'a','b'),['a','b']);assert.deepEqual(items.map(x=>x.id),['a','b','c']);});

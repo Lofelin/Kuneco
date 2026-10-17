@@ -1,3 +1,6 @@
+import {mountChatRecovery} from '../features/chat/chat-recovery.mjs';
+import {mountSessionOrder} from '../features/chat/session-order.mjs';
+import {mountToolApprovalCards} from '../features/chat/tool-approval-cards.mjs';
 import {mountChatSearch} from '../features/chat/chat-search.mjs';
 import {mountDraftPersistence} from '../features/chat/draft-persistence.mjs';
 import {mountInsightsPanel} from '../features/chat/insights-panel.mjs';
@@ -600,7 +603,7 @@ function bubble(role, text, engine = selectedEngine, pending = false, images = [
   if(role==='user' && images.length){
     block.classList.add('has-images');block.messageImages=images.map(image=>({...image}));
     const gallery=document.createElement('div');gallery.className='message-images';
-    for(const image of block.messageImages){const button=document.createElement('app-button');button.setAttribute('layout','custom');button.type='button';button.className='message-image';button.setAttribute('aria-label','预览图片 '+(image.name || '图片'));const thumbnail=document.createElement('img');thumbnail.src=image.dataURL || image.url;thumbnail.alt=image.name || '图片';button.append(thumbnail);button.onclick=()=>deepseekComposer.showPreview(image);gallery.append(button);}
+    for(const image of block.messageImages){const button=document.createElement('app-button');button.setAttribute('layout','custom');button.type='button';button.className='message-image';button.previewImage=image;button.setAttribute('aria-label','预览图片 '+(image.name || '图片'));const thumbnail=document.createElement('img');thumbnail.src=image.dataURL || image.url;thumbnail.alt=image.name || '图片';button.append(thumbnail);button.onclick=()=>deepseekComposer.showPreview(image);gallery.append(button);}
     block.append(gallery);if(!text.trim())content.hidden=true;
   }
   if(role==='error')block.append(label); block.append(content);if(reasoning && (reasoning.text || reasoning.activities?.length || Number.isFinite(reasoning.durationMs)))reasoningView(content,{...reasoning,complete:true},updateChatMessage); if(role==='user')mountMessageActions(block,{text,createdAt,onCopy:value=>void action(()=>navigator.clipboard.writeText(value)),canEdit:()=>{if(busy){toast('请先停止当前回复','chat');return false;}return true;},onEdit:()=>{
@@ -624,17 +627,9 @@ $('chat').addEventListener('click',event=>{
  if(!['http:','https:'].includes(url.protocol))return;
  void action(async()=>{await api.browser('navigate',url.href);switchPage('browser');});
 });
-function renderApproval() {
-  const el = $('approval'); el.replaceChildren();
-  el.classList.toggle('hidden', approvals.length === 0); if (!approvals.length) return;
-  const item = approvals[0]; const title = document.createElement('strong'); title.textContent = 'CC 请求修改文件，需要你确认';
-  const pre = document.createElement('pre'); pre.textContent = JSON.stringify(item.input, null, 2);
-  el.append(title, pre);
-  for (const [text, allow] of [['允许本次修改', true], ['拒绝', false]]) {
-    const button = createUI('app-button'); button.className = `button ${allow ? 'primary' : 'secondary'}`; button.textContent = text;
-    button.onclick = () => action(async () => { await api.approval(item.id, allow); approvals = approvals.filter(x => x.id !== item.id); renderApproval(); }); el.append(button);
-  }
-}
+const approvalCards=mountToolApprovalCards({host:$('approval'),scope:()=>[chatOwnerID,chatEnvironmentID,activeChatId],decide:(id,allow)=>api.approval(id,allow),onError:message=>toast(message,'chat')});
+function renderApproval(){approvalCards.render();}
+
 let importPreview = null;
 function closeImport() {
   $('importText').value = ''; $('importEntries').replaceChildren();
@@ -853,9 +848,9 @@ function chooseProjectMode(container){
  dialog.open=true;
  return new Promise(resolve=>{let choice=null;const finish=()=>{dialog.removeEventListener('wa-after-hide',finish);resolve(choice);};dialog.addEventListener('wa-after-hide',finish);$('projectModeContinue').onclick=()=>{choice=group.value;dialog.open=false;};$('projectModeCancel').onclick=()=>{dialog.open=false;};});
 }
-const deepseekComposer=mountDeepSeekComposer({context:()=>({key:(chatOwnerID || '')+':'+dockerEnvironmentState.activeId+':'+activeChatId,enabled:['deepseek','codex'].includes(selectedEngine) && Boolean(activeChatId),engine:selectedEngine,busy:busy || draftPersistence.loading}),toast:message=>toast(message,'chat'),onChange:()=>draftPersistence.capture()});
+const deepseekComposer=mountDeepSeekComposer({getImages:()=>[...$('chat').querySelectorAll('.message-image')].map(el=>el.previewImage).filter(Boolean),context:()=>({key:(chatOwnerID || '')+':'+dockerEnvironmentState.activeId+':'+activeChatId,enabled:['deepseek','codex'].includes(selectedEngine) && Boolean(activeChatId),engine:selectedEngine,busy:busy || draftPersistence.loading}),toast:message=>toast(message,'chat'),onChange:()=>draftPersistence.capture()});
 const draftPersistence=mountDraftPersistence({input:$('prompt'),form:$('chatForm'),scope:()=>({owner:chatOwnerID,environmentId:chatEnvironmentID,chatId:activeChatId}),composer:deepseekComposer,onReady:()=>{renderChatAvailability();renderAuth();deepseekComposer.render();},onError:message=>toast(message,'chat')});
-mountAssistantImagePreviews({root:$('chat'),context:()=>({owner:chatOwnerID || null,environmentId:chatEnvironmentID || null}),read:value=>api.readChatImage(value),preview:image=>deepseekComposer.showPreview(image)});
+mountAssistantImagePreviews({root:$('chat'),context:()=>({owner:chatOwnerID || null,environmentId:chatEnvironmentID || null,chatId:activeChatId}),read:value=>api.readChatImage(value),preview:image=>deepseekComposer.showPreview(image)});
 const chatNeedsProxy=()=>chatSessions.find(item=>item.id===activeChatId)?.networkMode!=='direct';
 const chatNetworkReady=()=>!chatNeedsProxy() || network.state==='ready';
 function renderAuth(){
@@ -878,7 +873,7 @@ let lastChatSyncNotice='';
 function chatSyncNotice(message){const text=String(message).replace(/^Error invoking remote method '[^']+': Error: /,'');if(text!==lastChatSyncNotice){lastChatSyncNotice=text;toast(text,'chat');}}
 function persistChatViews(){const views=chatViewData(),owner=chatOwnerID;if(owner){void api.saveChats(views,owner,chatEnvironmentID).then(()=>{if(owner!==chatOwnerID)return;lastChatSyncNotice='';$('chatStorageStatus').textContent='对话已保存到当前账号';}).catch(error=>{if(owner!==chatOwnerID)return;$('chatStorageStatus').textContent='对话保存失败 · 请勿关闭应用';chatSyncNotice(error.message);});}else try{localStorage.setItem('anonymous-chat-views',JSON.stringify(views));}catch{}}
 function saveChatView(){const tab=contentTabState.tabs.find(tab=>tab.id===contentTabState.activeId && tab.page==='cc');if(tab)tab.draft=$('prompt').value;const item=chatSessions.find(item=>item.id===activeChatId);if(item)item.nodes=[...$('chat').childNodes];persistChatViews();}
-function renderSessionHeader(){if(!chatRenderContainer){void draftPersistence.sync();chatSearch.refresh();}contextPicker.invalidate();insightPanel.refresh();
+function renderSessionHeader(){if(!chatRenderContainer){void draftPersistence.sync();chatSearch.refresh();approvalCards.render();chatRecovery.refresh();}contextPicker.invalidate();insightPanel.refresh();
  const item=chatSessions.find(item=>item.id===activeChatId);
  $('sessionNetworkMode').value=item?.networkMode || 'proxy';updateChatNetworkIcon('sessionNetworkMode');
  $('sessionTitle').textContent=item?.title || '新会话';
@@ -888,9 +883,10 @@ function renderSessionHeader(){if(!chatRenderContainer){void draftPersistence.sy
  $('infoModel').textContent=item?.model || selectedCodexModel || runtimeVersions[selectedEngine]?.model || runtimeRegistry.runtimes.find(entry=>entry.id===selectedEngine)?.model || '运行时默认模型';$('infoProject').textContent=item?.project || '未选择文件夹';
  $('infoCreatedAt').textContent=item?.createdAt?displayDate(item.createdAt):'未记录';$('infoSessionId').textContent=activeChatId || '未创建';
 }
+const sessionOrder=mountSessionOrder({scope:()=>({owner:chatOwnerID,environmentId:chatEnvironmentID}),items:()=>chatSessions,render:()=>renderSessionList(),onError:message=>toast(message,'chat')});
 function renderSessionList(){
  $('sessionList').replaceChildren();$('archivedList').replaceChildren();
- for(const item of [...chatSessions].sort((a,b)=>{if(Boolean(a.pinned)!==Boolean(b.pinned))return Number(Boolean(b.pinned))-Number(Boolean(a.pinned));const activeA=Date.parse(a.updatedAt)||0,activeB=Date.parse(b.updatedAt)||0;if(activeA || activeB)return (activeB || Date.parse(b.createdAt)||0)-(activeA || Date.parse(a.createdAt)||0) || (b.creationOrder || 0)-(a.creationOrder || 0);return (b.creationOrder || 0)-(a.creationOrder || 0);})){
+ for(const item of sessionOrder.sort()){
   const wrapper=document.createElement('div');wrapper.className='session-row-container'+(item.id===activeChatId?' selected':'');const button=createUI('app-button');button.className='session-row'+(item.id===activeChatId?' active':'');button.dataset.sessionId=item.id;button.setAttribute('aria-current',String(item.id===activeChatId));
   const icon=createIcon(runtimeIcon(item.engine));const title=document.createElement('span');title.className='session-title';title.textContent=item.title;const avatar=document.createElement('span');avatar.className='chat-item-avatar';avatar.append(icon);const copy=document.createElement('span');copy.className='chat-item-copy';const detail=document.createElement('span');detail.className='chat-item-detail';const status=document.createElement('span');status.className='chat-item-status '+(item.chatStatus || 'idle');const hasDraft=contentTabState.tabs.some(tab=>tab.page==='cc' && tab.sessionId===item.id && tab.draft?.trim());const hasMessages=(item.nodes || []).some(node=>node.classList?.contains('bubble'));status.textContent=({failed:'发送失败',stopped:'已停止',done:'已完成'})[item.chatStatus] || (item.chatStatus==='running'?'':!hasMessages?(hasDraft?'草稿':'尚未开始'):'');
 if(item.chatStatus==='running'){
@@ -903,7 +899,7 @@ if(item.chatStatus==='running'){
 }detail.append(status);
  const timestamp=item.updatedAt || item.createdAt;
  if(timestamp && Number.isFinite(Date.parse(timestamp))){const time=document.createElement('time');time.className='chat-item-time';time.dateTime=new Date(timestamp).toISOString();time.textContent=new Intl.DateTimeFormat('en-US',{hour:'2-digit',minute:'2-digit',hour12:true}).format(new Date(timestamp));time.title=displayDate(timestamp);detail.append(time);}
- copy.append(title,detail);button.append(avatar,copy);
+ copy.append(title,detail);button.append(avatar,copy);sessionOrder.bind(button,item);
   button.onclick=()=>void action(async()=>{if(activeChatId===item.id && page==='cc')return;const version=++chatRestoreVersion;saveChatView();const value=await api.selectSession(item.id,{deferAuth:true,viewed:true});if(version===chatRestoreVersion)applySession(value,item);});
   const archive=createUI('app-button');archive.className='icon-button session-archive';archive.setAttribute('aria-label',item.archived?'取消归档':'归档对话');archive.title=item.archived?'取消归档':'归档对话';archive.append(createIcon(item.archived?'archive-restore':'archive'));archive.onclick=()=>void action(async()=>{if(chatRuns.has(item.id))throw new Error('请先停止此对话的回复');saveChatView();await api.archiveSession(item.id,!item.archived);item.archived=!item.archived;renderSessionList();persistChatViews();});const pin=createUI('app-button');pin.className='icon-button session-pin'+(item.pinned?' pinned':'');pin.setAttribute('aria-label',item.pinned?'取消固定对话':'固定对话');pin.append(createIcon(item.pinned?'pin-off':'pin'));pin.onclick=()=>{item.pinned=!item.pinned;renderSessionList();persistChatViews();};wrapper.append(button,pin,archive);$(item.archived?'archivedList':'sessionList').append(wrapper);
  }
@@ -983,6 +979,7 @@ $('newSessionDialog').addEventListener('wa-hide',event=>{if(creatingChat)event.p
 $('railNewSession').onclick=()=>void action(newChat);
 function updateSendButton(){busy=chatRuns.has(activeChatId);$('chat').classList.toggle('reply-in-progress',busy); $('send').replaceChildren(createIcon(busy?'square':'arrow-up'));$('send').setAttribute('aria-label',busy?'停止回复':!chatNetworkReady()||authStates[selectedEngine]?.state!=='signed-in'?'保存待发送':'发送消息');$('send').classList.toggle('stopping',busy); }
 $('send').onclick=()=>void action(()=>busy?api.cancel(activeChatId):$('chatForm').requestSubmit());
+const chatRecovery=mountChatRecovery({container:$('chatForm'),scope:()=>JSON.stringify([chatOwnerID,chatEnvironmentID,activeChatId]),onRetry:(key,record)=>action(async()=>{if(key!==JSON.stringify([chatOwnerID,chatEnvironmentID,activeChatId])||chatRuns.has(activeChatId))throw Error('请在原对话空闲时重试');await sendChatMessage(record.message);})});
 const contextPicker=mountContextPicker({input:$('prompt'),host:$('chatContextPicker'),load:value=>api.chatContext({...value,chatId:activeChatId}),getScope:()=>JSON.stringify([chatOwnerID,dockerEnvironmentState.activeId,activeChatId,selectedEngine,chatSessions.find(s=>s.id===activeChatId)?.project])});
 const chatSearch=mountChatSearch({chat:document.getElementById('chat'),getScope:()=>JSON.stringify([chatOwnerID,chatEnvironmentID,activeChatId])});
 const insightPanel=mountInsightsPanel({page:$('page-cc'),api,scope:()=>({owner:chatOwnerID,environmentId:dockerEnvironmentState.activeId||null,chatId:activeChatId}),updateMarkdown:updateChatMessage});
@@ -1003,7 +1000,8 @@ async function sendChatMessage(message,{clearComposer=false,editBlock=null}={}){
  const editIndex=editBlock && nodes.includes(editBlock)?chatViewSnapshot([{id:submittedChatId,nodes:nodes.slice(0,nodes.indexOf(editBlock))}])[0].messages.length:-1;
  if(editBlock && editIndex<0)throw new Error('编辑位置已变化');
  const rewind=editBlock?{chatId:submittedChatId,index:editIndex,messages:chatViewData().find(view=>view.id===submittedChatId)?.messages}:undefined;
- const state={requestId:crypto.randomUUID(),submitting:true,events:[],reply:null};chatRuns.set(submittedChatId,state);busy=true;updateSendButton();
+ chatRecovery.clear();
+ const state={message:structuredClone(message),requestId:crypto.randomUUID(),submitting:true,events:[],reply:null};chatRuns.set(submittedChatId,state);busy=true;updateSendButton();
  try{
   state.draftKey=await draftPersistence.prepare(state.requestId,message);
   if(activeChatId!==submittedChatId||!draftPersistence.isCurrent(state.draftKey))throw new Error('对话已变化，消息已保留为待发送');
@@ -1057,7 +1055,7 @@ function handleWorkspaceEvent(type,data){
   if(type==='runtimeLoginCallback' && data.owner===accountState.user?.id && data.environmentId===dockerEnvironmentState.activeId){switchPage('console');toast(data.ok?'Codex 已登录成功':'登录未完成，请查看控制台','runtime');void action(()=>refreshEnvironmentConfiguration(false,'codex'));}
   if(type==='containerLoginOutput')$('containerLoginOutput').value=($('containerLoginOutput').value+data).slice(-32000);
   if(type==='containerLoginEnd'){toast(data,'runtime');void action(()=>refreshEnvironmentConfiguration(true));}
-  if(type==='chatAccountChanged'){contextPicker.close();chatScroll.clear();clearReasoningTimers();chatRuns.clear();busy=false;reply=null;pendingChatMerges=[];$('deepseekApiKey').value='';$('runtimeInstallDialog').open=false;void reloadAccountChats();}
+  if(type==='chatAccountChanged'){approvalCards.clear();contextPicker.close();chatScroll.clear();clearReasoningTimers();chatRuns.clear();busy=false;reply=null;pendingChatMerges=[];$('deepseekApiKey').value='';$('runtimeInstallDialog').open=false;void reloadAccountChats();}
   if(type==='chatMerged' && data.owner===chatOwnerID){if(chatRuns.size)pendingChatMerges.push(data);else applyChatMerge(data);}
   if(type==='chatSyncRecovered' && data.owner===chatOwnerID){lastChatSyncNotice='';$('chatStorageStatus').textContent='对话已保存到当前账号';}
   if(type==='chatSyncError' && data.owner===chatOwnerID){$('chatStorageStatus').textContent=data.message;}
@@ -1068,7 +1066,7 @@ function handleWorkspaceEvent(type,data){
   if(type==='chatNetworkMode'){const item=chatSessions.find(item=>item.id===data.id);if(item)item.networkMode=data.networkMode;renderSessionList();renderChatAvailability();renderAuth();}
   if (type === 'browserError') { $('browserMessage').textContent = data; toast(data,'browser'); }
   if (type === 'ccStart') {if(selectedEngine!=='deepseek' && reply)reasoningView(reply,{kind:'process',phase:'process'},updateChatMessage);if(data.model){selectedCodexModel=data.model;const current=chatSessions.find(item=>item.id===activeChatId);if(current)current.model=data.model;renderRuntime();renderSessionHeader();}const item=chatSessions.find(item=>item.id===activeChatId);if(item){item.updatedAt=data.updatedAt || new Date().toISOString();item.chatStatus='running';renderSessionList();} busy = true;deepseekComposer.render(); $('send').disabled = false;updateSendButton(); $('ccState').textContent = 'CC 正在处理…'; }
-  if(type==='ccActivity'){const follow=chatScroll.canFollow($('chat'));reply ||= bubble('assistant','',selectedEngine,true);const state=reply.parentNode.messageReasoning;const activities=mergeRuntimeActivity(state?.activities || [],data);reasoningView(reply,{kind:'process',phase:'process',activities},updateChatMessage);if(follow)chatScroll.follow($('chat'));}
+  if(type==='ccActivity'){approvalCards.activity(data);const follow=chatScroll.canFollow($('chat'));reply ||= bubble('assistant','',selectedEngine,true);const state=reply.parentNode.messageReasoning;const activities=mergeRuntimeActivity(state?.activities || [],data);reasoningView(reply,{kind:'process',phase:'process',activities},updateChatMessage);if(follow)chatScroll.follow($('chat'));}
   if(type==='ccProcess'){reply ||= bubble('assistant','',selectedEngine,true);const state=reply.parentNode.messageReasoning;reasoningView(reply,{kind:'process',phase:'process',text:(state?.text?state.text+'\n\n':'')+data.text,startedAt:state?.startedAt},updateChatMessage);}
   if(type==='ccUsage'){void insightPanel.refresh(true);const item=chatSessions.find(item=>item.id===data.sessionId);if(item){(item.tokenUsage ||= []).push(data.entry);renderProfileActivity();}}
   if(type==='ccNotice'){bubble('error',data);}
@@ -1085,8 +1083,8 @@ function handleWorkspaceEvent(type,data){
   if (type === 'ccTool' && !['userMessage','user_message','agentMessage','agent_message'].includes(data.name)) { const el = document.createElement('div'); el.className = 'tool-note'; el.textContent = ({WebSearch:'网页搜索',webSearch:'网页搜索',WebFetch:'读取网页',web_search:'网页搜索'})[data.name] || `工具：${data.name}`; $('chat').append(el); }
   if (type === 'ccError') {const status=data?.status==='stopped'?'stopped':'failed';finishReasoning(reply,updateChatMessage,status);if(reply?.classList.contains('reply-loading')){if(reply.parentNode.messageReasoning){reply.classList.remove('reply-loading');reply.replaceChildren();reply.removeAttribute('role');reply.removeAttribute('aria-label');}else{reply.parentNode.remove();reply=null;}}const item=chatSessions.find(item=>item.id===activeChatId);if(item)item.chatStatus=status;renderSessionList();bubble('error', typeof data==='string'?data:data.message);}
   if (type === 'ccEnd') {void insightPanel.refresh(true);finishReasoning(reply,updateChatMessage,data?.status || 'completed');if(reply?.classList.contains('reply-loading')){if(reply.parentNode.messageReasoning){reply.classList.remove('reply-loading');reply.replaceChildren();reply.removeAttribute('role');reply.removeAttribute('aria-label');}else{reply.parentNode.remove();reply=null;}}const item=chatSessions.find(item=>item.id===activeChatId);if(item && !['failed','stopped'].includes(item.chatStatus))item.chatStatus=data?.status==='stopped'?'stopped':'done';renderSessionList();chatRuns.delete(activeChatId);busy = false;deepseekComposer.render(); $('send').disabled = draftPersistence.loading || !activeChatId; updateSendButton(); $('ccState').textContent = '请求已结束'; approvals = []; renderApproval(); reply = null; saveChatView();if(!chatRuns.size){const merges=pendingChatMerges;pendingChatMerges=[];for(const merged of merges)applyChatMerge(merged);}saveChatView(); }
-  if (type === 'approval') { approvals.push(data); renderApproval(); }
-  if (type === 'approvalDone') { approvals = approvals.filter(x => x.id !== data.id); renderApproval(); }
+  if (type === 'ccApproval') approvalCards.update(data);
+  if (type === 'ccApprovalDone') approvalCards.update(data);
 }
 // Runtime events carry their conversation and request identity. Updating a
 // background transcript is synchronous and never changes the user's selection.
@@ -1102,7 +1100,7 @@ function withChatView(id,callback,{refresh=true}={}){
  busy=chatRuns.has(id);reply=chatRuns.get(id)?.reply || null;
  try{return callback();}finally{
   target.nodes=[...$('chat').childNodes];if(chatRuns.has(id))chatRuns.get(id).reply=reply;
-  if(background){chatRenderContainer=null;activeChatId=view.id;selectedEngine=view.engine;selectedCodexModel=view.model;}
+  if(background){chatRenderContainer=null;activeChatId=view.id;selectedEngine=view.engine;selectedCodexModel=view.model;approvalCards.render();}
   busy=chatRuns.has(activeChatId);reply=chatRuns.get(activeChatId)?.reply || null;
   if(refresh){renderSessionList();renderChatAvailability();renderSessionHeader();renderRuntime();updateSendButton();}
  }
@@ -1113,7 +1111,7 @@ function dispatchWorkspaceEvent(event){
  if(owner!==chatOwnerID || environmentId!==dockerEnvironmentState.activeId)return;
  const state=chatRuns.get(chatId);if(!state || state.requestId!==requestId)return;
  if(state.submitting){state.events.push(event);return;}
- if(type==='ccError')state.failed=true;
+ if(type==='ccError'){state.failed=true;if(data?.recovery)chatRecovery.show(data.recovery,JSON.stringify([owner,environmentId,chatId]),{message:state.message});}
  if(type==='ccEnd')void draftPersistence.settle(state.draftKey,state.requestId,!state.failed&&data?.status!=='stopped').catch(()=>{});
  withChatView(chatId,()=>handleWorkspaceEvent(type,data),{refresh:['ccStart','ccEnd','ccError'].includes(type)});
 }

@@ -22,7 +22,7 @@ export function codexActivity(event){
 }
 
 const printable=value=>typeof value==='string'?value:JSON.stringify(value,null,2);
-const statuses={in_progress:'执行中',completed:'已完成',failed:'失败',stopped:'已停止',interrupted:'状态未确认',pending:'等待中',paused:'已暂停'};
+const statuses={pending_approval:'等待授权',in_progress:'执行中',completed:'已完成',failed:'失败',stopped:'已停止',interrupted:'状态未确认',pending:'等待中',paused:'已暂停'};
 export function renderActivities(container,activities=[]){
  if(!activities.length)return;
  const list=document.createElement('div');list.className='runtime-activities';
@@ -52,6 +52,7 @@ export function renderActivities(container,activities=[]){
   if(shell){
    const command=activity.command || activity.input?.command || target;if(command)section('命令','$ '+command,'runtime-shell-command');
   }else section('参数',activity.input);
+  if(activity.authorization)section('授权',({pending:'等待授权',allowed:'已批准，执行结果以运行时为准',user_denied:'用户拒绝',cancelled:'请求取消'})[activity.authorization]||activity.authorization);
   if(activity.progress)section('进度',activity.progress);
   if(activity.currentTool)section('当前工具',activity.currentTool);
   const output=activity.changes?.length?'已获取文件变更信息，请展开下方差异预览。':activity.output ?? activity.detail;

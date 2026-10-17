@@ -1,5 +1,5 @@
 // Search DOM text without rewriting Markdown, tool results, or persisted messages.
-const EXCLUDED='app-button,wa-icon,script,style,.message-actions,.bubble-label,.message-editor';
+const EXCLUDED='app-button,wa-icon,script,style,.message-actions,.bubble-label,.message-editor,.chat-code-toolbar';
 export function findChatMatches(chat,query){
  const term=String(query || '').trim();if(!term)return [];
  const expression=new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'giu');

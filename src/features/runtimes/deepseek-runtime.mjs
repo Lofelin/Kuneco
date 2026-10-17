@@ -11,6 +11,18 @@ import path from 'node:path';
 import {homedir} from 'node:os';
 import {pathToFileURL} from 'node:url';
 
+// Preserve only protocol metadata; response bodies may contain credentials or prompts.
+export function deepSeekHTTPError(status,headers={},now=Date.now()){
+ const message=({400:'DeepSeek 请求参数或上下文超限，请检查模型与图片',401:'API Key 无效',402:'DeepSeek 账户余额不足',403:'DeepSeek 请求权限不足',429:'DeepSeek 请求过于频繁',503:'DeepSeek 服务暂时不可用'})[status] || 'DeepSeek 请求失败（HTTP '+status+'）';
+ const kind=({400:'invalid-request',401:'authentication',402:'balance',403:'permission',429:'rate-limit',503:'unavailable'})[status] || 'http-error';
+ const raw=headers['retry-after'];let retryAt=null;
+ if(typeof raw==='string' && raw.trim()){
+  const text=raw.trim(),value=/^\d+$/.test(text)?now+Number(text)*1000:/^[A-Za-z]{3,9}(?:,| )/.test(text)?Date.parse(text):NaN;
+  if(Number.isFinite(value)&&value>=0&&value<=8640000000000000)retryAt=Math.max(now,value);
+ }
+ return Object.assign(new Error(message),{recovery:{provider:'deepseek',kind,httpStatus:status,retryAt,automaticRetry:false,executionUnknown:false,manualRetry:[429,503].includes(status)}});
+}
+
 export async function readDeepSeekStream(response,onText=()=>{},onReasoning=()=>{}){
  let buffer='',answer='',reasoning='',usage,done=false,total=0,finish;const calls=new Map();
  const frame=value=>{
@@ -94,7 +106,7 @@ export async function requestDeepSeek(proxyURL,key,route,body,{installation=fals
    if(response.statusCode===200 && body?.stream){readDeepSeekStream(response,onText,onReasoning).then(resolve,reject).catch(()=>{});return;}
    let data='';response.setEncoding('utf8');response.on('data',chunk=>{data+=chunk;if(data.length>4_000_000)request.destroy(new Error('响应过大'));});
    response.on('error',()=>{reject(new Error('DeepSeek 响应中断'));});
-   response.on('end',()=>{if(response.statusCode!==200){reject(new Error(response.statusCode===401?'API Key 无效':response.statusCode===402?'DeepSeek 账户余额不足':response.statusCode===429?'DeepSeek 请求过于频繁，请稍后重试':response.statusCode===400?'DeepSeek 请求参数或上下文超限，请检查模型与图片':'DeepSeek 请求失败（HTTP '+response.statusCode+'）'));return;}try{resolve(JSON.parse(data));}catch{reject(new Error('DeepSeek 响应无效'));}});
+   response.on('end',()=>{if(response.statusCode!==200){reject(deepSeekHTTPError(response.statusCode,response.headers));return;}try{resolve(JSON.parse(data));}catch{reject(new Error('DeepSeek 响应无效'));}});
   });life.bind(request,{customConnection:!direct});pool.pending.add(request);request.once('close',()=>{pool.pending.delete(request);pool.lifecycles.delete(life);});request.once('error',()=>{reject(life.signal.aborted?life.signal.reason:new Error(direct?'DeepSeek API Key 校验失败，请检查网络连接':'DeepSeek 请求中断，请检查代理连接'));});request.end(payload);
  });
   }finally{release?.();life.finish();pool.lifecycles.delete(life);}
@@ -140,7 +152,7 @@ export async function runDeepSeekCLI(command,input,{directory=path.join(homedir(
    const result=await request(process.env.HTTP_PROXY,config.apiKey,'/chat/completions',{model,messages:[{role:'user',content:prompt}],max_tokens:4096,stream:true,stream_options:{include_usage:true},thinking:{type:'disabled'}},{direct:input.networkMode==='direct',signal,onText:()=>{},onReasoning:()=>{}});
    compactUsage=result.usage;const choice=result.choices?.[0];if(choice?.finish_reason!=='stop')throw new Error('摘要未完整返回，未修改原始上下文');return choice.message?.content;
   }});const receipt={...record,automatic:true,usage:compactUsage,contextLimit,triggerTokens:state.promptTokens+Math.max(0,state.completionTokens||0)};onCompaction(receipt);onActivity({...activity,status:'completed',durationMs:Date.now()-startedAt,output:{beforeBytes:record.beforeBytes,afterBytes:record.afterBytes,backup:record.backup,message:'已保留原始备份及最近两轮；聊天记录不删除'}});return true;
-  }catch(error){onCompaction({automatic:true,status:signal?.aborted?'stopped':'failed',at:new Date().toISOString(),usage:compactUsage,contextLimit,error:error.message});onActivity({...activity,status:signal?.aborted?'stopped':'failed',durationMs:Date.now()-startedAt,error:error.message,output:'自动压缩未完成，未自动重试；原始记录保留'});throw new Error('自动上下文压缩未完成：'+error.message);}
+  }catch(error){onCompaction({automatic:true,status:signal?.aborted?'stopped':'failed',at:new Date().toISOString(),usage:compactUsage,contextLimit,error:error.message});onActivity({...activity,status:signal?.aborted?'stopped':'failed',durationMs:Date.now()-startedAt,error:error.message,output:'自动压缩未完成，未自动重试；原始记录保留'});throw Object.assign(new Error('自动上下文压缩未完成：'+error.message),error.recovery?{recovery:{...error.recovery,executionUnknown:true,manualRetry:false}}:{});}
  };
  if(contextState&&await autoCompact(contextState))history=JSON.parse(await readFile(file,'utf8'));
  const content=message.images.length?[...(message.text.trim()?[{type:'text',text:message.text}]:[]),...message.images.map(image=>({type:'image_url',image_url:{url:image.dataURL || image.url,detail:image.detail}}))]:message.text;
@@ -155,7 +167,7 @@ export async function runDeepSeekCLI(command,input,{directory=path.join(homedir(
  const options={direct:input.networkMode==='direct',onText,onReasoning,signal};
  const tools=input.project===undefined?null:await createDeepSeekTools({cwd:input.project,signal,onActivity});
  const body={model,messages,stream:true,stream_options:{include_usage:true},thinking:{type:message.thinking},...(tools?{tools:tools.definitions,tool_choice:'auto'}:{})};
- const uploaded=[],imageReferences=new Map();
+ let executedTools=0;const uploaded=[],imageReferences=new Map();
  try{
   // Keep original image data in environment-local history; remote file references are temporary.
   if(totalImageBytes>64*1024*1024 || Buffer.byteLength(JSON.stringify(body))>48*1024*1024 || allImages.some(p=>p.image_url.url.startsWith('data:') && Buffer.from(p.image_url.url.split(',')[1],'base64').length>32*1024*1024)){
@@ -193,16 +205,16 @@ export async function runDeepSeekCLI(command,input,{directory=path.join(homedir(
    messages.push(assistant);if(body.messages!==messages)body.messages.push(assistant);answer+=assistant.content;
    if(!calls.length){await checkpoint();await manageContext(result.usage);return {text:answer,usage,finishReason:choice.finish_reason};}
    await checkpoint(); // Persist intent before executing; a restart must not repeat an unknown operation.
-   for(const call of calls){signal?.throwIfAborted();count++;const result=await tools.execute(call);const response={role:'tool',tool_call_id:call.id,content:result};messages.push(response);if(body.messages!==messages)body.messages.push(response);await checkpoint();signal?.throwIfAborted();}
+   for(const call of calls){signal?.throwIfAborted();count++;executedTools++;const result=await tools.execute(call);const response={role:'tool',tool_call_id:call.id,content:result};messages.push(response);if(body.messages!==messages)body.messages.push(response);await checkpoint();signal?.throwIfAborted();}
    await manageContext(result.usage);
   }
   throw new Error('工具执行达到 24 轮上限，已停止；已完成的操作不会自动重试');
- }finally{for(const id of uploaded)await request(process.env.HTTP_PROXY,config.apiKey,'/files/'+id,null,{direct:options.direct}).catch(()=>{});}
+ }catch(error){if(error.recovery&&executedTools>0)error.recovery={...error.recovery,executionUnknown:true,manualRetry:false};throw error;}finally{for(const id of uploaded)await request(process.env.HTTP_PROXY,config.apiKey,'/files/'+id,null,{direct:options.direct}).catch(()=>{});}
 
 }
 if(process.argv[1] && import.meta.url===pathToFileURL(process.argv[1]).href){
  const controller=new AbortController();const stop=()=>controller.abort(new Error('请求已取消'));process.on('SIGTERM',stop);process.on('SIGINT',stop);
  try{let text='';for await(const chunk of process.stdin){text+=chunk;if(text.length>300*1024*1024)throw new Error('输入过大');}const value=await runDeepSeekCLI(process.argv[2],text?JSON.parse(text):{},{signal:controller.signal,onUsage:usage=>console.log(JSON.stringify({type:'usage',usage})),onCompaction:record=>console.log(JSON.stringify({type:'compaction',record})),onActivity:activity=>console.log(JSON.stringify({type:'activity',activity})),onText:text=>console.log(JSON.stringify({type:'delta',text})),onReasoning:text=>console.log(JSON.stringify({type:'reasoning',text}))});console.log(JSON.stringify(process.argv[2]==='chat'?{type:'done',usage:value.usage,finishReason:value.finishReason}:value));}
- catch(error){console.error(error.code==='ENOENT'?'尚未配置 DeepSeek API Key':error.message);process.exitCode=1;}
+ catch(error){if(process.argv[2]==='chat'&&error.recovery)console.log(JSON.stringify({type:'error',message:error.message,recovery:error.recovery}));console.error(error.code==='ENOENT'?'尚未配置 DeepSeek API Key':error.message);process.exitCode=1;}
  finally{closeDeepSeekConnections();}
 }

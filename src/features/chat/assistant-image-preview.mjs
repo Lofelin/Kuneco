@@ -10,7 +10,7 @@ export function mountAssistantImagePreviews({root,context,read,preview}){
     const text=content.dataset.rawText;
     try{
      const image=await read({path,...scope});if(!content.isConnected || text!==content.dataset.rawText || JSON.stringify(context())!==JSON.stringify(scope))continue;
-     const button=document.createElement('app-button');button.setAttribute('layout','custom');button.className='message-image assistant-image-preview';button.dataset.assistantImage='';button.imagePath=path;button.setAttribute('aria-label','预览图片 '+image.name);
+     const button=document.createElement('app-button');button.setAttribute('layout','custom');button.className='message-image assistant-image-preview';button.dataset.assistantImage='';button.imagePath=path;button.previewImage=image;button.setAttribute('aria-label','预览图片 '+image.name);
      const img=document.createElement('img');img.src=image.dataURL;img.alt=image.name;button.append(img);button.onclick=()=>preview(image);content.append(button);
     }catch{/* Keep the original path/link available when the file has moved or is unavailable. */}
     finally{entries.delete(key);}

@@ -1,0 +1,3 @@
+.session-row.session-dragging{opacity:.5;cursor:grabbing}
+.session-row.session-drop-target{box-shadow:0 -2px 0 var(--control-focus-border)}
+.session-row.session-drop-target.session-drop-after{box-shadow:0 2px 0 var(--control-focus-border)}
