@@ -23,7 +23,11 @@ try{
  assert.equal(await manager.command(['exec',name,'cat','/workspace/reliability-sentinel']),'work');
  await ensureWorker(manager,{name,image,spec:'integration-v1',args,assertCurrent:noCancel});assert.equal((await inspect()).Id,after.Id);
  await manager.command(['network','connect','bridge',name]);
- await assert.rejects(ensureWorker(manager,{name,image,spec:'integration-v1',args,assertCurrent:noCancel}),/网络/);
+ await assert.rejects(ensureWorker(manager,{name,image,spec:'integration-v1',args,assertCurrent:noCancel}),/网络|隔离|放行/);
+ assert.equal((await inspect()).Id,after.Id);
+ const {directChatNetworkSetup}=await import('../../src/features/chat/container-chat-network.mjs');
+ await manager.command(['exec','--user','0',name,'sh','-eu','-c',directChatNetworkSetup]);
+ await ensureWorker(manager,{name,image,spec:'integration-v1',args,assertCurrent:noCancel});
  assert.equal((await inspect()).Id,after.Id);
  await manager.command(['network','disconnect','bridge',name]);
  const bad=[...args];bad[bad.indexOf('--entrypoint')+1]='/missing-entrypoint';
@@ -33,7 +37,7 @@ try{
  await new Promise(r=>setTimeout(r,300));
  const ps=await manager.command(['exec',name,'ps','-eo','stat']);assert.ok(!ps.split('\n').some(s=>s.trim().startsWith('Z')));
  assert.match(await manager.command(['exec',name,'sh','-c','iptables -S OUTPUT']),/-P OUTPUT DROP/);
- console.log(JSON.stringify({extraNetworkRejected:true,upgrade:true,rollback:true,volumesPreserved:true,reconnectRetainsContainer:true,init:true,zombies:0,readonly:true,logs:after.HostConfig.LogConfig,networkPolicy:'OUTPUT DROP'}));
+ console.log(JSON.stringify({extraNetworkRejected:true,explicitDirectRulesAccepted:true,upgrade:true,rollback:true,volumesPreserved:true,reconnectRetainsContainer:true,init:true,zombies:0,readonly:true,logs:after.HostConfig.LogConfig,networkPolicy:'OUTPUT DROP'}));
 }finally{
  const names=(await manager.command(['ps','-a','--format','{{.Names}}'])).split('\n').filter(n=>n===name||n.startsWith(name+'-upgrade-'));
  for(const n of names)await manager.command(['rm','-f',n]);

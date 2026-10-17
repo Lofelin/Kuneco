@@ -6,7 +6,7 @@ const args=['run','-d','--network','private','--name',name,'--mount','type=volum
 function fixture({same=false,running=true,failRun=false,cancelAt,extraMount=false}={}){
  let current=true,ready=0,replacement=null;const calls=[];
  const old={NetworkSettings:{Networks:{private:{}}},Config:{Image:same?image:'old',Labels:{app:'dingtu',[SPEC_LABEL]:same?spec:'old'}},State:{Running:running},Mounts:[{Type:'volume',Name:extraMount?'owned-worker-home-old':'owned-worker-home',Destination:'/home/node',RW:true}]};
- const manager={command:async a=>{calls.push(a);if(a[0]==='run'){const label=a.find(v=>v.startsWith(ATTEMPT_LABEL+'='));replacement={Id:'attempt-id',Config:{Labels:{[ATTEMPT_LABEL]:label.slice(ATTEMPT_LABEL.length+1)}}};}if(a[0]===cancelAt)current=false;if(a.includes('{{json .}}'))return JSON.stringify(replacement || old);if(a.includes('{{json .State}}'))return JSON.stringify({Running:true});if(a[0]==='exec'&&++ready===1)throw Error('not ready yet');if(a[0]==='run'&&failRun)throw Error('run failed');return '';}};
+ const manager={command:async a=>{calls.push(a);if(a[0]==='run'){const label=a.find(v=>v.startsWith(ATTEMPT_LABEL+'='));replacement={...old,Id:'attempt-id',Config:{...old.Config,Labels:{[ATTEMPT_LABEL]:label.slice(ATTEMPT_LABEL.length+1)}}};}if(a[0]===cancelAt)current=false;if(a.includes('{{json .}}'))return JSON.stringify(replacement || old);if(a.includes('{{json .State}}'))return JSON.stringify({Running:true});if(a[0]==='exec'&&++ready===1)throw Error('not ready yet');if(a[0]==='run'&&failRun)throw Error('run failed');return '';}};
  return {manager,calls,options:{name,image,spec,args,assertCurrent:()=>{if(!current)throw Error('cancelled');}}};
 }
 test('worker upgrade retains exact volumes and removes backup only after readiness',async()=>{
@@ -41,7 +41,7 @@ test('concurrent worker preparations are serialized and stale waiter cannot muta
  const started=new Promise(r=>entered=r);f.manager.command=async a=>{if(a.includes('{{json .}}')){entered();await paused;}return original(a);};
  const one=ensureWorker(f.manager,f.options);await started;let valid=true;
  const two=ensureWorker(f.manager,{...f.options,assertCurrent:()=>{if(!valid)throw Error('cancelled waiter');}});const rejected=assert.rejects(two,/cancelled waiter/);valid=false;release();await one;await rejected;
- assert.equal(f.calls.filter(a=>a.includes('{{json .}}')).length,1);
+ assert.equal(f.calls.filter(a=>a.includes('{{json .}}')).length,2);
 });
 for(const stage of ['inspect','stop','rename','start'])test(`worker invalidation during ${stage} prevents subsequent startup`,async()=>{
  const f=fixture({same:stage==='start',running:stage!=='start',cancelAt:stage});

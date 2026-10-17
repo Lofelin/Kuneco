@@ -35,12 +35,14 @@ export async function ensureWorker(manager,options){
 async function replaceWorker(manager,{name,image,spec,args,assertCurrent}){
  assertCurrent();const old=await inspectContainer(manager,name);
  assertCurrent();
- if(old)validateContainerNetworks(old,args[args.indexOf('--network')+1]);
+ if(old){validateContainerNetworks(old,args[args.indexOf('--network')+1],{direct:true});if(old.State?.Running)await validateDirectFirewall(manager,name,old);}
  if(old && old.Config?.Labels?.app!=='dingtu')throw new Error('容器归属不匹配，已停止升级');
  const validate=async()=>{
   assertCurrent();const state=JSON.parse(await manager.command(['inspect','--format','{{json .State}}',name]));assertCurrent();
   if(!state.Running)throw new Error(containerStatus(state).statusText);
   await manager.command(['exec',name,'test','-f','/tmp/kuneco-worker-ready']);assertCurrent();
+  const current=await inspectContainer(manager,name);assertCurrent();
+  validateContainerNetworks(current,args[args.indexOf('--network')+1],{direct:true});await validateDirectFirewall(manager,name,current);assertCurrent();
  };
  const ready=async()=>{for(let i=0;;i++){try{await validate();return;}catch(error){assertCurrent();if(i===29)throw error;await new Promise(r=>setTimeout(r,100));}}};
  if(old){
@@ -79,9 +81,9 @@ export async function inspectContainer(manager,name){
 }
 
 export const ATTEMPT_LABEL='io.kuneco.creation-attempt';
-export function validateContainerNetworks(container,network,{gateway=false}={}){
+export function validateContainerNetworks(container,network,{gateway=false,direct=false}={}){
  const attached=Object.keys(container.NetworkSettings?.Networks || {});
- const allowed=gateway?['bridge',network]:[network];
+ const allowed=gateway || direct?['bridge',network]:[network];
  if(!network || !attached.includes(network) || attached.some(name=>!allowed.includes(name)))throw new Error('容器网络与环境隔离配置不一致，保留原容器，请先核对网络');
  if(gateway && !attached.includes('bridge'))throw new Error('网关缺少预期网络，保留原容器，请先核对网络');
 }
@@ -100,4 +102,27 @@ export async function removeAttemptContainer(manager,name,attempt){
  const container=await inspectContainer(manager,name);if(!container)return;
  if(!container.Id || container.Config?.Labels?.[ATTEMPT_LABEL]!==attempt)throw new Error('创建失败且同名容器归属无法确认，已保留容器与升级备份，请核对后重试');
  await manager.command(['rm','-f',container.Id]);
+}
+
+// Explicit direct chats share the worker but only GID 1001 may bypass proxy egress.
+export function validateDirectFirewallRules(ipv4,ipv6,gatewayIP){
+ const check=(text,v6)=>{
+  const rules=text.trim().split('\n');
+  if(!rules.includes('-P OUTPUT DROP') || !rules.includes('-A OUTPUT -m owner --gid-owner 1001 -j ACCEPT'))throw new Error('直连网络的代理隔离规则不完整，已停止复用');
+  const allowed=new Set(['-P OUTPUT DROP','-A OUTPUT -o lo -j ACCEPT','-A OUTPUT -m owner --gid-owner 1001 -j ACCEPT']);
+  if(!v6){
+   allowed.add('-A OUTPUT -p udp -m udp --dport 53 -j REJECT --reject-with icmp-port-unreachable');
+   allowed.add('-A OUTPUT -p tcp -m tcp --dport 53 -j REJECT --reject-with icmp-port-unreachable');
+   allowed.add('-A OUTPUT -d '+gatewayIP+'/32 -p tcp -m tcp --dport 8080 -j ACCEPT');
+  }
+  if(rules.some(rule=>!allowed.has(rule)))throw new Error('直连网络存在非预期放行规则，已停止复用');
+ };
+ check(ipv4,false);check(ipv6,true);
+}
+async function validateDirectFirewall(manager,name,container){
+ if(!container?.NetworkSettings?.Networks?.bridge)return;
+ const gatewayIP=container.Config?.Env?.find(value=>value.startsWith('DINGTU_GATEWAY_IP='))?.slice('DINGTU_GATEWAY_IP='.length);
+ if(!gatewayIP)throw new Error('缺少代理网关隔离地址');
+ const [v4,v6]=await Promise.all(['iptables','ip6tables'].map(binary=>manager.command(['exec','--user','0',name,binary,'-S','OUTPUT'])));
+ validateDirectFirewallRules(v4,v6,gatewayIP);
 }
