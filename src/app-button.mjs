@@ -12,6 +12,10 @@ export class AppButton extends WaButton {
   .button:focus-visible{outline:2px solid var(--field-focus-ring,color-mix(in srgb,var(--blue) 16%,transparent));outline-offset:2px}
   :host([layout=custom]) .button{display:inherit;align-items:inherit;justify-content:inherit;gap:inherit!important;width:100%;height:100%;min-height:0;padding:0!important;border:0;background:transparent;color:inherit;font:inherit;white-space:inherit}
   :host([layout=custom]) .label{display:contents}
+  :host([variant=danger]) .button{background:var(--delete-background)!important;color:var(--delete-foreground)!important;border-color:transparent!important;box-shadow:none!important;filter:none!important}
+  :host([variant=danger]:not([disabled]):not([loading])) .button:is(:hover,:active){background:var(--delete-hover-background)!important;color:var(--delete-hover-foreground)!important}
+  :host([variant=danger]) slot::slotted(wa-icon){color:inherit!important}
+
  `];
  constructor(){super();this.size='s';}
 }

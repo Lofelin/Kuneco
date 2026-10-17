@@ -643,7 +643,6 @@ app-button.content-tab-pin::part(base),app-button.content-tab-close::part(base){
 #deleteEnvironmentError:empty{display:none}
 #confirmDeleteEnvironment::part(base){color:#d34e4e;background:#d34e4e12;border-color:transparent}
 #confirmDeleteEnvironment:not([disabled]):hover::part(base){color:#fff;background:#d34e4e}
-.docker-environment-row app-button[variant=danger]::part(base){color:#d34e4e}
 .environment-clickable{cursor:pointer;transition:border-color .12s,background .12s}
 .environment-clickable:hover{background:var(--hover)}
 .environment-clickable [role=app-button]:focus-visible{outline:2px solid var(--muted);outline-offset:6px;border-radius:4px}
@@ -651,7 +650,6 @@ app-button.content-tab-pin::part(base),app-button.content-tab-close::part(base){
 .environment-detail-heading h2{margin:0;font-size:24px;color:var(--ink)}
 .environment-detail-heading p{margin:8px 0 0}
 .environment-detail-actions{display:flex;gap:8px;flex-wrap:wrap;margin:24px 0}
-.environment-detail-actions app-button[variant=danger]::part(base){color:#d34e4e}
 .environment-detail-facts{display:grid;grid-template-columns:120px minmax(0,1fr);gap:16px;margin:24px 0;padding:22px;border:1px solid var(--line);border-radius:10px;background:var(--surface);font-size:13px}
 .environment-detail-facts dt{color:var(--muted)}.environment-detail-facts dd{margin:0;overflow-wrap:anywhere}
 .environment-detail-runtimes{margin-top:30px}.environment-detail-runtimes h3{font-size:14px}
@@ -1470,11 +1468,8 @@ app-dialog .form-footer{margin-bottom:0}
 
 .runtime-detail-actions{display:flex;align-items:center;gap:8px;margin-left:auto}
 #runtimeDetailHint{margin:0 20px 16px;font-size:12px;line-height:1.6}
-:is(.content-page-header app-button,.content-action)[variant=danger]::part(base){color:var(--danger,#dc2626)}
 
 /* Shared destructive action states across pages and dialogs. */
-app-button[variant=danger]::part(base){color:var(--danger,#dc2626)}
-app-button[variant=danger]:not([disabled])::part(base):is(:hover,:active,:focus-visible){color:var(--danger,#dc2626);background:color-mix(in srgb,var(--danger,#dc2626) 9%,var(--surface));border-color:color-mix(in srgb,var(--danger,#dc2626) 28%,var(--line))}
 
 .runtime-detail-layout{grid-template-columns:minmax(0,1fr) 280px}
 .runtime-detail-aside .runtime-related{padding:0}
@@ -1489,8 +1484,6 @@ app-button[variant=danger]:not([disabled])::part(base):is(:hover,:active,:focus-
 @media(max-width:950px){.runtime-detail-layout{grid-template-columns:1fr}}
 
 /* Compact row actions use menu sizing{min-width:112px;padding:4px;border:1px solid var(--line);border-radius:7px;background:var(--surface);box-shadow:0 6px 18px #0002}
-wa-dropdown-item[variant=danger]{color:var(--danger,#dc2626);--current-text-color:var(--danger,#dc2626)}
-wa-dropdown-item[variant=danger]:not([disabled]):is(:hover,:focus-visible){color:var(--danger,#dc2626);background:color-mix(in srgb,var(--danger,#dc2626) 9%,var(--surface))}
 
 #browserMoreMenu wa-dropdown-item wa-icon{width:14px!important;height:14px!important;min-width:14px!important;min-height:14px!important;font-size:14px!important}
 
@@ -1515,10 +1508,11 @@ wa-dropdown-item[variant=danger]:not([disabled]):is(:hover,:focus-visible){color
 :is(#sessionNetworkMode,#sessionModel)>wa-icon[slot=start]{display:flex;align-items:center;justify-content:center;align-self:center;height:16px;line-height:1;vertical-align:middle}
 
 /* Repeatable actions share one semantic blue treatment. */
+#setupDetect{--retry-action-color:var(--ink)}
 app-button.retry-action{flex-shrink:0}
 app-button.retry-action::part(base){white-space:nowrap}
-app-button.retry-action::part(base),app-button.retry-action.primary::part(base){color:var(--blue);background:var(--surface);border-color:var(--line);filter:none}
-app-button.retry-action:not([disabled])::part(base):is(:hover,:active,:focus-visible){color:var(--blue);background:color-mix(in srgb,var(--blue) 9%,var(--surface));border-color:color-mix(in srgb,var(--blue) 28%,var(--line));filter:none}
+app-button.retry-action::part(base),app-button.retry-action.primary::part(base){color:var(--retry-action-color,var(--blue));background:var(--surface);border-color:var(--line);filter:none}
+app-button.retry-action:not([disabled])::part(base):is(:hover,:active,:focus-visible){color:var(--retry-action-color,var(--blue));background:color-mix(in srgb,var(--blue) 9%,var(--surface));border-color:color-mix(in srgb,var(--blue) 28%,var(--line));filter:none}
 app-button.retry-action[loading] wa-icon,app-button.retry-action[aria-busy=true] wa-icon{animation:retry-action-spin 1s linear infinite}
 @keyframes retry-action-spin{to{transform:rotate(360deg)}}
 @media(prefers-reduced-motion:reduce){app-button.retry-action wa-icon{animation:none!important}}
@@ -1603,13 +1597,11 @@ app-button.retry-action[loading] wa-icon,app-button.retry-action[aria-busy=true]
 .runtime-detail-field-wide{grid-column:1/-1}
 @media(max-width:900px){#runtimeDetailContent .runtime-detail-facts{grid-template-columns:1fr}}
 
-/* Destructive buttons use a filled red surface in every container. */
-:is(app-button,.content-page-header app-button,.content-action,.docker-environment-row app-button,.environment-detail-actions app-button)[variant=danger]::part(base){background:#e05252;border-color:#e05252;color:#fff;filter:none}
-:is(app-button,.content-page-header app-button,.content-action,.docker-environment-row app-button,.environment-detail-actions app-button)[variant=danger]:not([disabled])::part(base):is(:hover,:focus-visible){background:#ce4242;border-color:#ce4242;color:#fff;filter:none}
-:is(app-button,.content-page-header app-button,.content-action,.docker-environment-row app-button,.environment-detail-actions app-button)[variant=danger]:not([disabled])::part(base):active{background:#bc3535;border-color:#bc3535;color:#fff;filter:none}
-wa-dropdown-item[variant=danger]{background:#e05252;color:#fff;--current-text-color:#fff}
-wa-dropdown-item[variant=danger]:not([disabled]):is(:hover,:focus-visible){background:#ce4242;color:#fff;--current-text-color:#fff}
-wa-dropdown-item[variant=danger]:not([disabled]):active{background:#bc3535;color:#fff;--current-text-color:#fff}
+/* Shared destructive-action palette: quiet at rest, solid only during pointer interaction. */
+body{--delete-foreground:#d34e4e;--delete-background:color-mix(in srgb,var(--delete-foreground) 7%,var(--surface));--delete-hover-background:#ce484c;--delete-hover-foreground:#fff}
+body.dark{--delete-foreground:#f0787c;--delete-background:color-mix(in srgb,var(--delete-foreground) 12%,var(--surface))}
+wa-dropdown-item[variant=danger]{background:var(--delete-background);color:var(--delete-foreground);--current-text-color:var(--delete-foreground)}
+wa-dropdown-item[variant=danger]:not([disabled]):is(:hover,:active){background:var(--delete-hover-background);color:var(--delete-hover-foreground);--current-text-color:var(--delete-hover-foreground)}
 
 /* Align environment facts with the three metadata columns above the divider. */
 .environment-has-image-details .environment-inline-facts{margin-inline-start:76px;grid-template-columns:minmax(0,1fr) minmax(0,.7fr) minmax(0,1.3fr);column-gap:24px}

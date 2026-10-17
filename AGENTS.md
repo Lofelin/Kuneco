@@ -98,3 +98,10 @@
 - 只读表格不绑定行激活；可点击行统一支持点击、Enter 和空格，单元格中的链接与操作菜单不得触发行跳转。空表显示跨列空状态，长内容换行、窄窗口横向滚动，保持表头与内容列对齐。
 - Markdown 先净化，再由 `adoptAppTables` 纳入同一组件，保留原生表格语义、链接和对齐；禁止为聊天回复另写表格样式。
 - 新增或修改表格必须通过 `test/app-table.test.mjs` 和 `test/app-table-contract.test.mjs`，并在重启后检查表头与内容对齐、长内容、空态、窄窗口、悬停/移出、键盘焦点、行跳转和菜单隔离。新增表格只能配置或扩展全局组件，禁止独立实现。
+
+## 全局删除按钮
+
+- 所有删除、移除、卸载等破坏性操作统一使用 `app-button variant="danger"`，配合 `trash-2` 语义图标（`slot="start"`）；删除菜单项使用 `wa-dropdown-item variant="danger"` 与 `slot="icon"`。覆盖页面、弹窗和动态生成的自动化、运行时、环境入口。
+- 默认状态为浅红底、红色文字和图标；仅悬停或按下时使用实红底、白色文字和图标，移出后立即恢复浅红状态。不得默认显示实红底白字；键盘聚焦保留统一浅蓝焦点提示，不得把聚焦状态当作悬停实红状态。
+- 颜色统一复用 `--delete-foreground`、`--delete-background`、`--delete-hover-background`、`--delete-hover-foreground`；按钮样式由 `src/app-button.mjs` 管理，菜单复用同一组全局 tokens。禁止页面添加另一套删除配色或以 `primary`、`appearance="plain"`、`layout="custom"` 绕过规则。
+- 禁用及加载时保持浅红语义且不响应悬停变色。验收覆盖默认、悬停、按下、移出、键盘聚焦与失焦、禁用和加载，检查图标与文字同色，并覆盖深浅主题、静态与动态入口。验收不得执行真实删除。

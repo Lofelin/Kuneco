@@ -1,3 +1,4 @@
+import {defaultAccountAvatar} from './account-avatar.mjs';
 import {encodeChatPayload,decodeChatPayload} from './chat-object-store.mjs';
 import http from 'node:http';
 import https from 'node:https';
@@ -28,7 +29,7 @@ export async function directRequest(url,{method='GET',body,token,signal}={}) {
 }
 export class AccountClient extends EventEmitter {
   constructor({serverURL,sessionFile,storage,openExternal,directIP,returnURL}){super();this.serverURL=accountServerURL(serverURL);this.sessionFile=sessionFile;this.storage=storage;this.openExternal=openExternal;this.returnURL=returnURL;this.directIP=directIP;this.token=null;this.user=null;this.status='signed-out';this.controller=null;this.avatar=null;this.version=0;}
-  state(){return {user:this.user,avatar:this.avatar,status:this.status,serverURL:this.serverURL};}
+  state(){return {user:this.user,avatar:this.avatar || defaultAccountAvatar(this.user,this.serverURL),status:this.status,serverURL:this.serverURL};}
   changed(){this.emit('change',this.state());}
   async request(route,options={}) {
     let res;try{res=await directRequest(this.serverURL+route,{token:this.token,...options});}catch(error){if(error.name==='AbortError')throw error;throw new Error('账号服务暂不可用，请确认 Go 服务已启动');}
@@ -38,7 +39,7 @@ export class AccountClient extends EventEmitter {
   async persist(){
     if(!this.storage.isEncryptionAvailable())throw new Error('系统凭据存储不可用，无法保存登录会话');
     await mkdir(path.dirname(this.sessionFile),{recursive:true,mode:0o700});
-    const secret=this.storage.encryptString(JSON.stringify({token:this.token,serverURL:this.serverURL,user:this.profileToken===this.token && this.user?{id:this.user.id,name:this.user.name,email:this.user.email,username:this.user.username}:null}));
+    const secret=this.storage.encryptString(JSON.stringify({token:this.token,serverURL:this.serverURL,user:this.profileToken===this.token && this.user?{id:this.user.id,name:this.user.name,email:this.user.email,username:this.user.username,avatarUrl:this.user.avatarUrl}:null}));
     await writeFile(this.sessionFile+'.tmp',secret,{mode:0o600});await rename(this.sessionFile+'.tmp',this.sessionFile);
   }
   async profile(signal){

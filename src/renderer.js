@@ -503,8 +503,8 @@ $('setupFinish').onclick=()=>void action(async()=>{
  const name=$('setupEnvironmentName').value.trim();setupCreating=true;
  $('setupFinish').disabled=true;$('setupFinish').loading=true;$('setupPrevious').disabled=true;$('setupDetect').disabled=true;$('setupStatus').textContent=`正在创建「${name}」环境…`;
  try{
-  if(setupEnvironmentKind==='local'){await environmentOperation('createLocal',{name,icon:setupSelectedIcon});await environmentOperation('select',{id:null});}
-  else{const existing=$('setupDockerSource').value==='existing';const state=await environmentOperation(existing?'attach':'create',{name,icon:setupSelectedIcon,key:$('setupExistingContainer').value});await environmentOperation('select',{id:state.createdId});}
+  if(setupEnvironmentKind==='local'){await environmentOperation('createLocal',{name,icon:setupSelectedIcon});await performEnvironmentOperation('select',{id:null});}
+  else{const existing=$('setupDockerSource').value==='existing';const state=await environmentOperation(existing?'attach':'create',{name,icon:setupSelectedIcon,key:$('setupExistingContainer').value});await performEnvironmentOperation('select',{id:state.createdId});}
   // Creation succeeded even if the subsequent runtime refresh fails.
   try{await refreshRuntimeRegistry(true);}catch(error){toast('环境已创建，运行时检测可稍后重试：'+error.message);}
   setupInProgress=false;setupSessionStarted=false;document.body.classList.remove('environment-onboarding');$('environmentSetup').classList.add('hidden');switchPage(setupEnvironmentKind==='docker'?'runtime':'cc');showEnvironmentCreated(name);void reloadAccountChats();
@@ -1383,7 +1383,9 @@ function renderProfile(state){
  const user=state.user,locale=user?.language || 'zh-CN';
  $('languageSelect').value=locale;document.documentElement.lang=locale;
  const dateLabel=value=>formatDisplayDate(value,locale);
- $('profileName').value=user?.name||'';$('profileEmail').textContent=user?.email||'请先登录';
+ $('profileName').value=user?.name||'';
+ const profileEmail=user ? (user.email||'') : '请先登录';
+ $('profileEmail').textContent=profileEmail;$('profileEmail').hidden=!profileEmail;
  $('profileCreated').textContent=dateLabel(user?.createdAt);$('profileLogin').textContent=dateLabel(user?.lastLoginAt);
  $('profileIP').textContent=user?.loginIp?`${user.loginIp}`:'—';
  $('profileAvatar').image=state.avatar||'';$('profileAvatar').initials=user?.name?.slice(0,2)||'访';
@@ -1449,7 +1451,8 @@ function createEnvironmentIconPicker(id,icon){
  menu.append(trigger,grid);return menu;
 }
 async function environmentOperation(action,value={}){
- if(action==='select' && value.id!==dockerEnvironmentState.activeId){
+ const hasCurrentEnvironment=dockerEnvironmentState.activeId===null?dockerEnvironmentState.localEnabled!==false:dockerEnvironmentState.environments.some(item=>item.id===dockerEnvironmentState.activeId);
+ if(action==='select' && hasCurrentEnvironment && value.id!==dockerEnvironmentState.activeId){
   const dialog=$('switchEnvironmentDialog'),confirm=$('confirmEnvironmentSwitch'),cancel=$('cancelEnvironmentSwitch');
   if(dialog.open)throw new Error('请先完成当前环境切换');
   const previous=dockerEnvironmentState.activeId,owner=accountState.user?.id;
@@ -1545,7 +1548,7 @@ async function refreshEnvironments(existing){
 
 $('deleteEnvironmentMenuTrigger').onclick=()=>{const state=dockerEnvironmentState;const item=state.activeId===null?(state.localEnabled!==false?{id:null,name:state.localName || '本机环境'}:null):state.environments.find(item=>item.id===state.activeId);if(item)environmentDeleteButton(item).onclick();};
 function environmentDeleteButton(item){
- const remove=createUI('wa-dropdown-item');remove.dataset.environmentDelete='true';const icon=createIcon('trash-2');icon.slot='icon';remove.append(icon,document.createTextNode((item.external?'移除关联：':'删除：')+item.name));remove.setAttribute('aria-label','删除环境 '+item.name);
+ const remove=createUI('wa-dropdown-item');remove.variant='danger';remove.dataset.environmentDelete='true';const icon=createIcon('trash-2');icon.slot='icon';remove.append(icon,document.createTextNode((item.external?'移除关联：':'删除：')+item.name));remove.setAttribute('aria-label','删除环境 '+item.name);
  remove.onclick=()=>{pendingEnvironmentDeletion={id:item.id,name:item.name};$('deleteEnvironmentExpected').textContent=item.name;$('deleteEnvironmentName').value='';$('deleteEnvironmentName').placeholder=item.name;$('confirmDeleteEnvironment').disabled=true;$('deleteEnvironmentError').textContent='';document.querySelector('.delete-environment-warning').textContent=item.external?'只移除此账号在应用中的容器关联、对话记录、代理配置和浏览数据。原容器及其文件、登录信息会保留。':item.id===null?'此操作不可撤销。应用内该环境的对话记录、代理配置、运行时检测记录和浏览数据将被永久删除。本机项目文件及系统 CLI 登录不会删除。':'此操作不可撤销。该环境的工作文件、运行时登录、代理配置、对话记录和浏览数据都将被永久删除。';$('deleteEnvironmentDialog').open=true;};return remove;
 }
 async function renderEnvironmentCard(row,id){
