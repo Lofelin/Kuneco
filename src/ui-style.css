@@ -739,7 +739,7 @@ app-button.content-tab-pin::part(base),app-button.content-tab-close::part(base){
 /* The proxy icon keeps the same leading anchor throughout collapse. */
 #proxyStatusIcon{width:16px;height:16px;flex-shrink:0}
 .sidebar-collapsed .proxy-summary{box-sizing:border-box;padding-inline:12px}
-.sidebar-collapsed .proxy-status-line{width:auto;justify-content:flex-start}
+.sidebar-collapsed .proxy-status-line{width:100%;justify-content:center}
 /* The collapsed rail owns all space up to the content frame. */
 .content-layout{transition:margin-left var(--sidebar-motion-duration) var(--sidebar-motion-easing)}
 .sidebar-collapsed .content-layout{margin-left:0}
@@ -1540,7 +1540,7 @@ app-button.retry-action[loading] wa-icon,app-button.retry-action[aria-busy=true]
 @media(max-width:700px){.settings-panel[data-panel="preferences"] #languageSelect,.settings-panel[data-panel="preferences"] .theme-segments{width:200px;flex-basis:200px}}
 
 /* Keep settings content compact when navigation is collapsed. */
-.settings-content:has([data-panel=preferences]:not(.hidden),[data-panel=environment]:not(.hidden),[data-panel=proxy]:not(.hidden)) :is(.settings-page-heading,.settings-body){max-width:var(--settings-form-max-width);width:100%;box-sizing:border-box;margin-inline:auto}
+.settings-content:has([data-panel]:not(.hidden)) :is(.settings-page-heading,.settings-body){max-width:var(--settings-form-max-width);width:100%;box-sizing:border-box;margin-inline:auto}
 .settings-environment .environment-details{display:block;margin:0;overflow:hidden;font-size:12px}
 .settings-environment .system-setting-row{display:grid;grid-template-columns:minmax(140px,1fr) minmax(0,230px);align-items:center;gap:24px;min-height:64px;padding:18px 20px;box-sizing:border-box}
 .settings-environment .system-setting-row+.system-setting-row{border-top:1px solid var(--line)}

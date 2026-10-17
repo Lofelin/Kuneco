@@ -14,6 +14,8 @@ import (
 	"unicode/utf8"
 )
 
+const maxAvatarBytes = 1024 * 1024
+
 type UserSettings struct {
 	Name     *string `json:"name,omitempty"`
 	Avatar   *string `json:"avatar,omitempty"`
@@ -47,7 +49,7 @@ func (s *Store) applySettings(u *User) error {
 	return nil
 }
 func (s *Server) updateProfile(w http.ResponseWriter, r *http.Request, u User) {
-	r.Body = http.MaxBytesReader(w, r.Body, 800*1024)
+	r.Body = http.MaxBytesReader(w, r.Body, int64(base64.StdEncoding.EncodedLen(maxAvatarBytes)+4096))
 	d := json.NewDecoder(r.Body)
 	d.DisallowUnknownFields()
 	var v UserSettings
@@ -74,8 +76,8 @@ func (s *Server) updateProfile(w http.ResponseWriter, r *http.Request, u User) {
 			return
 		}
 		b, e := base64.StdEncoding.DecodeString(parts[1])
-		if e != nil || len(b) > 512*1024 {
-			failure(w, 400, "头像最大 512 KB")
+		if e != nil || len(b) > maxAvatarBytes {
+			failure(w, 400, "头像不能超过 1 MB")
 			return
 		}
 		cfg, format, e := image.DecodeConfig(bytes.NewReader(b))

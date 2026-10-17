@@ -29,7 +29,7 @@ export async function directRequest(url,{method='GET',body,token,signal}={}) {
 }
 export class AccountClient extends EventEmitter {
   constructor({serverURL,sessionFile,storage,openExternal,directIP,returnURL}){super();this.serverURL=accountServerURL(serverURL);this.sessionFile=sessionFile;this.storage=storage;this.openExternal=openExternal;this.returnURL=returnURL;this.directIP=directIP;this.token=null;this.user=null;this.status='signed-out';this.controller=null;this.avatar=null;this.version=0;}
-  state(){return {user:this.user,avatar:this.avatar || defaultAccountAvatar(this.user,this.serverURL),status:this.status,serverURL:this.serverURL};}
+  state(){return {user:this.user,avatarFallback:defaultAccountAvatar(this.user,this.serverURL),avatar:this.avatar || defaultAccountAvatar(this.user,this.serverURL),status:this.status,serverURL:this.serverURL};}
   changed(){this.emit('change',this.state());}
   async request(route,options={}) {
     let res;try{res=await directRequest(this.serverURL+route,{token:this.token,...options});}catch(error){if(error.name==='AbortError')throw error;throw new Error('账号服务暂不可用，请确认 Go 服务已启动');}

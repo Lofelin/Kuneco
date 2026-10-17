@@ -16,3 +16,5 @@ await build({entryPoints:['src/console-ui.mjs'],outfile:'src/vendor/console.js',
 }]});
 
 await build({entryPoints:['src/chat-markdown.mjs'],outfile:'src/vendor/chat-markdown.js',bundle:true,format:'esm',target:'chrome140',minify:true});
+
+await build({entryPoints:['src/generated-avatar.mjs'],outfile:'src/vendor/generated-avatar.js',bundle:true,format:'esm',target:'chrome140',minify:true});

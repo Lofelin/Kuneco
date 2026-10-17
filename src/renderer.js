@@ -1,3 +1,4 @@
+import {generatedAvatar,runtimeAccountAvatar,setAccountAvatar} from './vendor/generated-avatar.js';
 import {restoredChatStatus} from './chat-status.mjs';
 import {renderAppTable} from './app-table.mjs';
 import {mountAssistantImagePreviews} from './assistant-image-preview.mjs';
@@ -1097,7 +1098,7 @@ function renderRuntimeTable(target,entries,{columns=[{key:'name',label:'运行�
   const access=runtimeAccess(entry),method=document.createElement('span');method.textContent=access.label;const auth=document.createElement('span'),authBadge=document.createElement('span');authBadge.className='runtime-status-tag';authBadge.dataset.state=entry.auth?.state || 'unknown';authBadge.dataset.kind=access.kind;authBadge.append(createIcon(access.icon),document.createTextNode(access.status));auth.append(authBadge);const added=document.createElement('span');const addedDate=entry.addedAt?new Date(entry.addedAt):null;added.textContent=addedDate && !Number.isNaN(addedDate.getTime())?addedDate.toLocaleString('zh-CN',{hour12:false}):'—';added.title=added.textContent;const loginAccount=document.createElement('span');loginAccount.className='runtime-login-account';loginAccount.textContent=entry.auth?.state==='signed-in'?(entry.auth.accountName?.trim() || '—'):'—';loginAccount.title=loginAccount.textContent;
   if(entry.auth?.state==='signed-in' && entry.auth.accountName?.trim()){
    const accountLabel=document.createElement('span');accountLabel.className='runtime-account-name';accountLabel.textContent=loginAccount.textContent;
-   const avatar=createUI('wa-avatar');avatar.className='runtime-account-avatar';avatar.initials=Array.from(entry.auth.accountName || '?').slice(0,1).join('').toLocaleUpperCase();avatar.label=(entry.auth.accountName || '当前登录账号')+'的头像';
+   const avatar=createUI('wa-avatar');avatar.className='runtime-account-avatar';setAccountAvatar(avatar,entry.auth.avatarUrl,runtimeAccountAvatar(entry));avatar.label=(entry.auth.accountName || '当前登录账号')+'的头像';
    loginAccount.replaceChildren(avatar,accountLabel);
   }
   return {entry,name:title,version,models,method,auth,account:loginAccount,added};
@@ -1117,7 +1118,7 @@ function openRuntimeDetails(entry){
  const hero=$('runtimeDetailHero');hero.replaceChildren();const name=document.createElement('h1');name.textContent=entry.name;const badge=document.createElement('span');badge.className='runtime-auth-badge';badge.dataset.ready=String(entry.auth?.state==='signed-in');badge.dataset.kind=access.kind;badge.append(createIcon(access.icon),document.createTextNode(authLabel));hero.append(createIcon(runtimeIcon(entry.id)),name,badge);
  const environment=dockerEnvironmentState.environments.find(item=>item.id===dockerEnvironmentState.activeId)?.name || '本机环境';$('runtimeDetailBreadcrumb').textContent=entry.name;
  const summary=$('runtimeDetailSummary');summary.replaceChildren();for(const [label,value] of [['登录账号',entry.auth?.state==='signed-in'?(entry.auth.accountName?.trim() || '—'):'未登录'],['执行环境',environment],['运行时',entry.version]]){const cell=document.createElement('div'),term=document.createElement('span'),valueNode=document.createElement('strong');term.textContent=label;valueNode.className='runtime-summary-value';
-  if(label==='登录账号' && entry.auth?.state==='signed-in' && entry.auth.accountName?.trim()){const avatar=createUI('wa-avatar');avatar.className='runtime-owner-avatar';avatar.initials=Array.from(value).slice(0,1).join('').toLocaleUpperCase();avatar.label=value+'的头像';valueNode.append(avatar);}
+  if(label==='登录账号' && entry.auth?.state==='signed-in' && entry.auth.accountName?.trim()){const avatar=createUI('wa-avatar');avatar.className='runtime-owner-avatar';setAccountAvatar(avatar,entry.auth.avatarUrl,runtimeAccountAvatar(entry));avatar.label=value+'的头像';valueNode.append(avatar);}
   if(label==='执行环境'){const active=dockerEnvironmentState.environments.find(item=>item.id===dockerEnvironmentState.activeId);valueNode.append(createIcon(environmentIcon(active?.icon || dockerEnvironmentState.localIcon,active?'boxes':'monitor')));}
   valueNode.append(document.createTextNode(value));cell.append(term,valueNode);summary.append(cell);}
  const chats=chatSessions.filter(item=>item.engine===entry.id).sort((a,b)=>(Date.parse(b.updatedAt || b.createdAt)||0)-(Date.parse(a.updatedAt || a.createdAt)||0)).slice(0,5);$('runtimeDetailChatCount').textContent=chats.length+' 个对话';$('runtimeDetailChats').replaceChildren();if(!chats.length){const empty=document.createElement('p');empty.className='muted';empty.textContent='还没有对话关联到这个运行时。';const icon=createIcon('messages-square');const state=document.createElement('div');state.className='runtime-related-empty';state.append(icon,empty);$('runtimeDetailChats').append(state);}else for(const chat of chats){const row=document.createElement('div');row.className='runtime-related-row';const copy=document.createElement('div');copy.className='runtime-related-copy';const title=document.createElement('strong');title.textContent=chat.title || '新会话';title.title=title.textContent;const usage=document.createElement('small');const entries=(chat.tokenUsage || []).filter(item=>Number.isSafeInteger(item.totalTokens) && item.totalTokens>=0);usage.textContent=entries.length?new Intl.NumberFormat(uiLocale()).format(entries.reduce((sum,item)=>sum+item.totalTokens,0))+' Token':'暂无 Token 数据';copy.append(title,usage);row.append(createIcon('messages-square'),copy);$('runtimeDetailChats').append(row);}
@@ -1341,7 +1342,7 @@ function renderAccount(state){
  $('setupAccountLogin').classList.toggle('hidden',Boolean(state.user));$('setupAccountLogout').classList.toggle('hidden',!state.user);
  const changed=accountState.user?.id!==state.user?.id;if(changed){$('renameEnvironmentDialog').open=false;clearBrowserCookies();lastChatSyncNotice='';$('chatStorageStatus').textContent='';}accountState=state;renderProxyStorageScope();if(changed)void loadConnectionRecords();if(changed){runtimeRegistry={runtimes:[]};renderChatAvailability();}if(changed && chatOwnerID!==state.user?.id){chatRestoreVersion++;chatOwnerID=null;chatSessions=[];activeChatId=null;$('chat').replaceChildren();renderSessionList();}
  if(changed){setupInProgress=false;setupSessionStarted=false;setupImageConfirmed=false;$('environmentCreatedDialog').open=false;setupPreviewKey='';$('setupRuntimePreviewList').replaceChildren();setupDockerChecked=false;setupDockerError='';$('setupEnvironmentName').value='';validateSetupEnvironment();clearTimeout(proxySaveTimer);proxySaveVersion++;}
- const user=state.user;renderProfile(state);$('accountName').textContent=user?.name || (state.status==='signing-in'?'正在登录…':'未登录');$('accountAvatar').initials=user?.name?.slice(0,2) || '访';$('accountAvatar').image=state.avatar || '';$('accountSubtitle').textContent=user?.email || user?.username || '登录后同步代理配置';$('accountMenuAvatar').image=state.avatar || '';$('accountMenuAvatar').initials=user?.name?.slice(0,2) || '访';$('accountMenuName').textContent=user?.name || '未登录';
+ const user=state.user;renderProfile(state);$('accountName').textContent=user?.name || (state.status==='signing-in'?'正在登录…':'未登录');setAccountAvatar($('accountAvatar'),state.avatar,state.avatarFallback || generatedAvatar('kuneco-guest'));$('accountSubtitle').textContent=user?.email || user?.username || '登录后同步代理配置';setAccountAvatar($('accountMenuAvatar'),state.avatar,state.avatarFallback || generatedAvatar('kuneco-guest'));$('accountMenuName').textContent=user?.name || '未登录';
  $('accountLogin').classList.toggle('hidden',Boolean(user) || state.status==='signing-in');$('accountLogout').classList.toggle('hidden',!user);$('accountCancel').classList.toggle('hidden',state.status!=='signing-in');$('accountDetails').classList.toggle('hidden',!user);
  $('accountEmail').textContent=user?.email || '';
  $('accountStatus').textContent=state.status==='signing-in'?'请在浏览器完成授权':'';
@@ -1358,7 +1359,7 @@ $('accountLogout').onclick=()=>void action(logoutAccount);
 for(const field of ['protocol','host','port','username','password'])for(const event of ['input','change'])$(field).addEventListener(event,updateProxyActions);
 void api.accountState().then(state=>{renderAccount(state);return refreshEnvironments();}).catch(error=>toast(error.message));
 
-let profileSaving=false;
+let profileSaving=false,profileStatusTimer;
 function renderProfileActivity(){
  const sessions=chatOwnerID && chatOwnerID===accountState.user?.id?chatSessions:[];
  const activity=profileActivity(sessions);
@@ -1388,14 +1389,14 @@ function renderProfile(state){
  $('profileEmail').textContent=profileEmail;$('profileEmail').hidden=!profileEmail;
  $('profileCreated').textContent=dateLabel(user?.createdAt);$('profileLogin').textContent=dateLabel(user?.lastLoginAt);
  $('profileIP').textContent=user?.loginIp?`${user.loginIp}`:'—';
- $('profileAvatar').image=state.avatar||'';$('profileAvatar').initials=user?.name?.slice(0,2)||'访';
+ setAccountAvatar($('profileAvatar'),state.avatar,state.avatarFallback || generatedAvatar('kuneco-guest'));
  renderProxyRegion(network);renderProfileActivity();refreshDisplayedTimes();
  for(const id of ['profileName','changeAvatar','languageSelect'])$(id).disabled=!user;
 
 }
 async function saveProfileChange(change){
- if(profileSaving)return;profileSaving=true;$('profileName').disabled=true;$('changeAvatar').disabled=true;$('profileStatus').textContent='正在保存…';
- try{renderAccount(await api.accountProfileSave(change));$('profileStatus').textContent='已保存';}
+ if(profileSaving)return;clearTimeout(profileStatusTimer);profileSaving=true;$('profileName').disabled=true;$('changeAvatar').disabled=true;$('profileStatus').textContent='正在保存…';
+ try{renderAccount(await api.accountProfileSave(change));$('profileStatus').textContent='已保存';profileStatusTimer=setTimeout(()=>{$('profileStatus').textContent='';},2500);}
  catch(error){$('profileStatus').textContent=error.message;throw error;}
  finally{profileSaving=false;const signedIn=Boolean(accountState.user);$('profileName').disabled=!signedIn;$('changeAvatar').disabled=!signedIn;}
 }
