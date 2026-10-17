@@ -1505,12 +1505,8 @@ app-dialog .form-footer{margin-bottom:0}
 :is(#sessionNetworkMode,#sessionModel)::part(display-input){align-self:center;height:28px;min-height:0;padding-block:0;margin-block:0;line-height:28px}
 :is(#sessionNetworkMode,#sessionModel)>wa-icon[slot=start]{display:flex;align-items:center;justify-content:center;align-self:center;height:16px;line-height:1;vertical-align:middle}
 
-/* Repeatable actions share one semantic blue treatment. */
-#setupDetect{--retry-action-color:var(--ink)}
+/* Repeatable action colors and states are owned by app-button. */
 app-button.retry-action{flex-shrink:0}
-app-button.retry-action::part(base){white-space:nowrap}
-app-button.retry-action::part(base),app-button.retry-action.primary::part(base){color:var(--retry-action-color,var(--blue));background:var(--surface);border-color:var(--line);filter:none}
-app-button.retry-action:not([disabled])::part(base):is(:hover,:active,:focus-visible){color:var(--retry-action-color,var(--blue));background:color-mix(in srgb,var(--blue) 9%,var(--surface));border-color:color-mix(in srgb,var(--blue) 28%,var(--line));filter:none}
 app-button.retry-action[loading] wa-icon,app-button.retry-action[aria-busy=true] wa-icon{animation:retry-action-spin 1s linear infinite}
 @keyframes retry-action-spin{to{transform:rotate(360deg)}}
 @media(prefers-reduced-motion:reduce){app-button.retry-action wa-icon{animation:none!important}}

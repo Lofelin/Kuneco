@@ -130,7 +130,7 @@ function activity(message){if(accountState.user)return;renderConnectionRecords([
 let connectionRecordsVersion=0;
 function renderConnectionRecords(entries,empty='等待你的第一次连接。'){
  connectionRecordEntries=entries;
- renderAppTable($('activity'),{label:'连接记录',columns:[{key:'time',label:'时间',width:'190px',render:item=>{const time=document.createElement('time');time.dateTime=item.time;time.textContent=displayDate(item.time,'datetime');return time;}},{key:'message',label:'连接详情'}],rows:entries,empty});
+ renderAppTable($('activity'),{label:'连接记录',columns:[{key:'time',label:'时间',width:'190px',render:item=>{const time=document.createElement('time');time.dateTime=item.time;time.textContent=displayDate(item.time,'datetime');return time;}},{key:'message',label:'连接详情'}],rows:entries,minWidth:560,empty});
 }
 async function loadConnectionRecords(){
  const owner=accountState.user?.id,environmentId=dockerEnvironmentState.activeId,version=++connectionRecordsVersion;renderConnectionRecords([]);if(!owner)return;
@@ -1083,7 +1083,7 @@ function createRuntimeModelsCell(entry){
 function renderSupportedModels(target,models,empty='暂无模型数据'){
  target.replaceChildren();for(const item of models){const tag=document.createElement('span');tag.className='runtime-model-tag';tag.textContent=item.name || item.model;tag.title=item.model || item.name;target.append(tag);}if(!models.length){const hint=document.createElement('span');hint.className='muted';hint.textContent=empty;target.append(hint);}
 }
-function renderRuntimeTable(target,entries,{columns=[{key:'name',label:'运行时',width:'14%'},{key:'version',label:'版本',width:'15%'},{key:'models',label:'模型',width:'23%'},{key:'method',label:'接入方式',width:'8%'},{key:'auth',label:'认证状态',width:'8%'},{key:'account',label:'登录账号',width:'15%'},{key:'added',label:'添加时间',width:'17%'}],actions=true,onOpen=openRuntimeDetails}={}){
+function renderRuntimeTable(target,entries,{columns=[{key:'name',label:'运行时',width:'145px'},{key:'version',label:'版本',width:'175px'},{key:'models',label:'模型'},{key:'method',label:'接入方式',width:'96px'},{key:'auth',label:'认证状态',width:'108px'},{key:'account',label:'登录账号',width:'110px'},{key:'added',label:'添加时间',width:'170px'}],actions=true,onOpen=openRuntimeDetails}={}){
  const rendered=entries.map(entry=>{
   const title=document.createElement('strong'),version=document.createElement('span');title.append(createIcon(runtimeIcon(entry.id)),document.createTextNode(entry.name));version.textContent=runtimeVersion(entry);const models=createRuntimeModelsCell(entry);
   const access=runtimeAccess(entry),method=document.createElement('span');method.textContent=access.label;const auth=document.createElement('span'),authBadge=document.createElement('span');authBadge.className='runtime-status-tag';authBadge.dataset.state=entry.auth?.state || 'unknown';authBadge.dataset.kind=access.kind;authBadge.append(createIcon(access.icon),document.createTextNode(access.status));auth.append(authBadge);const added=document.createElement('span');const addedDate=entry.addedAt?new Date(entry.addedAt):null;added.textContent=addedDate && !Number.isNaN(addedDate.getTime())?addedDate.toLocaleString('zh-CN',{hour12:false}):'—';added.title=added.textContent;const loginAccount=document.createElement('span');loginAccount.className='runtime-login-account';loginAccount.textContent=entry.auth?.state==='signed-in'?(entry.auth.accountName?.trim() || '—'):'—';loginAccount.title=loginAccount.textContent;
@@ -1580,7 +1580,7 @@ async function renderEnvironmentCard(row,id){
   const title=document.createElement('h3');title.textContent='运行时';const count=document.createElement('span');count.className='environment-runtime-count muted';count.textContent=detail.runtimes.length+' 个运行时';title.append(count);const hint=document.createElement('p');hint.className='environment-runtimes-hint muted';hint.textContent='此环境中已检测到的运行时、CLI 版本及支持的模型。';runtimes.append(title,hint);
   if(detail.runtimes.length){
    const table=document.createElement('app-table');
-   renderRuntimeTable(table,detail.runtimes,{columns:[{key:'name',label:'运行时',width:'30%'},{key:'version',label:'CLI 版本',width:'24%'},{key:'models',label:'模型',width:'46%'}],actions:false,onOpen:runtime=>{if(owner!==accountState.user?.id || id!==dockerEnvironmentState.activeId)return;switchPage('runtime');openRuntimeDetails(runtimeRegistry.runtimes.find(entry=>entry.id===runtime.id) || runtime);}});runtimes.append(table);
+   renderRuntimeTable(table,detail.runtimes,{columns:[{key:'name',label:'运行时',width:'145px'},{key:'version',label:'CLI 版本',width:'175px'},{key:'models',label:'模型'}],actions:false,onOpen:runtime=>{if(owner!==accountState.user?.id || id!==dockerEnvironmentState.activeId)return;switchPage('runtime');openRuntimeDetails(runtimeRegistry.runtimes.find(entry=>entry.id===runtime.id) || runtime);}});runtimes.append(table);
   }else{const empty=document.createElement('p');empty.className='environment-runtime-empty muted';empty.textContent='尚未配置运行时。'+(id===dockerEnvironmentState.activeId?'请前往「运行时」配置。':'切换到此环境后，请前往「运行时」配置。');runtimes.append(empty);}
   details.append(facts,runtimes);
  }catch(error){if(owner===accountState.user?.id && row.isConnected)details.textContent='环境信息读取失败：'+error.message;}
