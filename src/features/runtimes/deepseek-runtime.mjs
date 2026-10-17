@@ -115,6 +115,7 @@ export async function runDeepSeekCLI(command,input,{directory=path.join(homedir(
  const message=normalizeDeepSeekInput(typeof input.prompt==='string'?{text:input.prompt,images:input.images,thinking:input.thinking}:input.prompt);
  const model=input.model || config.model;if(!config.models.some(item=>item.model===model))throw new Error('请选择此账号可用的模型');
  const file=path.join(directory,input.sessionId+'.json');let history=[];try{history=JSON.parse(await readFile(file,'utf8'));if(!Array.isArray(history))throw new Error();}catch(error){if(error.code!=='ENOENT')throw new Error('对话历史损坏，未覆盖原记录，请新建对话');}
+ if(input.history!==undefined){if(!Array.isArray(input.history)||input.history.some(m=>!['user','assistant'].includes(m.role)||!(typeof m.content==='string'||Array.isArray(m.content))))throw new Error('回退历史无效');history=input.history;}
  const content=message.images.length?[...(message.text.trim()?[{type:'text',text:message.text}]:[]),...message.images.map(image=>({type:'image_url',image_url:{url:image.dataURL || image.url,detail:image.detail}}))]:message.text;
  const messages=[...history,{role:'user',content}];
  const allImages=messages.flatMap(m=>Array.isArray(m.content)?m.content.filter(p=>p.type==='image_url'):[]);

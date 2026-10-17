@@ -13,6 +13,7 @@ export function mergeChatPayload(base,local,remote){
    }
    if(key==='messages'){
     const prefix=(a,c)=>a.length<=c.length && a.every((v,i)=>equal(v,c[i]));
+    if(Array.isArray(b) && (!prefix(b,l)||!prefix(b,r)))throw new ChatSyncConflict();
     if(prefix(l,r))return r;if(prefix(r,l))return l;
    }
   }

@@ -1,4 +1,4 @@
-export function runDeepSeek({spawnProcess,sessionId,model,prompt,networkMode='proxy',signal,onText,onReasoning=()=>{},onFinish=()=>{}}){
+export function runDeepSeek({spawnProcess,sessionId,model,prompt,history,networkMode='proxy',signal,onText,onReasoning=()=>{},onFinish=()=>{}}){
  return new Promise((resolve,reject)=>{
   const child=spawnProcess({command:'node',args:['/home/node/.local/lib/dingtu/deepseek.mjs','chat'],signal});
   let output='',error='',streamed=false,finished=false,usage,parseError,total=0;
@@ -8,6 +8,6 @@ export function runDeepSeek({spawnProcess,sessionId,model,prompt,networkMode='pr
   child.stderr.on('data',text=>{error=(error+text).slice(-1000);});
   child.once('error',()=>reject(new Error('DeepSeek 运行时启动失败')));
   child.once('close',code=>{if(signal?.aborted)return reject(new Error('请求已取消'));if(code!==0)return reject(new Error(error.trim() || 'DeepSeek 请求失败'));try{if(parseError)throw parseError;if(output.trim())consume(output);if(!finished)throw new Error();resolve(usage);}catch{reject(new Error('DeepSeek 回复格式无效'));}});
-  child.stdin.on('error',()=>{});child.stdin.end(JSON.stringify({sessionId,model,prompt,networkMode}));
+  child.stdin.on('error',()=>{});child.stdin.end(JSON.stringify({sessionId,model,prompt,networkMode,history}));
  });
 }

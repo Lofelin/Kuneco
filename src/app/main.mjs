@@ -1,3 +1,5 @@
+import {ChatRuns} from '../features/chat/chat-runs.mjs';
+import {rewindPrefix,replayPrompt,deepSeekPrefix} from '../features/chat/message-rewind.mjs';
 import {connectEnvironmentProxy,restoreSelectedEnvironment} from '../features/environments/environment-proxy.mjs';
 import {prepareKeychainMigration,verifyKeychainMigration} from './keychain-migration.mjs';
 import {mountLocalProject} from '../features/projects/project-mount.mjs';
@@ -111,7 +113,8 @@ app.commandLine.appendSwitch('lang', 'en-US');
 app.commandLine.appendSwitch('accept-lang', 'en-US,en');
 let environmentStatus = {allowed:false,reasons:['尚未完成系统环境检测'],languages:[],countries:[]}, environmentPromise, environmentTimer;
 let fixtureEnvironment = fixtureMode && process.env.WORKSPACE_TEST_ENV ? JSON.parse(process.env.WORKSPACE_TEST_ENV) : null;
-let window, browser, gateway, healthTimer, run, project = '', sessionId, claudePath = '', codexPath = '', codexSessionId, selectedEngine = 'cc', codexModel = null, connecting = false;
+let window, browser, gateway, healthTimer, project = '', sessionId, claudePath = '', codexPath = '', codexSessionId, selectedEngine = 'cc', codexModel = null, connecting = false;
+const runs=new ChatRuns();
 const approvals = new Map();
 const browserTabs = new Map();
 let activeTabId, browserBounds = { x: 0, y: 0, width: 1, height: 1 }, browserVisible = false;
@@ -139,13 +142,13 @@ async function browserProxyConfiguration(){
  return {mode:'fixed_servers',proxyRules:gateway?.address || 'http://127.0.0.1:1',proxyBypassRules:'<-loopback>'};
 }
 let savedConfig = { protocol: 'http', host: '', port: 8080, username: '' };
-const emit = (type, data) => {
+const emit = (type, data, context={}) => {
  const owner=account?.user?.id;
  if(connectionRecords && owner && !accountChanging && ['network','requestFailure'].includes(type)){
   const message=type==='network'?[data.reason || '网络状态更新',data.ip].filter(Boolean).join(' · '):[data.reason,data.target,data.code].filter(Boolean).join(' · ');
   const environmentId=activeContainerId;void connectionRecords.append(owner,message,environmentId).then(entries=>{if(owner===account?.user?.id && environmentId===activeContainerId)emit('connectionRecords',{owner,environmentId,entries:entries.filter(item=>Object.hasOwn(item,'environmentId') && item.environmentId===environmentId)});}).catch(()=>{});
  }
- if(type==='account'){syncAccountWindow();data={...data,authRequired};}if (window && !window.isDestroyed()) window.webContents.send('workspace:event', { type, data }); };
+ if(type==='account'){syncAccountWindow();data={...data,authRequired};}if (window && !window.isDestroyed()) window.webContents.send('workspace:event', { type, data, ...context }); };
 async function checkEnvironment() {
   if (environmentPromise) return environmentPromise;
   environmentPromise = (async () => {
@@ -322,15 +325,15 @@ async function findClaude() {
   }
   return '';
 }
-function abortRun() {
-  run?.abort();
+function abortRun(predicate=()=>true) {
+  void runs.abortWhere(predicate);
   for (const [, approval] of approvals) approval.resolve({ behavior: 'deny', message: '会话已取消或代理失效' });
   approvals.clear();
 }
 async function stopGateway({preserveDirectChat=false}={}) {
   account?.closeConnections();
   clearInterval(healthTimer); healthTimer = null;
-  if(!preserveDirectChat || run?.networkMode!=='direct')abortRun();
+  abortRun(task=>!preserveDirectChat || task.networkMode!=='direct');
   if (gateway) { const old = gateway; gateway = null; await old.stop(); }
   if(browserMode!=='direct')stopBrowserTabs();
 }
@@ -353,7 +356,7 @@ function persistAISessions(){
   if(generation!==chatGeneration || owner!==chatOwner || account?.user?.id!==owner)return;
   chatDirty=true;try{const result=await saveChatSnapshot({client:account,owner,revision:chatRevision,payload,base:chatBase,isCurrent:()=>generation===chatGeneration && chatOwner===owner && account?.user?.id===owner});if(generation===chatGeneration && chatOwner===owner && account?.user?.id===owner){chatRevision=result.revision;
    if(JSON.stringify(payload)!==JSON.stringify(result.payload)){
-    const merged=mergeChatPayload(payload,chatPayload(),result.payload);aiSessions.clear();for(const item of merged.sessions || [])aiSessions.set(item.id,item);chatViews=merged.views || [];
+    const merged=mergeChatPayload(payload,chatPayload(),result.payload);const previous=new Map(aiSessions);aiSessions.clear();for(const item of merged.sessions || []){const existing=previous.get(item.id);aiSessions.set(item.id,existing?Object.assign(existing,item):item);}chatViews=merged.views || [];
     emit('chatMerged',{owner,base:payload,payload:result.payload});
    }
    chatBase=result.payload;payload=structuredClone(chatPayload());chatDirty=JSON.stringify(payload)!==JSON.stringify(result.payload);await writeChatCache(owner,payload);if(!chatDirty)emit('chatSyncRecovered',{owner});}}
@@ -390,7 +393,7 @@ async function loadAccountChats(allowLegacy){
  if(activeContainerId){
   for(const item of aiSessions.values())if(item.engine==='deepseek' && item.environmentId===activeContainerId){
    try{
-    const history=JSON.parse(await dockerEnvs.exec(owner,activeContainerId,['node','-e',"process.stdout.write(require('fs').readFileSync(require('path').join(require('os').homedir(),'.config/dingtu-deepseek',process.argv[1]+'.json'),'utf8'))",item.id],{maxBuffer:64*1024*1024}));
+    const history=JSON.parse(await dockerEnvs.exec(owner,activeContainerId,['node','-e',"process.stdout.write(require('fs').readFileSync(require('path').join(require('os').homedir(),'.config/dingtu-deepseek',process.argv[1]+'.json'),'utf8'))",item.deepseekSessionId || item.id],{maxBuffer:64*1024*1024}));
     if(generation!==chatGeneration || owner!==chatOwner)return;
     const view=chatViews.find(view=>view.id===item.id);const recovered=recoverDeepSeekMessages(view?.messages,history);
     if(recovered.length>(view?.messages?.length || 0)){if(view)view.messages=recovered;else chatViews.push({id:item.id,title:item.title,messages:recovered});chatDirty=true;}
@@ -403,7 +406,7 @@ async function loadAccountChats(allowLegacy){
 function storeCurrentSession(){const item=aiSessions.get(activeAISessionId);if(item)Object.assign(item,{engine:selectedEngine,model:codexModel,project,sessionId,codexSessionId});persistAISessions();}
 function activateAISession(item,{viewed=false}={}){if(viewed)item.lastViewedAt=new Date().toISOString();activeAISessionId=item.id;selectedEngine=item.engine;codexModel=item.model;project=item.project;sessionId=item.sessionId;codexSessionId=item.codexSessionId;persistAISessions();return {...item};}
 async function prepareChatAccountChange(){
- if(run){const pending=run;abortRun();let timer;try{await Promise.race([pending.finished,new Promise((_,reject)=>timer=setTimeout(()=>reject(new Error('对话仍在停止，请稍后重试')),10000))]);}finally{clearTimeout(timer);}}
+ if(runs.size){const pending={finished:Promise.all([...runs.values()].map(task=>task.finished))};abortRun();let timer;try{await Promise.race([pending.finished,new Promise((_,reject)=>timer=setTimeout(()=>reject(new Error('对话仍在停止，请稍后重试')),10000))]);}finally{clearTimeout(timer);}}
  await sessionSave.catch(()=>{});
  if(chatOwner && chatReady && account?.user?.id===chatOwner)await writeChatCache(chatOwner,structuredClone(chatPayload()));
  chatGeneration++;chatReady=false;
@@ -467,7 +470,7 @@ async function connect(config, remember, {environmentSwitch=false}={}) {
       if (gateway !== next) return;
       emit('network', { ...status, address: next.address });
       refreshProxyRegion(next);
-      if (status.state === 'blocked') { if(browserMode!=='direct')stopBrowserTabs(); if(run?.networkMode!=='direct')abortRun(); }
+      if (status.state === 'blocked') { if(browserMode!=='direct')stopBrowserTabs(); abortRun(task=>task.networkMode!=='direct'); }
       showBrowserViews();
     });
     const configuration=await browserProxyConfiguration();
@@ -563,7 +566,7 @@ ipcMain.handle('workspace:dockerEnvironments',guarded(async(action='state',value
   const owner=dockerOwner(),id=activeContainerId;
   if(!owner || !id || value.owner!==owner || value.environmentId!==id)throw new Error('运行时环境已变化，请重新打开详情');
   if(!['cc','codex'].includes(value.engine))throw new Error('未知运行时');
-  if(accountChanging || containerOperation || run)throw new Error('环境正在处理操作，请稍后退出登录');
+  if(accountChanging || containerOperation || runs.size)throw new Error('环境正在处理操作，请稍后退出登录');
   containerOperation=true;
   try{
    await dockerEnvs.exec(owner,id,value.engine==='codex'?['codex','logout']:['claude','auth','logout']);
@@ -578,7 +581,7 @@ ipcMain.handle('workspace:dockerEnvironments',guarded(async(action='state',value
  if(accountChanging || containerOperation || chatNetworkChanging)throw new Error('正在处理环境或连接方式切换，请稍候');containerOperation=true;
  try{
  if(!dockerOwner())throw new Error('请先登录');
- if(run || connecting || accountChanging || runtimeDetection)throw new Error('请等待当前操作结束');
+ if(runs.size || connecting || accountChanging || runtimeDetection)throw new Error('请等待当前操作结束');
  if(action==='login'){
   if(!activeContainerId || gateway?.status.state!=='ready')throw new Error('请先切换到容器环境并连接代理');if(!['cc','codex'].includes(value.engine))throw new Error('未知运行时');containerLogin?.kill();
   const launch=await dockerEnvs.spawner(dockerOwner(),activeContainerId);const child=launch({command:value.engine==='cc'?'claude':'codex',args:value.engine==='cc'?['auth','login']:['login']});containerLogin=child;
@@ -652,7 +655,7 @@ ipcMain.handle('workspace:saveChats',guarded(async(views,owner,environmentId=nul
  for(const view of chatViews){const item=aiSessions.get(view.id);item.title=view.title;item.pinned=Boolean(view.pinned);if(Number.isFinite(Date.parse(view.updatedAt)) && Date.parse(view.updatedAt)<=Date.now()+60000)item.updatedAt=view.updatedAt;}
  await persistAISessions();return {saved:true};
 }));
-ipcMain.handle('workspace:archiveSession',guarded(async(id,archived)=>{if(accountChanging || containerOperation || chatNetworkChanging)throw new Error('正在处理环境或连接方式切换，请稍候');if(run)throw new Error('请先停止回复');const item=aiSessions.get(id);if(!item || (item.environmentId || null)!==activeContainerId)throw new Error('会话不存在');item.archived=Boolean(archived);await persistAISessions();return {...item};}));
+ipcMain.handle('workspace:archiveSession',guarded(async(id,archived)=>{if(accountChanging || containerOperation || chatNetworkChanging)throw new Error('正在处理环境或连接方式切换，请稍候');if(runs.has(id))throw new Error('请先停止此对话的回复');const item=aiSessions.get(id);if(!item || (item.environmentId || null)!==activeContainerId)throw new Error('会话不存在');item.archived=Boolean(archived);await persistAISessions();return {...item};}));
 ipcMain.handle('workspace:accountProfileSave',guarded(async value=>account.updateProfile(value)));
 ipcMain.handle('workspace:avatarPick',guarded(async()=>{const {dialog}=await import('electron');const result=await dialog.showOpenDialog(window,{properties:['openFile'],filters:[{name:'头像',extensions:['png','jpg','jpeg']}]});if(result.canceled)return null;const file=result.filePaths[0];if((await stat(file)).size>1024*1024)throw new Error('头像不能超过 1 MB');const data=await readFile(file);if(data.length>1024*1024)throw new Error('头像不能超过 1 MB');return 'data:image/'+(path.extname(file).toLowerCase()==='.png'?'png':'jpeg')+';base64,'+data.toString('base64');}));
 async function currentCodexModels(){return RUNTIME_CATALOG.codex.models.map(item=>({...item}));}
@@ -683,11 +686,11 @@ async function runtimeView(registry,{refresh=true,engine=null}={}){
   const cached=previous.runtimes?.find(row=>row.id===item.id);
   if(!refresh || engine && item.id!==engine){
    const models=item.id==='codex'?RUNTIME_CATALOG.codex.models:item.models || cached?.models;
-   return {...cached,...item,auth:item.auth || cached?.auth || {state:'unknown'},models:models || [],modelsError:item.id==='codex' && models===null?'模型列表读取失败，请重试':null,busy:Boolean(run)&&selectedEngine===item.id};
+   return {...cached,...item,auth:item.auth || cached?.auth || {state:'unknown'},models:models || [],modelsError:item.id==='codex' && models===null?'模型列表读取失败，请重试':null,busy:[...runs.values()].some(task=>task.engine===item.id)};
   }
   const executable=id?null:item.id==='cc'?await findClaude():await findExecutable(RUNTIME_CATALOG[item.id]?.command || '');
   const auth=supportsChat(item.id)?id?await containerAuth(item.id):await detectAIAuth({engine:item.id,executable,gateway}):{state:'unknown'};
-  return {...item,auth,...(item.id==='codex'?{models:await currentCodexModels().catch(()=>[])}:{}),busy:Boolean(run)&&selectedEngine===item.id};
+  return {...item,auth,...(item.id==='codex'?{models:await currentCodexModels().catch(()=>[])}:{}),busy:[...runs.values()].some(task=>task.engine===item.id)};
  }));
  if(owner!==dockerOwner() || id!==activeContainerId)throw new Error('运行时环境已变化');
  const result={...registry,runtimes};runtimeViewCache.set(key,result);registeredRuntimes=result;
@@ -770,7 +773,7 @@ ipcMain.handle('workspace:browseFiles', guarded(async ({directory,kind}={}) => {
   return {directory:current,parent:path.dirname(current),entries};
 }));
 ipcMain.handle('workspace:project', guarded(async selected => {
- if(run || accountChanging || containerOperation)throw new Error('请先结束当前请求或环境切换');
+ if(runs.has(activeAISessionId) || accountChanging || containerOperation)throw new Error('请先结束当前请求或环境切换');
  const owner=account?.user?.id,environment=activeContainerId,generation=chatGeneration;
  if(!owner)throw new Error('请先登录');
  if(selected?.action==='browse'){
@@ -902,7 +905,7 @@ let learningAutomations;
 async function runLearningAutomation(item,question,controller){
  const ownerId=item.owner,environmentId=item.environmentId,requiresProxy=item.networkMode!=='direct';
  if(ownerId!==account?.user?.id || environmentId!==activeContainerId || accountChanging || containerOperation)throw new Error('账号或环境已变化');
- if(requiresProxy && !gateway && !run)await connect(savedConfig,false);
+ if(requiresProxy && !gateway && !runs.size)await connect(savedConfig,false);
  const proxy=requiresProxy?gateway:{status:{state:'ready',mode:'direct'}};
  const valid=()=>account?.user?.id===ownerId && activeContainerId===environmentId && !accountChanging && !containerOperation && environmentStatus.allowed && (!requiresProxy || gateway===proxy && proxy?.status.state==='ready') && !controller.signal.aborted;
  if(!valid())throw new Error('当前环境的代理未连接或出口未核验；本次未发送，问题进度保留。');
@@ -943,7 +946,7 @@ ipcMain.handle('workspace:learningAutomation',guarded(async(action='list',value=
  await learningAutomations.change(value.id,action,value);return learningAutomations.list();
 }));
 
-ipcMain.handle('workspace:cancel', guarded(async () => { abortRun(); return true; }));
+ipcMain.handle('workspace:cancel', guarded(async (id=activeAISessionId) => { if(!aiSessions.has(id))throw new Error('会话不存在');abortRun(task=>task.chatId===id); return true; }));
 ipcMain.handle('workspace:sessionModel',guarded(async(id,model)=>{
  if(accountChanging || containerOperation || chatNetworkChanging)throw new Error('正在切换对话或环境，请稍后');
  const item=aiSessions.get(id);
@@ -961,7 +964,7 @@ ipcMain.handle('workspace:sessionNetwork',guarded(async(id,mode)=>{
  if(chatNetworkMode(item)===choice.networkMode)return {id,networkMode:choice.networkMode};
  chatNetworkChanging=true;
  try{
-  if(run){const pending=run;abortRun();let timer;try{await Promise.race([pending.finished,new Promise((_,reject)=>timer=setTimeout(()=>reject(new Error('请求仍在停止，请稍后重新切换')),10000))]);}finally{clearTimeout(timer);}}
+  if(runs.has(id)){const pending=runs.get(id);abortRun(task=>task.chatId===id);let timer;try{await Promise.race([pending.finished,new Promise((_,reject)=>timer=setTimeout(()=>reject(new Error('请求仍在停止，请稍后重新切换')),10000))]);}finally{clearTimeout(timer);}}
   if(chatOwner!==owner || activeContainerId!==environment || aiSessions.get(id)!==item || activeAISessionId!==id)throw new Error('对话环境已变化，请重新选择');
   item.networkMode=choice.networkMode;let saveError;try{await persistAISessions();}catch(error){saveError=error;}
   emit('chatNetworkMode',{id,networkMode:item.networkMode});if(saveError)throw new Error('当前连接方式已切换，但保存失败，请稍后重试');return {id,networkMode:item.networkMode};
@@ -972,7 +975,7 @@ ipcMain.handle('workspace:newSession',guarded(async(options)=>{
  if(accountChanging || containerOperation || chatNetworkChanging)throw new Error('正在处理环境或连接方式切换，请稍候');
  requireActiveEnvironment();const choice=validateSessionOptions(options);
  if(accountChanging || runtimeOwner!==(account?.user?.id || null) || !registeredRuntimes?.runtimes.some(item=>item.id===choice.engine))throw new Error('请先前往运行时手动检测本机运行时');
- if(run)throw new Error('请先停止当前请求');if(activeContainerId && !(await dockerEnvs.state(dockerOwner())).environments.find(item=>item.id===activeContainerId)?.running)throw new Error('请先启动当前容器环境');await requireEnvironment();if(accountChanging || generation!==chatGeneration)throw new Error('对话账号或环境已变化');storeCurrentSession();
+ if(activeContainerId && !(await dockerEnvs.state(dockerOwner())).environments.find(item=>item.id===activeContainerId)?.running)throw new Error('请先启动当前容器环境');await requireEnvironment();if(accountChanging || generation!==chatGeneration)throw new Error('对话账号或环境已变化');storeCurrentSession();
  const item={id:randomUUID(),environmentId:activeContainerId,engine:choice.engine,model:choice.model,networkMode:choice.networkMode,project:'',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),sessionId:undefined,codexSessionId:undefined};aiSessions.set(item.id,item);if(item.engine==='deepseek')await repairSessionModel(item);activateAISession(item,{viewed:true});
  const executable=item.engine==='cc'?await findClaude():await findExecutable('codex');
  return {...item,...(item.id==='codex'?{models:await currentCodexModels().catch(()=>[])}:{}),auth:activeContainerId?await containerAuth(item.engine):await detectAIAuth({engine:item.engine,executable,gateway})};
@@ -992,9 +995,9 @@ ipcMain.handle('workspace:imagePreviewOpen',guarded(async image=>{
  const bytes=Buffer.from(match[2],'base64');if(nativeImage.createFromBuffer(bytes).isEmpty())throw new Error('无法打开图片');
  const dir=path.join(app.getPath('temp'),'dingtu-image-preview');await mkdir(dir,{recursive:true,mode:0o700});const imagePath=path.join(dir,Date.now()+'.'+match[1]);await writeFile(imagePath,bytes,{mode:0o600});const error=await shell.openPath(imagePath);if(error)throw new Error(error);
 }));
-ipcMain.handle('workspace:engine',guarded(async engine=>{if(run) throw new Error('请先停止当前请求');if(!['cc','codex','deepseek'].includes(engine))throw new Error('未知本机工具');defaultEngine=engine;await saveEnginePreference();return engine;}));
+ipcMain.handle('workspace:engine',guarded(async engine=>{if(runs.size) throw new Error('请先停止当前请求');if(!['cc','codex','deepseek'].includes(engine))throw new Error('未知本机工具');defaultEngine=engine;await saveEnginePreference();return engine;}));
 ipcMain.handle('workspace:aiAuth',guarded(async engine=>{if(!['cc','codex','deepseek'].includes(engine))throw new Error('未知工具');if(activeContainerId)return containerAuth(engine);const executable=engine==='cc'?await findClaude():await findExecutable('codex');return detectAIAuth({engine,executable,gateway});}));
-ipcMain.handle('workspace:codexModel',guarded(async model=>{if(run)throw new Error('请先停止当前请求');if(model!==null && (typeof model!=='string' || !/^[a-zA-Z0-9._:-]{1,100}$/.test(model)))throw new Error('无效模型名称');defaultCodexModel=model;await saveEnginePreference();return model;}));
+ipcMain.handle('workspace:codexModel',guarded(async model=>{if(runs.size)throw new Error('请先停止当前请求');if(model!==null && (typeof model!=='string' || !/^[a-zA-Z0-9._:-]{1,100}$/.test(model)))throw new Error('无效模型名称');defaultCodexModel=model;await saveEnginePreference();return model;}));
 ipcMain.handle('workspace:codexInfo',guarded(async()=>{if(activeContainerId){try{return{available:true,version:await dockerEnvs.exec(dockerOwner(),activeContainerId,['codex','--version']),model:null,models:await currentCodexModels().catch(()=>[])};}catch{return{available:false};}}codexPath=await findExecutable('codex');if(!codexPath)return{available:false};try{const {stdout}=await exec(codexPath,['--version'],{timeout:10000,maxBuffer:4096});return{available:true,version:stdout.trim(),model:await readCodexModel(),models:await currentCodexModels()};}catch{return{available:true,version:'版本检测失败'};}}));
 ipcMain.handle('workspace:approval', guarded(async (id, allow) => {
   const pending = approvals.get(id); if (!pending) throw new Error('授权请求已过期');
@@ -1002,89 +1005,105 @@ ipcMain.handle('workspace:approval', guarded(async (id, allow) => {
   pending.resolve(allow ? { behavior: 'allow', updatedInput: pending.input } : { behavior: 'deny', message: '用户拒绝此次文件修改' });
   return true;
 }));
-ipcMain.handle('workspace:cc', guarded(async prompt => {
-  const generation=chatGeneration,requestOwner=account?.user?.id || null;
-  if(['deepseek','codex'].includes(selectedEngine)){prompt=selectedEngine==='codex'?normalizeCodexInput(prompt):normalizeDeepSeekInput(prompt);for(const image of prompt.images){if(!image.dataURL)continue;const decoded=nativeImage.createFromDataURL(image.dataURL),size=decoded.getSize();const limit=prompt.images.length>=15?4096:8192;if(decoded.isEmpty() || size.width>limit || size.height>limit)throw new Error('图片无效或尺寸超过 '+limit+' 像素');}}
+ipcMain.handle('workspace:cc', guarded(async (prompt,rewind,chatId=activeAISessionId,requestId=randomUUID()) => {
+  const generation=chatGeneration,requestOwner=account?.user?.id || null,environmentId=activeContainerId;
+  const preparedChat=aiSessions.get(chatId);
+  if(!preparedChat || (preparedChat.environmentId || null)!==environmentId)throw new Error('对话不存在');
+  const engine=preparedChat.engine;
+  const controller=runs.begin(chatId,{engine,requestId,networkMode:chatRequestRoute(preparedChat,gateway?.status)});
+  const emitChat=(type,data)=>emit(type,data,{chatId,requestId,owner:requestOwner,environmentId});
+  const valid=()=>!controller.signal.aborted && generation===chatGeneration && requestOwner===(account?.user?.id || null) && environmentId===activeContainerId && aiSessions.get(chatId)===preparedChat;
+  try {
+  if(['deepseek','codex'].includes(engine)){prompt=engine==='codex'?normalizeCodexInput(prompt):normalizeDeepSeekInput(prompt);for(const image of prompt.images){if(!image.dataURL)continue;const decoded=nativeImage.createFromDataURL(image.dataURL),size=decoded.getSize();const limit=prompt.images.length>=15?4096:8192;if(decoded.isEmpty() || size.width>limit || size.height>limit)throw new Error('图片无效或尺寸超过 '+limit+' 像素');}}
   if(accountChanging || containerOperation || chatNetworkChanging)throw new Error('正在处理环境或连接方式切换，请稍候');
   await requireEnvironment();requireActiveEnvironment();
-  if (run) throw new Error('CC 正在处理请求');
-  if(!activeAISessionId || runtimeOwner!==(account?.user?.id || null) || !registeredRuntimes?.runtimes.some(item=>item.id===selectedEngine))throw new Error('请先手动检测运行时并新建对话');
-  await repairSessionModel(aiSessions.get(activeAISessionId));
-  if(accountChanging || generation!==chatGeneration || requestOwner!==(account?.user?.id || null))throw new Error('对话账号或环境已变化，请重新发送');
-  const preparedChat=aiSessions.get(activeAISessionId),preparedMode=chatNetworkMode(preparedChat);
+  if(!chatId || runtimeOwner!==(account?.user?.id || null) || !registeredRuntimes?.runtimes.some(item=>item.id===engine))throw new Error('请先手动检测运行时并新建对话');
+  await repairSessionModel(preparedChat);
+  if(accountChanging || !valid())throw new Error('对话账号或环境已变化，请重新发送');
+  const model=preparedChat.model,requestProject=preparedChat.project;
+  const preparedMode=chatNetworkMode(preparedChat);
   const requiresProxy=chatRequestRoute(preparedChat,gateway?.status)==='proxy';
   if (requiresProxy && gateway?.status.state !== 'ready') throw new Error('出口未通过验证，CC 请求已禁止');
-  if (!activeContainerId && selectedEngine==='cc' && !claudePath) throw new Error('没有检测到本机 CC');
-  if (!activeContainerId && selectedEngine==='codex') {codexPath=await findExecutable('codex');if(!codexPath)throw new Error('没有检测到本机 Codex CLI');}
-  const auth=activeContainerId?await containerAuth(selectedEngine):await detectAIAuth({engine:selectedEngine,executable:selectedEngine==='cc'?claudePath:codexPath,gateway});
+  if (!activeContainerId && engine==='cc' && !claudePath) throw new Error('没有检测到本机 CC');
+  if (!activeContainerId && engine==='codex') {codexPath=await findExecutable('codex');if(!codexPath)throw new Error('没有检测到本机 Codex CLI');}
+  const auth=activeContainerId?await containerAuth(engine):await detectAIAuth({engine:engine,executable:engine==='cc'?claudePath:codexPath,gateway});
   if(auth.state!=='signed-in')throw new Error(auth.state==='signed-out'?'当前环境运行时未登录，请先在官方CLI完成登录后重新检测。':'无法确认本机工具登录态，请重新检测。');
-  if(activeContainerId && selectedEngine==='deepseek'){
+  if(activeContainerId && engine==='deepseek'){
    await dockerEnvs.syncDeepSeekSource(dockerOwner(),activeContainerId);
   }
   const containerSpawn=activeContainerId?await (requiresProxy?dockerEnvs.spawner(dockerOwner(),activeContainerId):dockerEnvs.directChatSpawner(dockerOwner(),activeContainerId)):null;
-  const workingDirectory=activeContainerId?(project || await dockerEnvs.workingDirectory(dockerOwner(),activeContainerId)):project || path.join(app.getPath('userData'),'chat-workspaces',activeAISessionId || 'default');
-  if(!activeContainerId && !project)await mkdir(workingDirectory,{recursive:true,mode:0o700});
-  if (!['deepseek','codex'].includes(selectedEngine) && (typeof prompt !== 'string' || !prompt.trim() || prompt.length > 50000)) throw new Error('请输入有效内容（不超过 50000 字符）');
-  if(accountChanging || generation!==chatGeneration || requestOwner!==(account?.user?.id || null) || chatNetworkChanging || aiSessions.get(activeAISessionId)!==preparedChat || chatNetworkMode(preparedChat)!==preparedMode)throw new Error('对话连接方式已变化，请重新发送');
+  const workingDirectory=activeContainerId?(requestProject || await dockerEnvs.workingDirectory(dockerOwner(),activeContainerId)):requestProject || path.join(app.getPath('userData'),'chat-workspaces',chatId);
+  if(!activeContainerId && !requestProject)await mkdir(workingDirectory,{recursive:true,mode:0o700});
+  if (!['deepseek','codex'].includes(engine) && (typeof prompt !== 'string' || !prompt.trim() || prompt.length > 50000)) throw new Error('请输入有效内容（不超过 50000 字符）');
+  if(accountChanging || generation!==chatGeneration || requestOwner!==(account?.user?.id || null) || chatNetworkChanging || !valid() || chatNetworkMode(preparedChat)!==preparedMode)throw new Error('对话连接方式已变化，请重新发送');
   if(requiresProxy && gateway?.status.state!=='ready')throw new Error('代理状态已变化，请重新发送');
-  const controller = new AbortController();let finishRequest;controller.finished=new Promise(resolve=>finishRequest=resolve); controller.networkMode=requiresProxy?'proxy':'direct'; run = controller;
+  if(rewind){
+   if(rewind.chatId!==chatId)throw new Error('编辑的对话已变化');
+   const prefix=rewindPrefix(rewind.messages,rewind.index);
+   preparedChat.contextPrefix=prefix;preparedChat.deepseekSessionId=randomUUID();
+   if(activeAISessionId===chatId){sessionId=undefined;codexSessionId=undefined;}preparedChat.sessionId=undefined;preparedChat.codexSessionId=undefined;
+   const view=chatViews.find(v=>v.id===chatId);
+   if(view)view.messages=[...rewind.messages.slice(0,rewind.index),{role:'user',text:typeof prompt==='string'?prompt:prompt.text,images:prompt.images || []}];
+  }
+  controller.networkMode=requiresProxy?'proxy':'direct';
+  const nativeSessionId=preparedChat.sessionId,nativeCodexId=preparedChat.codexSessionId;
   const owner = requiresProxy?gateway:{status:{state:'ready',mode:'direct'}};
-  const canContinue=()=>generation===chatGeneration && requestOwner===(account?.user?.id || null) && environmentStatus.allowed && !controller.signal.aborted && (!requiresProxy || gateway===owner && owner.status.state==='ready');
+  const canContinue=()=>valid() && environmentStatus.allowed && !controller.signal.aborted && (!requiresProxy || gateway===owner && owner.status.state==='ready');
   const directSpawn=requiresProxy?null:createDirectChatSpawner(canContinue);
   const launch=containerSpawn?options=>{if(!canContinue())throw new Error('对话网络不可用');return containerSpawn(options);}:directSpawn;
-  const engine=selectedEngine;
-  const currentChat=aiSessions.get(activeAISessionId);if(currentChat){currentChat.updatedAt=new Date().toISOString();persistAISessions();}
+  const currentChat=preparedChat;if(currentChat){currentChat.updatedAt=new Date().toISOString();persistAISessions();}
   const usageOwner=chatOwner;
   let latestUsage=null;
-  emit('ccStart', {updatedAt:currentChat?.updatedAt,model:currentChat?.model});
+  emitChat('ccStart', {updatedAt:currentChat?.updatedAt,model:currentChat?.model});
   void (async () => {
     try {
       if(engine==='deepseek'){
         if(!containerSpawn)throw new Error('DeepSeek 仅在当前容器环境可用');
-        const usage=await runDeepSeek({networkMode:requiresProxy?'proxy':'direct',spawnProcess:launch,sessionId:activeAISessionId,model:codexModel,prompt,signal:controller.signal,onText:text=>emit('ccText',text),onReasoning:text=>emit('ccReasoning',text),onFinish:reason=>{if(reason==='length')emit('ccNotice','回复达到长度限制，可继续追问。');}});latestUsage=Number.isSafeInteger(usage?.total_tokens)?usage.total_tokens:null;
-        emit('ccResult',{error:false});return;
+        const usage=await runDeepSeek({networkMode:requiresProxy?'proxy':'direct',spawnProcess:launch,sessionId:currentChat.deepseekSessionId || chatId,history:currentChat.contextPrefix?deepSeekPrefix(currentChat.contextPrefix):undefined,model:model,prompt,signal:controller.signal,onText:text=>emitChat('ccText',text),onReasoning:text=>emitChat('ccReasoning',text),onFinish:reason=>{if(reason==='length')emitChat('ccNotice','回复达到长度限制，可继续追问。');}});latestUsage=Number.isSafeInteger(usage?.total_tokens)?usage.total_tokens:null;
+        delete currentChat.contextPrefix;emitChat('ccResult',{error:false});return;
       }
       if(engine==='codex') {
-        await runCodex({useLocalModel:!activeContainerId,spawnProcess:launch || undefined,executable:activeContainerId?'codex':codexPath,project:workingDirectory,model:codexModel,images:prompt.images,prompt:prompt.text,sessionId:codexSessionId,gateway:owner,signal:controller.signal,canStart:canContinue,onEvent:(type,value)=>{if(type==='session'){currentChat.codexSessionId=value;if(activeAISessionId===currentChat.id)codexSessionId=value;}else if(type==='usage')latestUsage=totalUsageTokens('codex',value);else emit({text:'ccText',tool:'ccTool',process:'ccProcess',activity:'ccActivity',error:'ccError'}[type],type==='tool'?{name:value}:value);}});
-        emit('ccResult',{sessionId:currentChat.codexSessionId,error:false});return;
+        await runCodex({useLocalModel:!activeContainerId,spawnProcess:launch || undefined,executable:activeContainerId?'codex':codexPath,project:workingDirectory,model:model,images:[...(!nativeCodexId?currentChat.contextPrefix?.flatMap(m=>m.images || []) || []:[]),...prompt.images],prompt:!nativeCodexId?replayPrompt(currentChat.contextPrefix,prompt.text):prompt.text,sessionId:nativeCodexId,gateway:owner,signal:controller.signal,canStart:canContinue,onEvent:(type,value)=>{if(type==='session'){currentChat.codexSessionId=value;if(activeAISessionId===currentChat.id)codexSessionId=value;}else if(type==='usage')latestUsage=totalUsageTokens('codex',value);else emitChat({text:'ccText',tool:'ccTool',process:'ccProcess',activity:'ccActivity',error:'ccError'}[type],type==='tool'?{name:value}:value);}});
+        delete currentChat.contextPrefix;emitChat('ccResult',{sessionId:currentChat.codexSessionId,error:false});return;
       }
-      const execution = query({ prompt: (async function* () { yield { type: 'user', message: { role: 'user', content: prompt }, parent_tool_use_id: null, session_id: '' }; })(), options: {
-        cwd: workingDirectory, pathToClaudeCodeExecutable: activeContainerId?'claude':claudePath, model:codexModel || undefined,
+      const execution = query({ prompt: (async function* () { yield { type: 'user', message: { role: 'user', content: !nativeSessionId?replayPrompt(currentChat.contextPrefix,prompt):prompt }, parent_tool_use_id: null, session_id: '' }; })(), options: {
+        cwd: workingDirectory, pathToClaudeCodeExecutable: activeContainerId?'claude':claudePath, model:model || undefined,
         env: chatRuntimeEnvironment(requiresProxy?proxyEnvironment(process.env, owner.url):directChatEnvironment(process.env)), settingSources: ['user','project','local'],
         spawnClaudeCodeProcess: launch || createRestrictedCCSpawner({port:owner.port,canStart:()=>environmentStatus.allowed && gateway === owner && owner.status.state === 'ready' && !controller.signal.aborted}),
         permissionMode: 'bypassPermissions',allowDangerouslySkipPermissions:true, abortController: controller, includePartialMessages: true,
-        resume: sessionId,
+        resume: nativeSessionId,
       } });
       let streamed = false;
       for await (const message of execution) {
         if (message.session_id){currentChat.sessionId=message.session_id;if(activeAISessionId===currentChat.id)sessionId=message.session_id;}
-        if (message.type === 'stream_event' && message.event?.type === 'content_block_delta' && message.event.delta?.type === 'text_delta') { streamed = true; emit('ccText', message.event.delta.text); }
+        if (message.type === 'stream_event' && message.event?.type === 'content_block_delta' && message.event.delta?.type === 'text_delta') { streamed = true; emitChat('ccText', message.event.delta.text); }
         else if (message.type === 'assistant') {
-          if (!streamed) for (const content of message.message.content || []) if (content.type === 'text') emit('ccText', content.text);
-          for (const content of message.message.content || []) if (content.type === 'tool_use') emit('ccActivity', {id:content.id,type:content.name,icon:content.name==='Bash'?'terminal':content.name==='Read'?'book-open':['Edit','Write'].includes(content.name)?'pencil':'activity',title:content.name,status:'in_progress',detail:content.input});
+          if (!streamed) for (const content of message.message.content || []) if (content.type === 'text') emitChat('ccText', content.text);
+          for (const content of message.message.content || []) if (content.type === 'tool_use') emitChat('ccActivity', {id:content.id,type:content.name,icon:content.name==='Bash'?'terminal':content.name==='Read'?'book-open':['Edit','Write'].includes(content.name)?'pencil':'activity',title:content.name,status:'in_progress',detail:content.input});
           streamed = false;
-        } else if(message.type==='user'){for(const content of message.message?.content || [])if(content.type==='tool_result')emit('ccActivity',{id:content.tool_use_id,status:content.is_error?'failed':'completed',detail:content.content});
+        } else if(message.type==='user'){for(const content of message.message?.content || [])if(content.type==='tool_result')emitChat('ccActivity',{id:content.tool_use_id,status:content.is_error?'failed':'completed',detail:content.content});
         } else if (message.type === 'result') {
-          latestUsage=totalUsageTokens('cc',message);
-          if (message.is_error) emit('ccError', 'CC 返回错误，请核对官方登录、代理连通性及额度。');
-          emit('ccResult', { sessionId:currentChat.sessionId, turns: message.num_turns, error: message.is_error });
+          latestUsage=totalUsageTokens('cc',message);if(!message.is_error)delete currentChat.contextPrefix;
+          if (message.is_error) emitChat('ccError', 'CC 返回错误，请核对官方登录、代理连通性及额度。');
+          emitChat('ccResult', { sessionId:currentChat.sessionId, turns: message.num_turns, error: message.is_error });
         }
       }
     } catch (error) {
-      emit('ccError', controller.signal.aborted ? '请求已取消；未自动重放操作。' : (['codex','deepseek'].includes(engine) ? error.message : 'CC 调用失败，请检查本机登录、CLI兼容性及代理；不会转为直连。'));
+      emitChat('ccError', controller.signal.aborted ? '请求已取消；未自动重放操作。' : (['codex','deepseek'].includes(engine) ? error.message : 'CC 调用失败，请检查本机登录、CLI兼容性及代理；不会转为直连。'));
     } finally {
+      if(currentChat.contextPrefix && engine!=='deepseek'){currentChat.sessionId=undefined;currentChat.codexSessionId=undefined;if(activeAISessionId===currentChat.id){sessionId=undefined;codexSessionId=undefined;}}
       if(latestUsage!==null && currentChat && chatOwner===usageOwner && aiSessions.get(currentChat.id)===currentChat){
         const entry={at:new Date().toISOString(),totalTokens:latestUsage};
         (currentChat.tokenUsage ||= []).push(entry);
-        emit('ccUsage',{sessionId:currentChat.id,entry});
+        emitChat('ccUsage',{sessionId:currentChat.id,entry});
       }
-      storeCurrentSession();
-      if (run === controller) run = null;
-      for (const [, pending] of approvals) pending.resolve({ behavior: 'deny', message: '请求已结束' });
-      approvals.clear(); emit('ccEnd', {});finishRequest();
+      persistAISessions();
+      runs.finish(controller);
+      emitChat('ccEnd', {});
     }
   })();
-  return true;
+  return {chatId,requestId};
+  } catch(error){runs.finish(controller);throw error;}
 }));
 // Only read the installed CLI version; never automatically log in or send model requests.
 ipcMain.handle('workspace:claudeInfo', guarded(async () => {

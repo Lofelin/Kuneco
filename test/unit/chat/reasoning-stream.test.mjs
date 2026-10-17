@@ -34,7 +34,7 @@ test('DeepSeek waiting status is independent of deep thinking toggle and retains
  for(const engine of ['deepseek','codex']){
   const form={},prompt={value:'hello'},nodes=[],render=(node,text)=>node.textContent=text;
   let pending;const action=fn=>(pending=fn());const bubble=role=>{const block=document.createElement('div'),content=document.createElement('div');block.className='bubble '+role;block.append(content);document.getElementById('chat').append(block);nodes.push(content);return content;};
-  new Function('$','action','selectedEngine','deepseekComposer','api','chatSessions','activeChatId','renderSessionList','bubble','reasoningView','updateChatMessage','reply','saveChatView',submit)(id=>id==='chatForm'?form:prompt,action,engine,{payload:text=>({text,thinking:'disabled'}),clear(){}},{cc:async()=>{}},[],'chat',()=>{},bubble,reasoningView,render,null,()=>{});
+  new Function('$','action','selectedEngine','deepseekComposer','api','chatSessions','activeChatId','renderSessionList','bubble','reasoningView','updateChatMessage','reply','saveChatView','chatRuns','updateSendButton','withChatView','dispatchWorkspaceEvent',submit)(id=>id==='chatForm'?form:prompt,action,engine,{payload:text=>({text,thinking:'disabled'}),clear(){}},{cc:async()=>{}},[],'chat',()=>{},bubble,reasoningView,render,null,()=>{},new Map(),()=>{},(_id,fn)=>fn(),()=>{});
   form.onsubmit({preventDefault(){}});await pending;
   const content=nodes.at(-1);assert.equal(Boolean(content.parentNode.querySelector('details')),true);
   if(engine==='codex'){finishReasoning(content,render);assert.match(content.parentNode.querySelector('summary').textContent,/用时 .* 秒/);}

@@ -3,7 +3,7 @@ export function mountMessageActions(block,{text,createdAt,onEdit,onCopy,canEdit=
  const doc=block.ownerDocument,bar=doc.createElement('div');bar.className='message-actions';
  if(createdAt && Number.isFinite(Date.parse(createdAt))){const time=doc.createElement('time');time.dateTime=createdAt;time.textContent=new Date(createdAt).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true}).toLowerCase();time.title=new Date(createdAt).toLocaleString();bar.append(time);}
  for(const [label,icon,callback] of [['复制消息','copy',()=>onCopy(typeof text==='function'?text():text)],...(onEdit?[['编辑消息','pencil',()=>{if(canEdit())onEdit();}]]:[])]){
-  const button=doc.createElement('app-button');button.type='button';button.className='icon-button message-action';button.setAttribute('appearance','plain');button.setAttribute('aria-label',label);button.title=label;
+  const button=doc.createElement('app-button');button.type='button';button.className='icon-button message-action'+(icon==='pencil'?' message-edit-action':'');button.setAttribute('appearance','plain');button.setAttribute('aria-label',label);button.title=label;
   const image=doc.createElement('wa-icon');image.setAttribute('src','assets/icons/'+icon+'.svg');button.append(image);button.onclick=callback;bar.append(button);
  }
  block.append(bar);return bar;
@@ -12,7 +12,7 @@ export function mountMessageActions(block,{text,createdAt,onEdit,onCopy,canEdit=
 export function openMessageEditor(block,{text,onSend,onCancel=()=>{}}){
  if(block.querySelector('.message-editor'))return;
  const doc=block.ownerDocument,editor=doc.createElement('div');editor.className='message-editor';
- const input=doc.createElement('wa-textarea');input.value=text;input.setAttribute('aria-label','编辑消息内容');input.setAttribute('resize','auto');input.rows=3;
+ const input=doc.createElement('wa-textarea');input.value=text;input.setAttribute('aria-label','编辑消息内容');input.setAttribute('resize','auto');input.rows=2;
  const actions=doc.createElement('div');actions.className='message-editor-actions';
  const error=doc.createElement('div');error.className='message-editor-error';error.setAttribute('role','alert');
  const make=(label,icon)=>{const button=doc.createElement('app-button');button.type='button';button.className='content-action';const image=doc.createElement('wa-icon');image.setAttribute('slot','start');image.setAttribute('src','assets/icons/'+icon+'.svg');button.append(image,doc.createTextNode(label));return button;};
