@@ -1,0 +1,32 @@
+const topics=[
+ ['明确学习目标','我想系统学习编程，请帮我制定一个适合初学者的学习目标。','Define learning goals','Help me define a realistic goal for learning programming as a beginner.'],
+ ['拆解目标','把刚才的目标拆成四个阶段，并说明每个阶段的成果。','Break down the goal','Break that goal into four stages with a concrete outcome for each stage.'],
+ ['安排时间','基于这四个阶段，制定每天30分钟的一周学习计划。','Plan the week','Turn those stages into a one-week plan with 30 minutes of practice per day.'],
+ ['建立概念','从第一阶段开始，用生活中的例子解释变量和数据类型。','Variables and types','Start the first stage: explain variables and data types using everyday examples.'],
+ ['练习变量','延续变量的例子，给我三个由浅入深的小练习，并给出参考答案。','Practice variables','Give me three progressively harder exercises on variables, with reference answers.'],
+ ['条件判断','基于之前的变量练习，解释条件判断以及常见的边界情况。','Make decisions','Build on the variable exercises to explain conditionals and boundary cases.'],
+ ['条件练习','设计一个根据年龄判断票价的小练习，列出边界输入和预期结果。','Test conditionals','Design an age-based ticket pricing exercise with boundary inputs and expected results.'],
+ ['循环','把上面的单人票价扩展为多人列表，解释循环的作用。','Understand loops','Extend the ticket example to a list of people and explain loops.'],
+ ['循环练习','在多人票价例子中计算总价，解释空列表和无效年龄如何处理。','Practice loops','Calculate total ticket cost and discuss empty lists and invalid ages.'],
+ ['函数','将票价计算抽成函数，解释参数、返回值与单一职责。','Create functions','Extract ticket pricing into a function and explain parameters, return values, and single responsibility.'],
+ ['函数练习','为刚才的函数补充三个测试用例，解释每个用例覆盖什么。','Test functions','Add three test cases for that function and explain their coverage.'],
+ ['集合','比较列表、集合和字典，说明票务系统适合用在哪里。','Choose collections','Compare lists, sets, and maps within the ticketing example.'],
+ ['数据建模','为票务系统设计简单的数据结构，分别表示用户、订单和票。','Model data','Design simple data structures for users, orders, and tickets.'],
+ ['错误处理','延续票务系统，区分输入错误、网络错误和程序错误。','Handle errors','Distinguish input errors, network failures, and programming errors in the ticketing system.'],
+ ['输入验证','为创建订单设计输入验证规则，并给出合法和非法示例。','Validate input','Design validation rules for creating orders with valid and invalid examples.'],
+ ['调试','假设订单总价计算错误，给出逐步定位问题的方法。','Debug a problem','Walk through debugging an incorrect order total step by step.'],
+ ['日志','给刚才的调试方案加入日志，并解释如何避免记录敏感信息。','Use logs','Add useful logging to the debugging plan without recording sensitive information.'],
+ ['自动测试','区分单元测试与集成测试，为票务系统各举两个例子。','Automate tests','Explain unit and integration tests, with two ticketing examples of each.'],
+ ['代码重构','针对目前的票务例子，提出三项小规模重构并说明验证方式。','Refactor safely','Suggest three small refactorings for this example and explain how to verify them.'],
+ ['算法复杂度','用票务订单查找解释时间复杂度，比较遍历列表和字典查找。','Analyze complexity','Explain time complexity by comparing list scans and map lookups for orders.'],
+ ['持久化','解释如何把订单保存到数据库，并区分内存和持久化存储。','Persist data','Explain storing orders in a database and how persistence differs from memory.'],
+ ['数据库约束','为订单设计主键、唯一约束和金额约束，解释其作用。','Design constraints','Design primary keys, uniqueness rules, and amount constraints for orders.'],
+ ['事务','用创建订单与扣减库存解释事务，并分析失败时的回滚。','Understand transactions','Explain transactions using order creation and inventory reduction, including rollback.'],
+ ['API设计','为查询和创建订单设计HTTP API，列出请求和响应示例。','Design an API','Design HTTP APIs for creating and reading orders, including request and response examples.'],
+ ['安全基础','检查这些API的身份认证、权限和输入验证风险，给出改进建议。','Review security','Review authentication, authorization, and input-validation risks in those APIs.'],
+ ['并发与幂等','当两个用户同时买最后一张票时会发生什么？给出防超卖与防重复提交的方案。','Concurrency and idempotency','Explain how to prevent overselling the last ticket and duplicate order submissions.'],
+ ['部署与监控','为这个小项目制定部署检查清单，包括健康检查、错误监控与回滚。','Deploy and monitor','Create a deployment checklist covering health checks, error monitoring, and rollback.'],
+ ['总结与下一步','总结上述学习路径，列出知识地图、自测问题和下一阶段实践项目。','Reflect and continue','Summarize this learning path with a concept map, self-check questions, and a follow-up project.']
+];
+export const LEARNING_LIBRARY=topics.flatMap((t,i)=>[{id:`zh-${i+1}`,language:'zh',step:i+1,title:t[0],prompt:t[1]},{id:`en-${i+1}`,language:'en',step:i+1,title:t[2],prompt:t[3]}]);
+export function learningQuestions(language){return LEARNING_LIBRARY.filter(q=>language==='all' || q.language===language).sort((a,b)=>a.language.localeCompare(b.language)||a.step-b.step);}
