@@ -9,7 +9,7 @@ const exec = promisify(execFile);
 
 // macOS reads its menu-bar name from the native bundle, even in development.
 // Keep the installed Electron bundle untouched. main.mjs retains the legacy
-// safeStorage identity and userData path independently of this native branding.
+// userData path and migrates its Keychain key before opening the workspace.
 export async function desktopExecutable({root, electron, platform = process.platform}) {
   if (platform !== 'darwin') return electron;
   const source = path.resolve(path.dirname(electron), '../..');

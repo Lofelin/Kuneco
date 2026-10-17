@@ -1,4 +1,5 @@
 import {connectEnvironmentProxy,restoreSelectedEnvironment} from './environment-proxy.mjs';
+import {prepareKeychainMigration,verifyKeychainMigration} from './keychain-migration.mjs';
 import {mountLocalProject} from './project-mount.mjs';
 import {browseEnvironmentProject,selectEnvironmentProject,importEnvironmentProject} from './project-files.mjs';
 import {normalizeCodexInput} from './codex-images.mjs';
@@ -89,13 +90,18 @@ const probeUrl = fixtureMode ? process.env.WORKSPACE_TEST_PROBE_URL : undefined;
 const browserHomeUrl = fixtureMode ? process.env.WORKSPACE_TEST_HOME_URL || 'https://www.google.com/?hl=en' : 'https://www.google.com/?hl=en';
 if (fixtureMode && process.env.WORKSPACE_TEST_DATA_DIR) app.setPath('userData', process.env.WORKSPACE_TEST_DATA_DIR);
 const exec = promisify(execFile);
-// Compatibility identity: retain existing encrypted credentials and local profiles.
+// Keep the profile path stable; only the Keychain identity is migrated.
 const legacyProfileName = '定途工作空间';
-app.setName(process.platform === 'darwin' ? legacyProfileName : 'Kuneco');
+app.setName(fixtureMode ? 'Kuneco Test' : 'Kuneco');
 if (!fixtureMode) app.setPath('userData', path.join(app.getPath('appData'), legacyProfileName));
 if(!fixtureMode){
  if(!app.requestSingleInstanceLock())app.exit(0);
  app.on('second-instance',()=>{if(window && !window.isDestroyed()){if(window.isMinimized())window.restore();window.show();window.focus();}});
+}
+let keychainMigration;
+if(process.platform==='darwin' && !fixtureMode){
+ try{keychainMigration=prepareKeychainMigration({directory:app.getPath('userData'),executable:process.execPath});}
+ catch(error){console.error(error.message);app.exit(1);}
 }
 app.commandLine.appendSwitch('disable-quic');
 app.commandLine.appendSwitch('hide-scrollbars');
@@ -1078,8 +1084,8 @@ ipcMain.handle('workspace:claudeInfo', guarded(async () => {
   catch { return { available: true, version: '版本检测失败' }; }
 }));
 app.whenReady().then(async () => {
-  // Warm the macOS credential key under its existing identity before changing branding.
-  if (process.platform === 'darwin' && safeStorage.isEncryptionAvailable()) safeStorage.encryptString('');
+  try{verifyKeychainMigration({directory:app.getPath('userData'),storage:safeStorage,migration:keychainMigration});}
+  catch(error){console.error(error.message);app.exit(1);return;}
   app.setName('Kuneco');
   Menu.setApplicationMenu(Menu.buildFromTemplate([...(process.platform==='darwin'?[{label:'Kuneco',role:'appMenu'}]:[]),{role:'fileMenu'},{role:'editMenu'},{label:'显示',submenu:[{role:'resetZoom'},{role:'zoomIn'},{role:'zoomOut'},{type:'separator'},{role:'togglefullscreen'}]},{role:'windowMenu'}]));
   app.configureHostResolver({ enableBuiltInResolver: false, secureDnsMode: 'off' });
