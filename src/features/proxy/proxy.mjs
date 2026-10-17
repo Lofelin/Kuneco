@@ -46,6 +46,12 @@ function localTarget(host) {
 function proxyError(code, statusCode) {
   const error = new Error('代理请求失败'); error.code = code; error.statusCode = statusCode; return error;
 }
+function rejectConnect(client,status,headers='') {
+  if(client.destroyed)return;
+  // Rejected tunnels have no useful read half. Flush the response, then close
+  // even when the peer never sends FIN; healthy tunnel half-closes are separate.
+  client.end(`HTTP/1.1 ${status}\r\n${headers}Connection: close\r\nContent-Length: 0\r\n\r\n`,()=>client.destroy());
+}
 export function connectionFailureReason(error) {
   const code = error?.code;
   if (['ERR_SSL_WRONG_VERSION_NUMBER', 'ERR_SSL_PACKET_LENGTH_TOO_LONG', 'ERR_SSL_UNSUPPORTED_PROTOCOL', 'ERR_SSL_RECORD_OVERFLOW'].includes(code)) return '代理入口协议不匹配：IPRoyal HTTP|HTTPS 请选“HTTP / HTTPS”；它同样支持 HTTPS 网站。当前入口已锁定。';
@@ -388,7 +394,7 @@ export class ProxyGateway extends EventEmitter {
     return {signal:controller.signal,finish,connected:(type)=>{client.off('end',cancel);if(!done&&!kind){kind=type;this.forwardMetrics[kind]++;this.forwardMetrics.establishedTotal++;}},acquire:async(key)=>{const slot=await this.forwarding.acquire(controller.signal,key);if(controller.signal.aborted){slot();controller.signal.throwIfAborted();}release=slot;}};
   }
   async forwardConnect(req, client, head) {
-    if (!this.authorized(req)) return client.end('HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm="workspace"\r\n\r\n');
+    if (!this.authorized(req)) return rejectConnect(client,'407 Proxy Authentication Required','Proxy-Authenticate: Basic realm="workspace"\r\n');
     const scope=this.forwardingScope(client),timings=this.performanceStats.start('connect');let host,port,upstream;
     try {
       this.assertOpen();
@@ -405,7 +411,7 @@ export class ProxyGateway extends EventEmitter {
       this.update({});
     }catch(error){
       timings.finish(scope.signal.aborted?'cancelled':requestOutcome(error));upstream?.destroy();scope.finish();
-      if(!client.destroyed)client.end(`HTTP/1.1 ${['PROXY_BUSY','PROXY_QUEUE_TIMEOUT'].includes(error.code)?'503 Service Unavailable':'502 Bad Gateway'}\r\nConnection: close\r\n\r\n`);
+      rejectConnect(client,['PROXY_BUSY','PROXY_QUEUE_TIMEOUT'].includes(error.code)?'503 Service Unavailable':'502 Bad Gateway');
       if(!scope.signal.aborted)this.reportFailure(error,host,port);
     }
   }
