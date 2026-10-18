@@ -1,3 +1,4 @@
+import {environmentDetailComplete,environmentRefreshDue} from '../features/environments/environment-refresh.mjs';
 import {mountEnvironmentSettings} from '../features/environments/environment-settings.mjs';
 import {mountEnvironmentLogs} from '../features/environments/environment-logs-ui.mjs';
 import {mountEnvironmentLayout} from '../features/environments/environment-layout.mjs';
@@ -1660,14 +1661,18 @@ function setEnvironmentTypeIcon(target,local){
  target.className='environment-type-icon';target.dataset.kind=local?'local':'docker';target.title=label;target.setAttribute('aria-label',label);target.setAttribute('role','img');
  const icon=createIcon(brand==='monitor'?'monitor':'brand-'+brand);icon.setAttribute('aria-hidden','true');target.replaceChildren(icon);
 }
-let environmentLoadVersion=0,environmentPageScope=null,environmentPageDirty=false;
+let environmentLoadVersion=0,environmentPageScope=null,environmentPageDirty=false,environmentPageCheckedAt=0;
 const environmentScope=()=>JSON.stringify([accountState.user?.id || null,dockerEnvironmentState.activeId || null]);
 async function ensureEnvironmentPage(){
  if(document.querySelector('#page-environments>.environments-body').classList.contains('is-loading'))return;
- if(environmentPageScope===environmentScope() && !environmentPageDirty)return;
+ if(!environmentRefreshDue({scope:environmentPageScope,currentScope:environmentScope(),dirty:environmentPageDirty,checkedAt:environmentPageCheckedAt}))return;
  await refreshEnvironments();
 }
+setInterval(()=>{
+ if(accountState.user && !document.hidden && $('page-environments').getClientRects().length)void ensureEnvironmentPage().catch(error=>console.warn('Environment refresh failed',error));
+},5000);
 async function refreshEnvironments(existing){
+ let complete=true;
  const version=++environmentLoadVersion,body=document.querySelector('#page-environments>.environments-body');body.classList.add('is-loading');body.setAttribute('aria-busy','true');
  try{
  const owner=accountState.user?.id;const state=existing || await api.dockerEnvironments('state');if(owner!==accountState.user?.id || version!==environmentLoadVersion)return;const gitEnvironmentChanged=dockerEnvironmentState.activeId!==state.activeId || dockerEnvironmentState.localEnabled!==state.localEnabled;dockerEnvironmentState=state;if(gitEnvironmentChanged)gitSettings.invalidate();renderProxyStorageScope();if(!document.querySelector('[data-panel=browser]').classList.contains('hidden'))void loadBrowserCookiePreferences();
@@ -1695,18 +1700,18 @@ async function refreshEnvironments(existing){
  $('environmentList').replaceChildren();
  const localRow=document.createElement('div');localRow.className='docker-environment-row';localRow.dataset.localEnvironment='true';
  const localInfo=document.createElement('div'),localTitle=document.createElement('strong'),localMeta=document.createElement('p');localTitle.textContent=localName;localMeta.className='muted';localMeta.textContent='本机环境 · 使用本机运行时与文件'+(state.activeId===null?' · 当前环境':'');localInfo.append(localTitle,localMeta);localRow.append(createIcon(environmentIcon(state.localIcon,'monitor')),localInfo);
- if(hasLocal && state.activeId===null){$('environmentList').append(localRow);await renderEnvironmentCard(localRow,null);}
+ if(hasLocal && state.activeId===null){$('environmentList').append(localRow);complete=(await renderEnvironmentCard(localRow,null))===true;}
 
  for(const item of state.environments.filter(item=>item.id===state.activeId)){
   const row=document.createElement('div');row.className='docker-environment-row';
   const info=document.createElement('div'),name=document.createElement('strong'),meta=document.createElement('p');name.textContent=item.name;meta.className='muted';meta.textContent=`${item.statusText || (item.running?'运行中':'已停止')} · ${item.runtimeCount} 个运行时${item.external?' · 已有容器（原网络）':''}${item.id===state.activeId?' · 当前环境':''}`;info.append(name,meta);row.append(createIcon(environmentIcon(item.icon,'boxes')),info);
 
   row.dataset.environmentId=item.id;
-  $('environmentList').append(row);await renderEnvironmentCard(row,item.id);
+  $('environmentList').append(row);complete=(await renderEnvironmentCard(row,item.id))===true;
  }
 
- if(version===environmentLoadVersion){environmentPageScope=environmentScope();environmentPageDirty=false;}
- }finally{if(version===environmentLoadVersion){body.classList.remove('is-loading');body.setAttribute('aria-busy','false');}}
+ if(version===environmentLoadVersion){environmentPageScope=environmentScope();environmentPageDirty=!complete;environmentPageCheckedAt=Date.now();}
+ }catch(error){if(version===environmentLoadVersion)environmentPageDirty=true;throw error;}finally{if(version===environmentLoadVersion){body.classList.remove('is-loading');body.setAttribute('aria-busy','false');}}
 }
 
 $('deleteEnvironmentMenuTrigger').onclick=()=>{const state=dockerEnvironmentState;const item=state.activeId===null?(state.localEnabled!==false?{id:null,name:state.localName || '本机环境'}:null):state.environments.find(item=>item.id===state.activeId);if(item)environmentDeleteButton(item).onclick();};
@@ -1763,6 +1768,7 @@ async function renderEnvironmentCard(row,id){
   }
   details.append(runtimes);
   mountEnvironmentLayout({header,details,metadata,local,scope:JSON.stringify([owner,id]),detail});
+  return environmentDetailComplete(detail);
  }catch(error){if(owner===accountState.user?.id && row.isConnected)details.textContent='环境信息读取失败：'+error.message;}
 }
 
