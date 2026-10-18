@@ -44,7 +44,7 @@ app-button.icon-button::part(base){width:27px;min-height:27px;padding:0;border:0
 app-button.nav::part(base),app-button.settings-tab::part(base),app-button.session-row::part(base),app-button.text-button::part(base){width:100%;background:transparent;border:0;justify-content:flex-start;color:var(--muted);}
 app-button.nav::part(base){padding:7px 10px;font-size:14px;}
 app-button.nav.active::part(base){background:var(--selected);color:var(--ink);}
-app-button.settings-tab::part(base){padding:9px 10px;}
+app-button.settings-tab::part(base){padding:4px var(--button-padding-inline);min-height:28px;}
 app-button.settings-tab.active::part(base),app-button.session-row.active::part(base){background:var(--soft);color:var(--ink);}
 app-button.session-row::part(base){padding:10px 8px;}
 app-button.session-row::part(label){display:flex;width:100%;gap:7px;}
@@ -185,7 +185,7 @@ wa-input::part(input),wa-number-input::part(input),wa-select::part(combobox),wa-
 #accountSubtitle{font-size:12px;line-height:16px;color:var(--muted);max-width:182px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .account-trigger::part(label){width:100%;}
 .account-trigger::part(base){width:100%;min-height:54px;}
-.settings-nav{width:224px;}
+.settings-nav{width:192px;}
 .settings-nav-title,.rail-heading strong{font-size:16px;line-height:24px;}
 .settings-page-heading h1{font-size:24px;line-height:32px;}
 .card h2,.compact h1{font-size:16px;line-height:24px;}
@@ -262,8 +262,8 @@ body.dark #accountLogout:hover,body.dark #accountLogout:focus-visible{background
 
 
 /* Navigation rhythm and compact conversation header. */
-.sidebar>nav{display:flex;flex-direction:column;gap:4px;}
-.settings-nav{gap:6px;}
+.sidebar>nav{display:flex;flex-direction:column;gap:2px;}
+.settings-nav{gap:2px;}
 .session-list{display:flex;flex-direction:column;gap:4px;}
 .session-row::part(base){min-height:38px;}
 .session-header{min-height:60px;height:auto;padding:12px 0;gap:12px;}
@@ -332,7 +332,7 @@ body.dark #accountLogout:hover,body.dark #accountLogout:focus-visible{background
 wa-icon.brand-claude-code{color:#D97757!important}wa-icon.brand-codex{color:#000!important}.dark wa-icon.brand-codex{color:#fff!important}
 .app-toolbar{left:106px;right:auto;gap:4px}.sidebar-collapsed .app-toolbar{left:19px;right:auto}
 .primary-nav-separator{height:1px;background:var(--line);margin:10px 12px}.sidebar-collapsed .primary-nav-separator{margin-left:4px;margin-right:4px}
-.settings-group-title{font-size:12px;font-weight:500;color:var(--muted);margin:8px 10px 2px}.settings-group-divider{height:1px;background:var(--line);flex-shrink:0;margin:12px 8px 8px}
+.settings-group-title{font-size:12px;font-weight:500;color:var(--muted);margin:4px 6px 0}.settings-group-divider{height:1px;background:var(--line);flex-shrink:0;margin:6px 6px 2px}
 .proxy-summary{margin:8px 8px 22px;padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--canvas);font-size:12px}.proxy-status-line{display:flex;align-items:center;gap:8px}.proxy-status-line strong{font-size:12px;font-weight:550}.proxy-status-line>wa-icon{font-size:18px;color:#c05858;animation:proxy-disconnected 3s ease-in-out infinite}.proxy-status-line>span{margin-left:auto;font-size:10px;color:var(--muted)}.proxy-detail-line{display:flex;align-items:center;gap:7px;margin:10px 0 5px;color:var(--muted)}#proxyFlag{font-size:16px;line-height:20px}.proxy-summary-ip{font-family:"Inter Variable",monospace;color:var(--ink);font-size:12px}.proxy-summary[data-state=ready] #proxyStatusIcon{color:var(--success);animation:proxy-connected 2.2s ease-in-out infinite}.proxy-summary[data-state=checking] #proxyStatusIcon{color:var(--warning);animation:proxy-checking 1.6s linear infinite}.proxy-summary[data-state=ready] #proxyHealth{color:var(--success)}.proxy-summary[data-state=blocked] #proxyStatusLabel{color:#c05858}.proxy-summary[data-state=checking] #proxyStatusLabel{color:var(--warning)}.sidebar-collapsed .proxy-summary{padding:8px;margin:8px 0 20px}.sidebar-collapsed .proxy-status-line{justify-content:center}.sidebar-collapsed .proxy-summary strong,.sidebar-collapsed #proxyHealth,.sidebar-collapsed .proxy-detail-line,.sidebar-collapsed .proxy-summary-ip{display:none}
 @keyframes proxy-connected{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.65;transform:scale(1.1)}}@keyframes proxy-disconnected{0%,100%{opacity:.8}50%{opacity:.4}}@keyframes proxy-checking{to{transform:rotate(360deg)}}@media(prefers-reduced-motion:reduce){#proxyStatusIcon{animation:none!important}}
 /* Hide tracks and thumbs while keeping mouse, keyboard and touch scrolling. */
@@ -372,7 +372,7 @@ app-button.content-tab-pin,app-button.content-tab-close,app-button.tab-close{--i
 
 /* One rounded content frame, inset from both edges of the desktop shell. */
 .content-area{background:var(--shell);padding-right:10px;padding-bottom:10px}
-.content-layout{margin-left:8px;border:1px solid var(--line);border-radius:16px;overflow:hidden;background:var(--canvas);isolation:isolate}
+.content-layout{margin-left:0;border:1px solid var(--line);border-radius:16px;overflow:hidden;background:var(--canvas);isolation:isolate}
 .content-tabs{padding-left:36px;box-shadow:none}
 .sidebar-collapsed .content-tabs{padding-left:172px}
 .content-tab.active{box-shadow:0 2px 0 var(--canvas)}
@@ -547,7 +547,7 @@ app-button wa-icon,wa-dropdown-item wa-icon,wa-icon{font-size:16px!important;wid
 .automation-empty{flex:1;height:auto;padding:32px}
 .runtime-state.runtime-empty{inset:var(--content-heading-height) 0 0}
 .settings-nav{padding-top:0}
-.settings-nav-title{margin:0 -12px 8px;padding:0 14px;font-weight:550}
+.settings-nav-title{margin:0 -12px 4px;padding:0 14px;font-weight:550}
 .settings-content{max-width:none;padding:0;margin:0}
 .settings-page-heading,.settings-content:has(.profile-panel:not(.hidden)) .settings-page-heading{display:flex;width:100%;max-width:1052px;margin:0 auto;padding:0 36px;border-bottom:0}
 .settings-body{max-width:1052px;margin:0 auto;padding:28px 36px}
@@ -1237,6 +1237,10 @@ body.environment-onboarding:not(.auth-mode)>.setup-window-drag{display:block}
 
 /* Match the trigger and each menu row to the same four columns. */
 #environmentTrigger::part(label){display:grid;grid-template-columns:16px minmax(0,1fr) 20px 16px;gap:10px}
+#environmentTrigger>wa-icon:first-child{width:16px;height:16px;min-width:16px;flex-shrink:0}
+.sidebar-collapsed #environmentTrigger{--button-padding-inline:12px}
+.sidebar-collapsed #environmentTrigger::part(base){justify-content:flex-start;padding-inline:12px}
+.sidebar-collapsed #environmentTrigger::part(label){grid-template-columns:16px 0 0 0;gap:0;justify-content:start;min-width:16px}
 #environmentTypeBadge{margin-left:0}
 #environmentMenu wa-dropdown-item{padding-left:1px;padding-right:9px}
 #environmentMenu wa-dropdown-item::part(icon),#environmentMenu wa-dropdown-item::part(details){display:none}
@@ -1244,7 +1248,7 @@ body.environment-onboarding:not(.auth-mode)>.setup-window-drag{display:block}
 #environmentMenu .environment-option-copy .environment-type-icon{margin:0}
 #environmentTypeBadge[data-kind=docker] wa-icon{color:#2496ed}
 #environmentTypeBadge wa-icon[src$="brand-windows.svg"]{color:#0078d4}
-.sidebar-collapsed #environmentTrigger::part(label){display:flex}
+.sidebar-collapsed #environmentTrigger::part(label){display:grid}
 @media(max-width:900px){}
 
 /* Align table edges with the toolbar content at every window width. */
@@ -1948,11 +1952,44 @@ body.dark{--credential-status-color:#b59ade}
 .environment-runtime-count{margin-left:10px;font-size:13px;font-weight:400}
 .environment-inline-runtimes .environment-runtime-empty{padding:20px;border:1px solid var(--line);border-radius:8px;background:var(--surface);font-size:13px}
 
-/* Compact primary navigation retains labels and the shared button geometry. */
-.sidebar nav>.nav{height:34px;min-height:34px;flex:0 0 34px}
-.sidebar nav>.nav::part(base){height:34px;min-height:34px;padding-block:6px;font-size:13px;line-height:20px}
-.sidebar-collapsed .sidebar nav>.nav{height:34px!important;flex-basis:34px}
-.sidebar-collapsed .sidebar nav>.nav::part(base){height:34px!important;min-height:34px!important;max-height:34px!important;aspect-ratio:auto}
+/* Both navigation levels share the same type, icon and row geometry. */
+body{--navigation-font-size:13px;--navigation-line-height:20px;--navigation-row-height:30px;--navigation-icon-size:16px;--navigation-group-size:12px}
+.sidebar nav>.nav,.settings-nav>.settings-tab{height:var(--navigation-row-height);min-height:var(--navigation-row-height);flex:0 0 var(--navigation-row-height);font-size:var(--navigation-font-size);line-height:var(--navigation-line-height)}
+.sidebar nav>.nav::part(base),.settings-nav>.settings-tab::part(base){height:var(--navigation-row-height);min-height:var(--navigation-row-height);padding-block:4px;font-size:var(--navigation-font-size);line-height:var(--navigation-line-height)}
+.sidebar nav>.nav span{font-size:inherit;line-height:inherit;white-space:nowrap}
+.sidebar nav>.nav wa-icon,.settings-nav>.settings-tab wa-icon{width:var(--navigation-icon-size);height:var(--navigation-icon-size);font-size:var(--navigation-icon-size);flex:none}
+.sidebar-collapsed .sidebar nav>.nav{height:var(--navigation-row-height)!important;flex-basis:var(--navigation-row-height)}
+.sidebar-collapsed .sidebar nav>.nav::part(base){height:var(--navigation-row-height)!important;min-height:var(--navigation-row-height)!important;max-height:var(--navigation-row-height)!important;aspect-ratio:auto}
+.primary-nav-group-title,.settings-group-title{font-size:var(--navigation-group-size);line-height:18px;font-weight:500;color:var(--muted);margin:6px 6px 2px}
+.primary-nav-group-title:first-child{margin-top:0}
+.sidebar-collapsed .primary-nav-group-title{display:none}
+body:not(.sidebar-collapsed) .proxy-summary{height:auto;min-height:0;margin-bottom:4px;padding-block:8px}
+/* Expanded rail icons share a center 20px inside the sidebar content edge. */
+body:not(.sidebar-collapsed) #environmentTrigger{--button-padding-inline:12px}
+body:not(.sidebar-collapsed) .sidebar nav>.nav::part(base){padding-inline:12px}
+body:not(.sidebar-collapsed) #accountTrigger::part(base){padding-inline:3px}
+/* Preserve the compact rail and keep the avatar at the same vertical position. */
+.sidebar-collapsed #accountMenu{margin-left:0;margin-right:0}
+.sidebar-collapsed #accountTrigger::part(base){width:100%;height:54px;min-height:54px;padding:8px 6px}
+/* Keep intrinsic content stable while the rail animates around it. */
+.sidebar{interpolate-size:allow-keywords;overflow-x:clip}
+.sidebar nav>.nav::part(base){overflow:hidden}
+.sidebar nav>.nav span,.sidebar-collapsed .sidebar nav>.nav span{display:inline;flex:none;white-space:nowrap;transition:opacity .12s ease .16s;opacity:1}
+.sidebar-collapsed .sidebar nav>.nav span{opacity:0;transition-delay:0s}
+.primary-nav-group-title,.sidebar-collapsed .primary-nav-group-title{display:block;overflow:hidden;white-space:nowrap;height:18px;min-height:0;flex-shrink:0;transition:height var(--sidebar-motion-duration) var(--sidebar-motion-easing),margin var(--sidebar-motion-duration) var(--sidebar-motion-easing),opacity .12s ease .16s}
+.sidebar-collapsed .primary-nav-group-title{height:0;margin-block:0;opacity:0;transition-delay:0s}
+.proxy-summary{transition:height var(--sidebar-motion-duration) var(--sidebar-motion-easing),padding var(--sidebar-motion-duration) var(--sidebar-motion-easing),margin var(--sidebar-motion-duration) var(--sidebar-motion-easing)}
+.sidebar .proxy-status-line{width:var(--sidebar-proxy-content-width,204px);min-width:0;justify-content:flex-start}
+.sidebar .proxy-detail-line,.sidebar .proxy-ip-line{width:var(--sidebar-proxy-content-width,204px)}
+.sidebar-collapsed .proxy-summary #proxyStatusLabel{position:static;display:block}
+.sidebar-collapsed .proxy-summary .proxy-detail-line:not(.hidden){position:static;display:flex}
+.sidebar-collapsed .proxy-summary .proxy-ip-line{position:static;display:flex}
+.sidebar-collapsed .proxy-summary .proxy-summary-ip:not(.hidden){position:static;display:block}
+.sidebar .account-copy,.sidebar-collapsed .account-copy{display:flex;flex:none;width:170px;white-space:nowrap;transition:opacity .12s ease .16s}
+.sidebar-collapsed .account-copy{opacity:0;visibility:hidden;transition-delay:0s}
+#accountTrigger::part(base){overflow:hidden;transition:padding var(--sidebar-motion-duration) var(--sidebar-motion-easing),height var(--sidebar-motion-duration) var(--sidebar-motion-easing)}
+#accountTrigger::part(label){flex-shrink:0}
+@media(prefers-reduced-motion:reduce){.sidebar nav>.nav span,.primary-nav-group-title,.proxy-summary,.sidebar .account-copy,#accountTrigger::part(base),.content-tabs-viewport{transition:none}}
 
 .file-picker-entries>.file-picker-empty{width:100%;height:100%;min-height:0;box-sizing:border-box}
 
@@ -2118,7 +2155,16 @@ body.chat-mode .content-tabs-viewport{padding-right:48px}
 .chat-insights>.insights-empty{flex:1;min-height:220px}
 .chat-insights>details:has(>.insights-empty){display:flex;flex-direction:column;flex:1;min-height:0}
 .chat-insights>details>.insights-empty{flex:1;min-height:220px}
-body:has(>.window-insights.insights-open) .main-shell{margin-right:0}
+/* The inspector shares the content frame; shell inset belongs at the outer edge. */
+@media(min-width:1151px){
+ body.chat-mode:has(>.window-insights.insights-open) .content-area{padding-right:0}
+ body.chat-mode:has(>.window-insights.insights-open) .content-layout{border-top-right-radius:0;border-bottom-right-radius:0;border-right:0}
+ .window-insights{box-sizing:border-box;background:var(--shell)}
+ .window-insights.insights-open{padding-right:10px;padding-bottom:10px}
+ .window-insights::before{content:"";position:absolute;top:var(--app-tabs-height,44px);right:10px;bottom:10px;left:0;background:var(--canvas);border:1px solid var(--line);border-left:0;border-radius:0 16px 16px 0;pointer-events:none}
+ .window-insights .chat-insights{position:relative;flex-basis:calc(var(--insights-size) - 10px);width:calc(var(--insights-size) - 10px);background:transparent}
+}
+
 
 .chat-document-chip,.chat-document-card{display:flex;align-items:center;gap:8px;min-width:0;padding:8px;border:1px solid var(--line);border-radius:8px;font-size:12px}.chat-document-card{flex-wrap:wrap}.chat-document-card strong{overflow-wrap:anywhere}.chat-document-card small{color:var(--muted)}.message-documents{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}#sessionEffort{max-width:130px}
 
