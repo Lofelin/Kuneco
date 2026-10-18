@@ -150,6 +150,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/auth/google/callback", s.callback)
 	mux.HandleFunc("POST /v1/auth/google/poll", s.poll)
 	mux.HandleFunc("PUT /v1/me/profile", s.authorized(s.updateProfile))
+	mux.HandleFunc("GET /v1/me/browser-settings", s.authorized(s.browserSettingsRead))
+	mux.HandleFunc("PUT /v1/me/browser-settings", s.authorized(s.browserSettingsWrite))
 	mux.HandleFunc("GET /v1/me/browser-cookies", s.authorized(s.cookiesRead))
 	mux.HandleFunc("PUT /v1/me/browser-cookies", s.authorized(s.cookiesWrite))
 	mux.HandleFunc("GET /v1/me/runtimes", s.authorized(s.runtimeRead))
