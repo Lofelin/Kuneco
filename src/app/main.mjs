@@ -1,3 +1,4 @@
+import {validConsoleDirectory} from '../shared/console-preferences.mjs';
 import {createPreferenceStore} from '../features/preferences/preference-store.mjs';
 import {createQuitConfirmation} from '../features/preferences/quit-confirmation.mjs';
 import {createContainerDownloads} from '../features/browser/browser-downloads.mjs';
@@ -995,8 +996,21 @@ ipcMain.handle('workspace:windowDrag',guarded(({phase,x,y}={})=>{
 }));
 ipcMain.handle('workspace:console',guarded(async(action,value={})=>{
  if(action==='close'){if(value.token===consoleSession?.token)closeConsole();return true;}
- if(!dockerOwner() || !activeContainerId){closeConsole();if(action==='status')return {available:false,message:'请选择 Docker 容器环境后使用控制台。'};throw new Error('控制台仅连接当前账号的 Docker 容器');}
+ if(!dockerOwner() || !activeContainerId){closeConsole();if(['status','directory'].includes(action))return {available:false,message:'请选择 Docker 容器环境后使用控制台。'};throw new Error('控制台仅连接当前账号的 Docker 容器');}
  if(accountChanging || containerOperation)throw new Error('环境正在切换，请稍后重试');
+ if(action==='directory'||action==='directory-save'){
+  const owner=dockerOwner(),id=activeContainerId,scope=JSON.stringify([owner,id]);
+  const {item}=await dockerEnvs.get(owner,id);
+  if(action==='directory-save'){
+   if(value.scope!==scope)throw new Error('当前环境已变化，请重新打开设置');
+   if(!validConsoleDirectory(value.path))throw new Error('请填写容器内绝对路径，不支持换行或控制字符');
+   if(value.path)try{await dockerEnvs.exec(owner,id,['sh','-c','test -d "$1" && test -x "$1"','console-directory',value.path],{timeout:5000});}catch{throw new Error('目录不存在或当前容器用户无法访问');}
+   if(owner!==dockerOwner()||id!==activeContainerId)throw new Error('当前环境已变化');
+   if(!preferenceStore||preferenceLoadError)throw new Error(preferenceLoadError||'偏好设置尚未就绪');
+   const next=await preferenceStore.save({consoleDirectories:{...preferenceStore.get().consoleDirectories,[scope]:value.path}});emit('preferences',next);
+  }
+  return {available:true,scope,name:item.name,defaultPath:item.external?.workingDirectory||'/workspace',path:preferenceStore?.get().consoleDirectories?.[scope]||''};
+ }
  if(action==='status'){const {item}=await dockerEnvs.get(dockerOwner(),activeContainerId);return {available:true,id:activeContainerId,name:item.name,external:Boolean(item.external),codexAuth:item.registry?.runtimes?.some(entry=>entry.id==='codex')?await containerAuth('codex'):null};}
  if(action==='open'){
   if(value.loginEngine!==undefined && !['cc','codex'].includes(value.loginEngine))throw new Error('未知运行时');
@@ -1008,7 +1022,7 @@ ipcMain.handle('workspace:console',guarded(async(action,value={})=>{
   connection.on('open-url',url=>{if(current())emit('console',{token:connection.token,type:'open-url',url});});
   connection.on('notice',text=>{if(current())emit('console',{token:connection.token,type:'notice',text});});
   connection.on('exit',()=>{emit('console',{token:connection.token,type:'exit'});if(consoleSession===connection)consoleSession=null;});
-  try{await connection.open(value.cols,value.rows,value.loginEngine);if(!current() || connection.closed)throw new Error('终端连接已取消，请重新连接');return {token:connection.token};}
+  try{await connection.open(value.cols,value.rows,value.loginEngine,preferenceStore?.get().consoleDirectories?.[JSON.stringify([connection.owner,connection.id])]||'');if(!current() || connection.closed)throw new Error('终端连接已取消，请重新连接');return {token:connection.token};}
   catch(error){if(consoleSession===connection)consoleSession=null;connection.close();throw error;}finally{consoleOpening=false;}
  }
  const connection=consoleSession;

@@ -1,7 +1,8 @@
+import {consoleDefaults,normalizeConsolePreferences} from './console-preferences.mjs';
 export const chatFontFamilies=Object.freeze({system:'system-ui, sans-serif',serif:'Georgia, "Songti SC", serif',sans:'"Inter Variable", "PingFang SC", sans-serif',opendyslexic:'OpenDyslexic, system-ui, sans-serif'});
-export const preferenceDefaults=Object.freeze({shortcuts:Object.freeze({}),sendShortcut:'enter',chatFontSize:14,chatFontFamily:'system',chatWidth:'wide',codeFontSize:13,confirmQuit:true,motion:'system',hourCycle:'system',timeDisplay:'absolute'});
+export const preferenceDefaults=Object.freeze({...consoleDefaults,shortcuts:Object.freeze({}),sendShortcut:'enter',chatFontSize:14,chatFontFamily:'system',chatWidth:'wide',codeFontSize:13,confirmQuit:true,motion:'system',hourCycle:'system',timeDisplay:'absolute'});
 export function normalizePreferences(value={}){
- const out={...preferenceDefaults,shortcuts:{}};
+ const out={...preferenceDefaults,shortcuts:{},...normalizeConsolePreferences(value || {})};
  if(!value || typeof value!=='object')return out;
  for(const [key,allowed] of Object.entries({chatFontFamily:['system','serif','sans','opendyslexic'],chatWidth:['narrow','medium','wide'],sendShortcut:['enter','modifier'],motion:['system','reduce'],hourCycle:['system','12','24'],timeDisplay:['absolute','relative']}))if(allowed.includes(value[key]))out[key]=value[key];
  for(const key of ['chatFontSize','codeFontSize'])if(Number.isInteger(value[key])&&value[key]>=12&&value[key]<=20)out[key]=value[key];

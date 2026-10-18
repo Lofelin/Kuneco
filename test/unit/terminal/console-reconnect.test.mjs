@@ -2,13 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import vm from 'node:vm';
+import {consoleOptions,consoleDefaults} from '../../../src/shared/console-preferences.mjs';
 
 async function fixture(close=async()=>true){
- const nodes={containerTerminal:{replaceChildren(){}},consoleStatus:{textContent:''},consoleConnect:{},consoleConnectLabel:{},'page-console':{classList:{contains:()=>false}}};
- class Terminal {constructor(){this.cols=80;this.rows=24;this.parser={registerOscHandler(){}};}attachCustomKeyEventHandler(handler){this.keyHandler=handler;}loadAddon(){}open(host){host.terminal=this;}onData(){}onResize(){}focus(){}dispose(){}reset(){}write(){}}
+ const nodes={containerTerminal:{style:{},replaceChildren(){}},consoleStatus:{textContent:''},consoleConnect:{},consoleConnectLabel:{},'page-console':{classList:{contains:()=>false}}};
+ class Terminal {constructor(options){this.options=options;this.cols=80;this.rows=24;this.parser={registerOscHandler(){}};}attachCustomKeyEventHandler(handler){this.keyHandler=handler;}loadAddon(){}open(host){host.terminal=this;}onData(){}onResize(){}focus(){}dispose(){}reset(){}write(){}}
  const inputs=[];Terminal.prototype.input=function(data){inputs.push(data);};
  const opened=[];const api={async console(action,value){if(action==='status')return{available:true,id:'fixture'};if(action==='close')return close(value);if(action==='open'){opened.push(value);return{token:'token-'+opened.length};}},onEvent(){}};
- const sandbox={document:{getElementById:id=>nodes[id]},window:{addEventListener(){}},Terminal,FitAddon:class{fit(){}},WebLinksAddon:class{},ResizeObserver:class{observe(){}},TextEncoder,URL};
+ const sandbox={consoleOptions,consoleDefaults,mountConsolePaste:()=>({cancel(){}}),MutationObserver:class{observe(){}},document:{body:{classList:{contains:()=>false}},addEventListener(){},getElementById:id=>nodes[id]},window:{addEventListener(){}},Terminal,FitAddon:class{fit(){}},WebLinksAddon:class{},ResizeObserver:class{observe(){}},TextEncoder,URL};
  const source=(await readFile(new URL('../../../src/features/terminal/console-ui.mjs',import.meta.url),'utf8')).replace(/^import .*;\n/gm,'').replace('export function mountConsole','function mountConsole');
  vm.runInNewContext(source+'\nglobalThis.mount=mountConsole;',sandbox);
  return{view:sandbox.mount(api),nodes,opened,inputs,key:event=>nodes.containerTerminal.terminal.keyHandler(event)};

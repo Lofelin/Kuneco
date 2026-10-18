@@ -8,7 +8,7 @@ export function createPreferenceStore(file){
    if(!patch||typeof patch!=='object'||Array.isArray(patch))throw new Error('无效偏好设置');
    if(Object.hasOwn(patch,'shortcuts'))validateShortcuts(patch.shortcuts);
    const next=normalizePreferences({...value,...patch});
-   for(const [key,item] of Object.entries(patch))if(!Object.hasOwn(preferenceDefaults,key)||(key==='shortcuts'?JSON.stringify(next[key])!==JSON.stringify(item):next[key]!==item))throw new Error('无效偏好设置：'+key);
+   for(const [key,item] of Object.entries(patch))if(!Object.hasOwn(preferenceDefaults,key)||(['shortcuts','consoleDirectories'].includes(key)?JSON.stringify(next[key])!==JSON.stringify(item):next[key]!==item))throw new Error('无效偏好设置：'+key);
    await writeFile(file+'.tmp',JSON.stringify(next),{mode:0o600});await rename(file+'.tmp',file);value=next;return {...value};
   });queue=run;return run;
  }};

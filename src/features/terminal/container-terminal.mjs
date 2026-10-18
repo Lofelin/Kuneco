@@ -1,3 +1,4 @@
+import {validConsoleDirectory} from '../../shared/console-preferences.mjs';
 import http from 'node:http';
 import {createLoginLinkDetector,matchesCodexCallback} from './terminal-login-links.mjs';
 import {EventEmitter} from 'node:events';
@@ -14,7 +15,8 @@ function request(socketPath,path,body){
 }
 export class ContainerTerminal extends EventEmitter{
  constructor(manager,owner,id){super();Object.assign(this,{manager,owner,id});this.token=randomUUID();this.closed=false;this.pendingBytes=0;}
- async open(cols=80,rows=24,loginEngine){
+ async open(cols=80,rows=24,loginEngine,workingDirectory=''){
+  if(!validConsoleDirectory(workingDirectory))throw new Error('无效的终端工作目录');
   if(loginEngine!==undefined && !['cc','codex'].includes(loginEngine))throw new Error('未知运行时');
   const {item,prefix}=await this.manager.get(this.owner,this.id);
   this.endpoint=item.external?.endpoint || this.manager.endpoint;
@@ -30,7 +32,7 @@ for url do case "$url" in http://*|https://*) printf '\033]777;dingtu-open-url;%
   const command=loginCommand?['sh','-c','umask 077; echo $$ > "$1" || exit 1; shift; exec bash -ic "$1"','dingtu-console',this.pidFile,loginCommand+'; exec bash -i']:['sh','-c','umask 077; echo $$ > "$1" || exit 1; if command -v bash >/dev/null 2>&1; then exec bash -i; else exec sh -i; fi','dingtu-console',this.pidFile];
   const result=await request(socketPath,'/containers/'+encodeURIComponent(container)+'/exec',{
    AttachStdin:true,AttachStdout:true,AttachStderr:true,Tty:true,Cmd:command,
-   ...(item.external?{}:{User:'1000:1000'}),WorkingDir:item.external?.workingDirectory || '/workspace',
+   ...(item.external?{}:{User:'1000:1000'}),WorkingDir:workingDirectory || item.external?.workingDirectory || '/workspace',
    Env:['TERM=xterm-256color','COLORTERM=truecolor','LANG=C.UTF-8','LC_ALL=C.UTF-8','BROWSER='+this.browserFile],ConsoleSize:[rows,cols]
   });
   this.execId=result.Id;if(this.closed)return;
