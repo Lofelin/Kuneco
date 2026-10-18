@@ -2394,3 +2394,6 @@ html[data-reduced-motion="true"] *,html[data-reduced-motion="true"] *::before,ht
 #prompt::part(textarea),#draft::part(textarea),.message-editor wa-textarea::part(textarea){font-family:var(--chat-font-family,inherit)}
 .chat-column{max-width:var(--chat-content-width,100%);margin-inline:auto;width:100%}
 .settings-body [data-panel="preferences"] wa-radio-group.app-segmented{flex-shrink:0}
+
+/* Font choices preview the same family as conversation text; menu metrics stay global. */
+wa-option.font-preview-option,wa-option.font-preview-option::part(label){font-family:var(--option-font-family)}

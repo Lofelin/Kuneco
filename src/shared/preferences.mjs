@@ -1,3 +1,4 @@
+export const chatFontFamilies=Object.freeze({system:'system-ui, sans-serif',serif:'Georgia, "Songti SC", serif',sans:'"Inter Variable", "PingFang SC", sans-serif',opendyslexic:'OpenDyslexic, system-ui, sans-serif'});
 export const preferenceDefaults=Object.freeze({shortcuts:Object.freeze({}),sendShortcut:'enter',chatFontSize:14,chatFontFamily:'system',chatWidth:'wide',codeFontSize:13,confirmQuit:true,motion:'system',hourCycle:'system',timeDisplay:'absolute'});
 export function normalizePreferences(value={}){
  const out={...preferenceDefaults,shortcuts:{}};

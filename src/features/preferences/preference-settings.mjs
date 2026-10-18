@@ -1,3 +1,4 @@
+import {chatFontFamilies} from '../../shared/preferences.mjs';
 import {formatDisplayDate} from '../../shared/date-format.mjs';
 export function mountPreferenceSettings({host,getPreferences,save}){
  const doc=host.ownerDocument,controls=new Map();
@@ -8,7 +9,7 @@ export function mountPreferenceSettings({host,getPreferences,save}){
   label.id='preference-'+key+'-label';hint.id='preference-'+key+'-hint';copy.append(label,hint);
   const control=element(options?(segmented?'wa-radio-group':'wa-select'):'wa-switch');control.id='preference-'+key;control.setAttribute('aria-labelledby',label.id);control.setAttribute('aria-describedby',hint.id);control.size='s';
   if(segmented){control.className='app-segmented';control.setAttribute('orientation','horizontal');}
-  if(options)for(const [value,text] of options){const option=element(segmented?'wa-radio':'wa-option',text);option.value=String(value);if(segmented)option.setAttribute('appearance','button');control.append(option);}
+  if(options)for(const [value,text] of options){const option=element(segmented?'wa-radio':'wa-option',text);option.value=String(value);if(key==='chatFontFamily'){option.classList.add('font-preview-option');option.style.setProperty('--option-font-family',chatFontFamilies[value]);}if(segmented)option.setAttribute('appearance','button');control.append(option);}
   row.append(copy,control);group.append(row);controls.set(key,control);
   control.addEventListener('change',async()=>{if(control.disabled)return;const value=options?(key.endsWith('FontSize')?Number(control.value):control.value):control.checked;render(false);status.textContent='正在保存…';try{await save({[key]:value});status.textContent='已保存到本设备';}catch(error){status.textContent='保存失败：'+error.message;}finally{render();}});
  }

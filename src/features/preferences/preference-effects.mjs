@@ -1,9 +1,9 @@
-import {normalizePreferences} from '../../shared/preferences.mjs';
+import {normalizePreferences,chatFontFamilies} from '../../shared/preferences.mjs';
 import {configureDateDisplay,formatDisplayDate,formatCompactTime} from '../../shared/date-format.mjs';
 export function applyPreferences(value,document=globalThis.document){
  const preferences=normalizePreferences(value),root=document.documentElement;
  root.style.setProperty('--chat-font-size',preferences.chatFontSize+'px');root.style.setProperty('--code-font-size',preferences.codeFontSize+'px');
- root.style.setProperty('--chat-font-family',({system:'system-ui, sans-serif',serif:'Georgia, "Songti SC", serif',sans:'"Inter Variable", "PingFang SC", sans-serif',opendyslexic:'OpenDyslexic, system-ui, sans-serif'})[preferences.chatFontFamily]);
+ root.style.setProperty('--chat-font-family',chatFontFamilies[preferences.chatFontFamily]);
  root.style.setProperty('--chat-content-width',({narrow:'680px',medium:'860px',wide:'100%'})[preferences.chatWidth]);
  root.dataset.reducedMotion=String(preferences.motion==='reduce');
  configureDateDisplay(preferences);
