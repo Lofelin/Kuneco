@@ -13,3 +13,10 @@ test('conversation rail keeps compact clock labels across preference changes and
  const doc=new JSDOM('<html lang="zh-CN"><time class="chat-item-time" data-time-kind="compact" datetime="2026-10-17T18:30:00Z"></time><time datetime="2026-10-17T18:30:00Z"></time></html>').window.document;
  try{for(const timeDisplay of ['absolute','relative']){configureDateDisplay({hourCycle:'24',timeDisplay});for(let i=0;i<3;i++)refreshTimeElements(doc);assert.equal(doc.querySelector('.chat-item-time').textContent,formatCompactTime('2026-10-17T18:30:00Z'));assert.match(doc.querySelector('.chat-item-time').textContent,/^\d{2}:\d{2} [AP]M$/);assert.match(doc.querySelector('.chat-item-time').title,/2026/);}}finally{configureDateDisplay({hourCycle:'system',timeDisplay:'absolute'});}
 });
+
+test('reading preferences persist, preserve legacy sizes and reject unknown fonts or widths',async()=>{
+ const dir=await mkdtemp(path.join(tmpdir(),'kuneco-reading-')),file=path.join(dir,'preferences.json');
+ try{await writeFile(file,JSON.stringify({chatFontSize:17}));const store=createPreferenceStore(file);const old=await store.load();assert.equal(old.chatFontSize,17);assert.equal(old.chatWidth,'wide');assert.equal(old.chatFontFamily,'system');
+ await store.save({chatFontFamily:'opendyslexic',chatWidth:'narrow'});const value=await createPreferenceStore(file).load();assert.equal(value.chatFontSize,17);assert.equal(value.chatFontFamily,'opendyslexic');assert.equal(value.chatWidth,'narrow');await assert.rejects(store.save({chatFontFamily:'missing'}));await assert.rejects(store.save({chatWidth:'10000px'}));
+ }finally{await rm(dir,{recursive:true,force:true});}
+});

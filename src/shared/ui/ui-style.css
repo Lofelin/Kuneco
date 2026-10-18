@@ -2388,3 +2388,9 @@ html[data-reduced-motion="true"] *,html[data-reduced-motion="true"] *::before,ht
 #shortcutSettings [hidden]{display:none!important}
 #shortcutSettings>.app-empty-state{min-height:240px}
 @container(max-width:480px){.shortcut-toolbar>wa-input{width:auto;flex:1}}
+
+/* Reading preferences affect conversation content, never navigation or code. */
+.bubble .message-content,#messages article>div,.preference-reading-preview p{font-family:var(--chat-font-family,inherit)}
+#prompt::part(textarea),#draft::part(textarea),.message-editor wa-textarea::part(textarea){font-family:var(--chat-font-family,inherit)}
+.chat-column{max-width:var(--chat-content-width,100%);margin-inline:auto;width:100%}
+.settings-body [data-panel="preferences"] wa-radio-group.app-segmented{flex-shrink:0}

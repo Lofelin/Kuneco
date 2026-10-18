@@ -3,3 +3,6 @@
 @import '@fontsource-variable/inter';
 
 @import '@xterm/xterm/css/xterm.css';
+
+/* Bundled from https://github.com/antijingoist/opendyslexic (SIL OFL). */
+@font-face{font-family:OpenDyslexic;src:url(../../assets/fonts/opendyslexic/OpenDyslexic-Regular.woff2) format("woff2");font-style:normal;font-weight:400;font-display:swap}
