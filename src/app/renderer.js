@@ -20,7 +20,7 @@ import {mountChatSearch} from '../features/chat/chat-search.mjs';
 import {mountDraftPersistence} from '../features/chat/draft-persistence.mjs';
 import {mountBrowserSettings,mountBrowserModeSwitches} from '../features/browser/browser-settings.mjs';
 import {mountInsightsPanel} from '../features/chat/insights-panel.mjs';
-import {containerDisplayRows,networkDisplayRows} from '../features/environments/container-display-rows.mjs';
+import {containerDisplayRows,networkDisplayRows,renderContainerHealth} from '../features/environments/container-display-rows.mjs';
 import {mountContextPicker} from '../features/chat/context-picker.mjs';
 import {mountChatScroll} from '../features/chat/scroll-follow.mjs';
 import {mergeRuntimeActivity} from '../features/runtimes/activity-state.mjs';
@@ -1742,7 +1742,7 @@ async function renderEnvironmentCard(row,id){
   const type=document.createElement('span');setEnvironmentTypeIcon(type,local);nameLine.append(name);nameLine.append(type);
   if(!local)nameLine.append(status);
   const metadata=document.createElement('dl');metadata.className='settings-facts';
-  if(!local)for(const [label,text] of [['容器镜像版本',detail.containerImage || '未知'],['容器名称',detail.containerName || '未记录'],['容器 ID',detail.containerId || '未记录'],['创建时间',detail.createdAt?displayEnvironmentDate(detail.createdAt):'未记录']]){const term=document.createElement('dt'),value=document.createElement('dd');term.textContent=label;value.textContent=text;if(label==='创建时间' && detail.createdAt){value.dataset.environmentDate=detail.createdAt;value.dataset.environmentRecent='false';value.title=displayDate(detail.createdAt);}metadata.append(term,value);}
+  if(!local)for(const [label,text] of [['容器名称',detail.containerName || '未记录'],['容器 ID',detail.containerId || '未记录'],['容器镜像版本',detail.containerImage || '未知']]){const term=document.createElement('dt'),value=document.createElement('dd');term.textContent=label;value.textContent=text;if(label==='创建时间' && detail.createdAt){value.dataset.environmentDate=detail.createdAt;value.dataset.environmentRecent='false';value.title=displayDate(detail.createdAt);}metadata.append(term,value);}
   identity.append(nameLine);if(local){const subtitle=document.createElement('p');subtitle.className='environment-container-name';subtitle.textContent='使用本机运行时与工作文件';identity.append(subtitle);}else identity.append(metadata);
   header.replaceChildren(createEnvironmentIconPicker(id,environmentIcon(local?dockerEnvironmentState.localIcon:dockerEnvironmentState.environments.find(item=>item.id===id)?.icon,local?'monitor':'boxes')),identity);
   const facts=document.createElement('dl');facts.className='environment-inline-facts';
@@ -1750,12 +1750,11 @@ async function renderEnvironmentCard(row,id){
    ...(!local?[['基础镜像来源',detail.baseImage]]:[]),
    ['工作文件',id===null?'使用本机文件':detail.external?'使用原容器文件':'独立容器数据卷'],
    ['运行时登录',id===null?'使用本机登录':detail.external?'使用原容器登录':'仅保存在当前环境'],
-   ...(local?[
-    ['创建时间',detail.createdAt?displayDate(detail.createdAt):null,detail.createdAt]
-   ]:[])
+   ['创建时间',detail.createdAt?displayDate(detail.createdAt):'未记录',detail.createdAt]
   ]){if(value===null)continue;const term=document.createElement('dt'),description=document.createElement('dd');term.textContent=label;description.textContent=value;if(date){description.dataset.environmentDate=date;description.dataset.environmentRecent=String(label==='最近检测');description.textContent=displayEnvironmentDate(date,label==='最近检测');description.title=displayDate(date);}const pair=document.createElement('div');if(label==='基础镜像来源')pair.className='environment-fact-wide';pair.append(term,description);facts.append(pair);}
   const runtimes=document.createElement('div');runtimes.className='environment-inline-runtimes';
-  const title=document.createElement('h3');title.className='preference-heading';title.textContent='运行时';const hint=document.createElement('p');hint.className='environment-runtimes-hint settings-section-description muted';hint.textContent='此环境中已检测到的运行时、CLI 版本及支持的模型。';runtimes.append(title,hint);
+  const title=document.createElement('h3');title.className='preference-heading';title.textContent='运行时';
+  const hint=document.createElement('p');hint.className='environment-runtimes-hint settings-section-description muted';hint.textContent='此环境中已检测到的运行时、CLI 版本及支持的模型。';runtimes.append(title,hint);
   if(detail.runtimes.length){
    const table=document.createElement('app-table');
    renderRuntimeTable(table,detail.runtimes,{columns:[{key:'name',label:'运行时',width:'145px'},{key:'version',label:'CLI 版本',width:'175px'},{key:'models',label:'模型'}],actions:false,onOpen:runtime=>{if(owner!==accountState.user?.id || id!==dockerEnvironmentState.activeId)return;switchPage('runtime');openRuntimeDetails(runtimeRegistry.runtimes.find(entry=>entry.id===runtime.id) || runtime);}});runtimes.append(table);
@@ -1771,9 +1770,8 @@ async function renderEnvironmentCard(row,id){
   }
   if(!local){
    const section=document.createElement('section');section.className='environment-reliability';
-   const heading=document.createElement('h3');heading.className='preference-heading';heading.textContent='容器状态与保障';
-   const description=document.createElement('p');description.className='settings-section-description';description.textContent=detail.external?'以下为原容器当前配置，由原容器管理方维护。':'容器自检只检查本地服务，不代表代理出口已核验。数据卷保留，规格更新失败会回退。';
-   const table=document.createElement('app-table');renderAppTable(table,{label:'容器状态与保障',columns:[{key:'label',label:'项目',width:'120px'},{key:'worker',label:detail.external?'关联容器':'工作容器'},...(!detail.external?[{key:'gateway',label:'代理网关'}]:[])],rows:containerDisplayRows(detail.reliability?.worker,detail.reliability?.gateway,{external:detail.external}),minWidth:detail.external?400:600});section.append(heading,description,table);details.append(section);
+   const heading=document.createElement('h3');heading.className='preference-heading';heading.textContent='容器状态';
+   const table=document.createElement('app-table');renderAppTable(table,{label:'容器状态与保障',columns:[{key:'label',label:'项目',width:'120px'},{key:'worker',label:detail.external?'关联容器':'工作容器',render:row=>row.label==='服务健康'?renderContainerHealth(document,detail.reliability?.worker,row.worker):row.worker},...(!detail.external?[{key:'gateway',label:'代理网关',render:row=>row.label==='服务健康'?renderContainerHealth(document,detail.reliability?.gateway,row.gateway):row.gateway}]:[])],rows:containerDisplayRows(detail.reliability?.worker,detail.reliability?.gateway,{external:detail.external}),minWidth:detail.external?400:600});section.append(heading,table);details.append(section);
   }
   details.append(runtimes);
   mountEnvironmentLayout({header,details,metadata,local,scope:JSON.stringify([owner,id]),detail});
