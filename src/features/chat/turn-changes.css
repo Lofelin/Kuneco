@@ -15,3 +15,126 @@
 
 .turn-change-link::part(base){width:100%;text-align:left}
 .turn-changes-bar app-button::part(base){border-radius:999px}
+
+.session-changes-entry{display:block;width:100%;margin-bottom:12px}
+.session-changes-entry::part(base){width:100%;border:0;border-bottom:1px solid var(--line);border-radius:0;background:transparent}
+.session-changes-entry::part(label){display:flex;align-items:center;gap:12px;width:100%;text-align:left}
+.change-entry-totals{margin-left:auto;font-variant-numeric:tabular-nums}
+.chat-insights.changes-review{padding-inline:0}
+.chat-insights.changes-review .insights-heading{margin-inline:0;padding-left:16px}
+
+.chat-insights.changes-review .insights-heading{margin-bottom:0}
+.changes-review-toolbar{display:flex;align-items:center;gap:8px;padding:0 12px;height:var(--content-heading-height);min-height:var(--content-heading-height);box-sizing:border-box;border-bottom:1px solid var(--line);flex-wrap:nowrap;flex-shrink:0}
+.changes-review-toolbar wa-select{min-width:0;flex:0 1 130px;max-width:180px}
+.changes-review-toolbar .changes-file-select{flex:1 1 90px}
+.review-total{white-space:nowrap;font-size:13px;font-variant-numeric:tabular-nums}
+.review-files{min-width:0;flex:1}
+.review-file{border-bottom:1px solid var(--line);min-width:0}
+.review-file-toggle{display:flex;width:100%;align-items:center;min-height:48px;padding:8px 12px;box-sizing:border-box;text-align:left;gap:8px;color:var(--ink);background:transparent}
+.review-file-toggle::part(base){width:100%;border-radius:0}
+.review-file-badge{font-size:9px;font-weight:600;line-height:18px;color:var(--muted);background:var(--soft);border-radius:4px;padding:0 3px;flex-shrink:0}
+.review-file-badge.type-md{color:var(--success)}
+.review-file-badge.type-js,.review-file-badge.type-mjs{color:#9b7300;background:#f8eed4}
+.review-file-badge.type-css{color:#7652b9;background:#eee5fa}
+.review-file-path{text-align:left;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:13px;font-weight:400}
+.review-file-path>span{color:var(--muted)}
+.review-file-path>strong{font-weight:400;color:var(--ink)}
+.review-file-counts{flex:none;white-space:nowrap;font-size:12px}
+.changes-review-diff[hidden]{display:none}
+.changes-review-diff{overflow-x:auto;min-width:0}
+.changes-review-diff .activity-file-diff{margin:0;border:0}
+.changes-review-diff .activity-file-diff>summary,.changes-review-diff .diff-modes{display:none}
+.changes-review-diff .file-diff-content pre{max-height:none;margin:0;border-radius:0}
+.review-code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;line-height:22px}
+.review-code-line{display:flex;min-width:max-content;white-space:pre;min-height:22px}
+.review-code-line code{font:inherit;padding:0 12px 0 0;background:none;color:var(--ink)}
+.review-code-line.addition{background:color-mix(in srgb,var(--success) 12%,transparent)}
+.review-code-line.deletion{background:color-mix(in srgb,var(--danger,#b42318) 10%,transparent)}
+.review-line-number{flex:0 0 42px;box-sizing:border-box;text-align:right;padding-right:10px;border-right:2px solid var(--canvas);color:var(--muted);user-select:none}
+.review-line-sign{flex:0 0 22px;text-align:center;user-select:none}
+.addition>.review-line-number,.addition>.review-line-sign{color:var(--success)}
+.deletion>.review-line-number,.deletion>.review-line-sign{color:var(--danger,#b42318)}
+.review-context-toggle{display:flex;align-items:center;gap:8px;background:var(--soft);color:var(--muted);margin:2px 8px;border-radius:8px;min-height:34px;padding:0 12px;box-sizing:border-box;width:calc(100% - 16px);font-size:12px}
+.review-context-toggle::part(base){border-radius:8px}
+.review-unavailable{padding:12px}
+.review-file-toggle{border:0!important;border-radius:0!important;box-shadow:none!important;background:transparent!important}
+.review-file-toggle::part(label){display:flex!important;align-items:center;gap:8px;flex:1;min-width:0;width:100%}
+.review-file-toggle::part(base){border:0!important;box-shadow:none!important;background:transparent!important;padding:0!important}
+.changes-review-toolbar wa-select::part(combobox){border-radius:999px}
+
+
+.chat-insights .insights-heading.insights-tabs{justify-content:flex-start;gap:6px;padding:5px 48px 5px 10px;align-items:stretch}
+.insights-tab-item{display:flex;align-items:center;flex:0 1 130px;max-width:130px;min-width:0;border:1px solid transparent;border-radius:11px;color:var(--muted);-webkit-app-region:no-drag}
+.insights-tab-item[data-selected=true]{background:var(--surface);border-color:var(--line);color:var(--ink);box-shadow:0 1px 2px rgb(0 0 0 / 3%)}
+.insights-tab{min-width:0;flex:1;align-self:stretch;color:inherit;-webkit-app-region:no-drag}
+.insights-tab::part(base){width:100%;height:100%;min-height:30px;justify-content:flex-start;border:0!important;border-radius:10px;background:transparent!important;color:inherit;box-shadow:none!important;padding-inline:var(--button-padding-inline)!important}
+.insights-tab-close{flex:none;width:26px;height:26px;margin-right:3px;color:var(--muted)}
+.insights-tab-close wa-icon{width:14px;height:14px}
+
+#expandInsights{right:46px}
+body.chat-mode:not(.insights-full-mode):not(:has(.window-insights.insights-open))>#expandInsights{display:none!important}
+.chat-insights .insights-heading.insights-tabs{padding-right:82px}
+.insights-full-page{height:100%;min-height:0;max-width:none!important;padding:0!important;overflow:hidden}
+.insights-full-page>.chat-insights{width:100%;height:100%;flex-basis:auto;border-left:0;padding:0}
+.insights-full-page .insights-heading{display:none}
+
+
+.changes-review-toolbar{position:relative;padding-right:48px}
+.changes-review-toolbar .review-more-menu>[slot="trigger"]{position:absolute;right:12px;top:50%;transform:translateY(-50%);margin:0!important}
+.review-more-menu::part(menu){min-width:240px}
+.review-wrap .review-code-line code{white-space:pre-wrap;overflow-wrap:anywhere}
+.review-wrap .review-code-line{min-width:0}
+.review-wrap .file-diff-content pre{white-space:pre-wrap;overflow-wrap:anywhere}
+
+/* Clip every animation frame to the inspector's inner window edge. */
+.window-insights{clip-path:inset(0 10px 10px 0 round 0 0 16px 0)}
+.insights-tabs>wa-dropdown{display:flex;align-self:center;align-items:center;height:28px;-webkit-app-region:no-drag}
+.insights-tabs>wa-dropdown>[slot="trigger"]{display:flex;align-items:center;justify-content:center;margin:0;height:28px}
+@media(max-width:1150px){
+ .window-insights{width:0;transform:none;transition:width var(--sidebar-motion-duration) var(--sidebar-motion-easing)}
+ .window-insights.insights-open{width:var(--insights-size);transform:none}
+}
+@media(prefers-reduced-motion:reduce){.window-insights{transition:none}}
+.session-information{width:340px;padding:8px;overflow:visible;box-sizing:border-box}
+.session-information .session-changes-entry{margin:0 0 4px}
+.session-information .session-changes-entry::part(label){gap:8px;font-size:var(--menu-font-size);font-weight:400}
+.session-information .session-changes-entry strong{font-weight:400}
+.session-information .change-entry-totals{font-size:11px;white-space:normal;text-align:right}
+.session-detail-entry,.session-information>#openChatWindow{display:block;width:100%;margin:0}
+.session-detail-entry::part(base),.session-information>#openChatWindow::part(base){width:100%;justify-content:flex-start;min-height:32px;font-size:var(--menu-font-size);font-weight:400}
+.session-detail-entry::part(label){flex:1;text-align:left}
+.session-detail-flyout{position:fixed;inset:auto;margin:0;padding:16px;box-sizing:border-box;max-height:calc(100vh - 24px);overflow:auto;background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:var(--overlay-radius);box-shadow:0 6px 24px rgb(0 0 0 / 12%);font-size:12px;line-height:18px}
+.session-detail-flyout h2{font-size:13px;font-weight:500;margin:0 0 12px}
+.session-detail-flyout dl{display:grid;grid-template-columns:100px minmax(0,1fr);gap:10px;margin:0}
+.session-detail-flyout dt{color:var(--muted)}
+.session-detail-flyout dd{margin:0;overflow-wrap:anywhere}
+.session-detail-flyout p{color:var(--muted);font-size:12px;line-height:18px;margin:0 0 12px}
+.session-detail-flyout .session-usage{border:0;margin:0;padding:0}
+.session-detail-flyout progress{margin-top:12px;width:100%}
+/* Compact session menu, with window actions in the chat header. */
+#sessionInfoMenu::part(menu){padding:4px}
+.session-information{width:240px;padding:4px}
+.session-information .session-changes-entry{margin:0 0 2px}
+.session-information .session-changes-entry::part(base){min-height:30px;padding-block:3px}
+.session-detail-entry::part(base){min-height:28px;padding-block:3px}
+.session-information .change-entry-totals{font-size:11px;line-height:16px}
+#sessionInfoMenu .session-information{width:240px;padding:4px}
+#sessionInfoMenu .session-detail-entry::part(base){min-height:28px;padding-block:3px}
+.chat-settings-menu{width:240px;padding:4px}
+.chat-settings-search{display:block;width:100%}
+.chat-settings-search::part(base){width:100%;justify-content:flex-start;min-height:32px;font-weight:400}
+.chat-settings-network{display:flex;flex-direction:column;align-items:stretch;gap:8px;padding:10px 6px 6px;font-size:var(--menu-font-size);line-height:var(--menu-line-height);border-top:1px solid var(--line);margin-top:4px}
+#chatSettingsMenu #sessionNetworkMode{min-width:0;width:100%;margin:0}
+#sessionNetworkMode wa-radio{flex:1;justify-content:center;border-radius:14px;--wa-form-control-activated-color:var(--hover);font-size:12px}
+#sessionNetworkMode wa-radio::part(label){font-weight:400}
+#sessionNetworkMode wa-radio:is(:hover,:state(checked)){background:var(--hover);color:var(--ink)}
+#chatSettingsMenu::part(menu){background:var(--surface);border:var(--overlay-border);box-shadow:var(--overlay-shadow)}
+#page-cc{max-width:none;width:100%;padding:0 0 14px;box-sizing:border-box}
+#page-cc>.session-header{padding-inline:18px;margin:0;width:100%;border-bottom:1px solid var(--line);flex-shrink:0}
+#page-cc>.session-header .session-heading{flex:1;min-width:0}
+#page-cc>.chat-workspace{width:100%;max-width:980px;padding-inline:24px;margin-inline:auto;box-sizing:border-box}
+#chatSettingsMenu #openChatWindow{margin-top:4px}
+@media(max-width:700px){#page-cc>.chat-workspace{padding-inline:18px}}
+/* Both chat menus share the same outer geometry. */
+#sessionInfoMenu::part(menu),#chatSettingsMenu::part(menu){box-sizing:border-box;width:250px;padding:4px}
+#sessionInfoMenu .session-information,#chatSettingsMenu .chat-settings-menu{box-sizing:border-box;width:100%;padding:4px}

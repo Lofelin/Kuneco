@@ -1,0 +1,12 @@
+import {diffLines,parseUnifiedDiff} from './file-diff.mjs';
+export function reviewRows(change){return typeof change.before==='string'&&typeof change.after==='string'?diffLines(change.before,change.after):parseUnifiedDiff(change.diff||'');}
+export function groupReviewRows(rows){const groups=[];for(let i=0;i<rows.length;){if(rows[i].type!=='context'){groups.push({rows:[rows[i++]]});continue;}let end=i;while(end<rows.length&&rows[end].type==='context')end++;const run=rows.slice(i,end);groups.push({rows:run,foldable:run.length>6,key:String(i)});i=end;}return groups;}
+export function renderReviewDiff(host,change,{expanded={},expandAll=false,onToggle=()=>{}}={}){
+ host.classList.add('review-code');
+ if(change.unavailable){const p=document.createElement('p');p.className='review-unavailable';p.textContent='差异不可用：'+change.unavailable;host.append(p);return;}
+ const line=row=>{const el=document.createElement('div');el.className='review-code-line '+row.type;const number=document.createElement('span');number.className='review-line-number';number.textContent=String((row.type==='deletion'?row.old:row.next)??'');const sign=document.createElement('span');sign.className='review-line-sign';sign.textContent=row.type==='addition'?'+':row.type==='deletion'?'−':'';const code=document.createElement('code');code.textContent=row.text;el.append(number,sign,code);return el;};
+ const rows=reviewRows(change);if(!rows.length){const p=document.createElement('p');p.className='review-unavailable';p.textContent='没有文本行差异';host.append(p);return;}
+ for(const group of groupReviewRows(rows)){if(!group.foldable){for(const row of group.rows)host.append(line(row));continue;}
+  const section=document.createElement('div'),toggle=document.createElement('app-button'),content=document.createElement('div');toggle.className='review-context-toggle';toggle.setAttribute('layout','custom');const icon=document.createElement('wa-icon');icon.slot='start';icon.src='assets/icons/chevron-down.svg';const label=document.createElement('span');label.textContent=group.rows.length+' 行未修改';toggle.append(icon,label);let open=Boolean(expandAll||expanded[group.key]);const update=()=>{toggle.setAttribute('aria-expanded',String(open));icon.src='assets/icons/'+(open?'chevron-up':'chevron-down')+'.svg';content.hidden=!open;};toggle.onclick=()=>{open=!open;onToggle(group.key,open);update();};for(const row of group.rows)content.append(line(row));section.append(toggle,content);update();host.append(section);
+ }
+}

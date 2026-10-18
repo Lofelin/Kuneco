@@ -17,5 +17,9 @@ export function recordArtifacts(item,activity,turnId){
 }
 export function insightView(item,views=[],scope){
  for(const message of views.find(v=>v.id===item.id)?.messages||[])for(const activity of message.reasoning?.activities||[])recordArtifacts(item,activity);
- const seenMaintenance=new Set();const records=(item.tokenUsage||[]).filter(r=>{if(r.purpose!=='compaction')return true;const key=r.at+':'+r.totalTokens;if(seenMaintenance.has(key))return false;seenMaintenance.add(key);return true;});item.tokenUsage=records;return {chatId:item.id,engine:item.engine,model:item.model,artifacts:item.artifacts||[],turnChanges:summarizeTurnChanges(item.artifacts,item.fileChangeTurn,scope),usage:records.filter(r=>r.purpose!=='compaction').at(-1)||null,totalTokens:records.length?records.reduce((n,r)=>n+(r.totalTokens||0),0):null,compression:item.compression||null};
+ const validScope=!scope||!!item.fileChangeTurn&&['owner','environmentId','chatId'].every(k=>item.fileChangeTurn[k]===scope[k]);
+ const receipts=validScope?(item.artifacts||[]).filter(a=>a.turnId):[];
+ const changeHistory=[...new Set(receipts.map(a=>a.turnId))].reverse().map(id=>({...summarizeTurnChanges(receipts,{id}),at:receipts.find(a=>a.turnId===id)?.at}));
+ const conversationChanges=receipts.length?summarizeTurnChanges(receipts.map(a=>({...a,turnId:'conversation'})),{id:'conversation'}):null;
+ const seenMaintenance=new Set();const records=(item.tokenUsage||[]).filter(r=>{if(r.purpose!=='compaction')return true;const key=r.at+':'+r.totalTokens;if(seenMaintenance.has(key))return false;seenMaintenance.add(key);return true;});item.tokenUsage=records;return {chatId:item.id,engine:item.engine,model:item.model,artifacts:item.artifacts||[],changeHistory,conversationChanges,turnChanges:summarizeTurnChanges(item.artifacts,item.fileChangeTurn,scope),usage:records.filter(r=>r.purpose!=='compaction').at(-1)||null,totalTokens:records.length?records.reduce((n,r)=>n+(r.totalTokens||0),0):null,compression:item.compression||null};
 }

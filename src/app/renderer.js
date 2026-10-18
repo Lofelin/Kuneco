@@ -268,6 +268,7 @@ $('accountSettings').onclick=()=>void action(()=>openAccountSettings('preference
 for(const type of ['wa-show','wa-after-show','wa-reposition','wa-after-hide'])document.addEventListener(type,event=>{if(event.target.matches?.('app-dialog,wa-dropdown'))bounds();});
 
 function contentTabFor(next) {
+ if(next==='insights')return contentTabState.tabs.find(tab=>tab.id===contentTabState.activeId && tab.page==='insights') || contentTabState.tabs.find(tab=>tab.page==='insights');
  if(next==='cc'){const current=contentTabState.tabs.find(tab=>tab.id===contentTabState.activeId && tab.page==='cc') || contentTabState.tabs.find(tab=>tab.page==='cc');if(current)return current;}
  return {id:next,page:next,pinned:pinnedContentPages.has(next),title:next==='environments'?'环境':next==='cc'?'对话':next==='overview'?'设置':next==='automation'?'自动化':next==='runtime'?'运行时':next==='console'?'控制台':'浏览器'};
 }
@@ -316,7 +317,7 @@ function renderContentTabs(){
   const item=document.createElement('div');item.className='content-tab'+(tab.id===contentTabState.activeId?' active':'');item.dataset.tabId=tab.id;item.oncontextmenu=event=>openContentTabMenu(event,tab);item.addEventListener('keydown',event=>{if(event.key==='ContextMenu' || event.shiftKey && event.key==='F10')openContentTabMenu(event,tab);});
   const divider=document.createElement('span');divider.className='content-tab-divider';divider.setAttribute('aria-hidden','true');item.append(divider);
   const select=createUI('app-button');select.className='content-tab-select';select.setAttribute('role','tab');select.setAttribute('aria-selected',String(tab.id===contentTabState.activeId));select.setAttribute('aria-controls',`page-${tab.page}`);select.title=tab.title;
-  const label=document.createElement('span');label.className='content-tab-title';label.textContent=tab.title;select.append(createIcon(tab.page==='cc'?'messages-square':tab.page==='overview'?'settings':tab.page==='automation'?'zap':tab.page==='console'?'terminal':tab.page==='runtime'?'monitor':tab.page==='environments'?'boxes':'globe'),label);
+  const label=document.createElement('span');label.className='content-tab-title';label.textContent=tab.title;select.append(createIcon(tab.page==='insights'?(tab.insightView==='changes'?'file-text':'folder'):tab.page==='cc'?'messages-square':tab.page==='overview'?'settings':tab.page==='automation'?'zap':tab.page==='console'?'terminal':tab.page==='runtime'?'monitor':tab.page==='environments'?'boxes':'globe'),label);
   select.onclick=()=>void action(()=>activateContentTab(tab));
   select.onkeydown=event=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;event.preventDefault();const index=contentTabState.tabs.findIndex(item=>item.id===tab.id);const next=event.key==='Home'?0:event.key==='End'?contentTabState.tabs.length-1:(index+(event.key==='ArrowRight'?1:-1)+contentTabState.tabs.length)%contentTabState.tabs.length;void action(()=>activateContentTab(contentTabState.tabs[next]));};
   const close=createUI('app-button');close.className='content-tab-close';close.setAttribute('icon-action-exempt','');close.append(createIcon('x'));close.setAttribute('aria-label',`${copy.close} ${tab.title}`);close.onclick=()=>void action(()=>closeContentTabView(tab.id));const pin=createUI('app-button');pin.className='content-tab-pin';pin.setAttribute('icon-action-exempt','');pin.append(createIcon(tab.pinned?'pin-off':'pin'));pin.setAttribute('aria-label',tab.pinned?copy.unpin:copy.pin);pin.setAttribute('aria-pressed',String(Boolean(tab.pinned)));pin.onclick=()=>toggleContentTabPin(tab.id);if(tab.pinned)item.classList.add('pinned');item.append(select,pin);if(!tab.pinned && contentTabState.tabs.length>1)item.append(close);$('contentTabs').append(item);
@@ -334,6 +335,7 @@ function newChatTab(){
 }
 async function activateContentTab(tab,saveCurrent=true){
  const version=++chatRestoreVersion;
+ if(tab.page==='insights'){if(tab.insightScope!==insightPanel.scopeKey())throw new Error('请返回原对话后重新打开完整视图');contentTabState.activeId=tab.id;}
  if(tab.page==='cc'){
   if(saveCurrent)saveChatView();const item=chatSessions.find(item=>item.id===tab.sessionId);const value=item?await api.selectSession(item.id,{deferAuth:true,viewed:true}):null;if(version!==chatRestoreVersion)return;
   contentTabState.activeId=tab.id;
@@ -353,14 +355,16 @@ async function closeContentTabView(id){
  if(previous===id){if(replacement)await activateContentTab(replacement,false);else{page=null;document.body.classList.remove('chat-mode','browser-mode','settings-mode');document.querySelectorAll('.page').forEach(el=>el.classList.add('hidden'));document.querySelectorAll('.nav').forEach(el=>el.classList.remove('active'));bounds();}}
 }
 function switchPage(next,{connectConsole=true}={}) {
+ if(next==='insights'&&!contentTabState.tabs.some(tab=>tab.page==='insights'))next='cc';
  contentTabState=openContentTab(contentTabState,contentTabFor(next));contentTabState.tabs.sort((a,b)=>Number(Boolean(b.pinned))-Number(Boolean(a.pinned)));renderContentTabs();
  page = next;
+  insightPanel.setFullView(next==='insights'?contentTabState.tabs.find(tab=>tab.id===contentTabState.activeId)?.insightView:null);
   closeSuggestions();
-  document.body.classList.toggle('chat-mode',next==='cc');
+  document.body.classList.toggle('chat-mode',next==='cc'||next==='insights');
   document.body.classList.toggle('settings-mode',next==='overview');
   document.body.classList.toggle('browser-mode', next === 'browser');
   document.querySelectorAll('.page').forEach(el => el.classList.toggle('hidden', el.id !== `page-${next}`));
-  document.querySelectorAll('.nav').forEach(el => el.classList.toggle('active', el.dataset.page === next));
+  document.querySelectorAll('.nav').forEach(el => el.classList.toggle('active', el.dataset.page === (next === 'insights' ? 'cc' : next)));
   if(next==='cc' && activeChatId){
    // Restore history only after the chat pane is visible and has a layout.
    chatScroll.restore(activeChatId);
@@ -946,7 +950,7 @@ $('archiveToggle').onclick=()=>{const expanded=$('archiveToggle').getAttribute('
 function applySession(value,item){contextPicker.close();chatScroll.save();if(chatRuns.has(activeChatId))chatRuns.get(activeChatId).reply=reply;chatRestoreVersion++;if(item.archived){$('archiveToggle').setAttribute('aria-expanded','true');$('archivedList').classList.remove('hidden');$('archiveChevron').src='assets/icons/chevron-down.svg';}const tab=contentTabFor('cc');contentTabState=openContentTab(contentTabState,{...tab,sessionId:value.id});activeChatId=value.id;selectedEngine=value.engine;selectedCodexModel=value.model;authStates[selectedEngine]=value.auth;busy=chatRuns.has(item.id);reply=chatRuns.get(item.id)?.reply || null;$('chat').replaceChildren(...(item.nodes || []));item.networkMode=value.networkMode || 'proxy';item.project=value.project || '';item.model=value.model;item.reasoningEffort=value.reasoningEffort||null;item.lastViewedAt=value.lastViewedAt;item.createdAt=value.createdAt;item.updatedAt=value.updatedAt;item.archived=Boolean(value.archived);renderChatAvailability();renderSessionHeader();renderRuntime();renderSessionList();switchPage('cc');persistChatViews();chatScroll.restore(value.id);void checkAIAuth();}
 let creatingChat=false;
 function updateChatNetworkIcon(id='chatNetworkMode'){
- const select=$(id);let icon=select.querySelector(':scope > wa-icon[slot=start]');if(!icon){icon=createIcon('shield-check');icon.slot='start';select.prepend(icon);}
+ const select=$(id);if(select.localName==='wa-radio-group')return;let icon=select.querySelector(':scope > wa-icon[slot=start]');if(!icon){icon=createIcon('shield-check');icon.slot='start';select.prepend(icon);}
  const mode=select.value || 'proxy';icon.src='assets/icons/'+({direct:'globe',proxy:'shield-check',auto:'network'})[mode]+'.svg';icon.className='chat-mode-'+mode;
 }
 $('chatNetworkMode').addEventListener('change',()=>updateChatNetworkIcon());
@@ -1024,7 +1028,16 @@ $('send').onclick=()=>void action(()=>busy?api.cancel(activeChatId):$('chatForm'
 const chatRecovery=mountChatRecovery({container:$('chatForm'),scope:()=>JSON.stringify([chatOwnerID,chatEnvironmentID,activeChatId]),onRetry:(key,record)=>action(async()=>{if(key!==JSON.stringify([chatOwnerID,chatEnvironmentID,activeChatId])||chatRuns.has(activeChatId))throw Error('请在原对话空闲时重试');await sendChatMessage(record.message);})});
 const contextPicker=mountContextPicker({input:$('prompt'),host:$('chatContextPicker'),load:value=>api.chatContext({...value,chatId:activeChatId}),getScope:()=>JSON.stringify([chatOwnerID,dockerEnvironmentState.activeId,activeChatId,selectedEngine,chatSessions.find(s=>s.id===activeChatId)?.project])});
 const chatSearch=mountChatSearch({chat:document.getElementById('chat'),getScope:()=>JSON.stringify([chatOwnerID,chatEnvironmentID,activeChatId])});
-const insightPanel=mountInsightsPanel({page:$('page-cc'),api,scope:()=>({owner:chatOwnerID,environmentId:dockerEnvironmentState.activeId||null,chatId:activeChatId}),updateMarkdown:updateChatMessage});
+const chatSettingsMenu=document.createElement('wa-dropdown');chatSettingsMenu.id='chatSettingsMenu';chatSettingsMenu.placement='bottom-end';
+const chatSettingsTrigger=document.createElement('app-button');chatSettingsTrigger.slot='trigger';chatSettingsTrigger.className='icon-button';chatSettingsTrigger.setAttribute('appearance','plain');chatSettingsTrigger.setAttribute('icon-only','');chatSettingsTrigger.setAttribute('aria-label','对话设置');chatSettingsTrigger.title='对话设置';chatSettingsTrigger.append(createIcon('list-settings'));chatSettingsMenu.append(chatSettingsTrigger);
+const chatSettingsBody=document.createElement('div');chatSettingsBody.className='chat-settings-menu';
+const searchEntry=document.getElementById('chatSearchTrigger');searchEntry.removeAttribute('icon-only');searchEntry.removeAttribute('appearance');searchEntry.className='menu-action chat-settings-search';searchEntry.querySelector('wa-icon').slot='start';searchEntry.append(document.createTextNode('搜索对话'));searchEntry.addEventListener('click',()=>{chatSettingsMenu.open=false;});chatSettingsBody.append(searchEntry);
+const networkRow=document.createElement('div');networkRow.className='chat-settings-network';const networkLabel=document.createElement('span');networkLabel.textContent='网络';networkRow.append(networkLabel,document.getElementById('sessionNetworkMode'));chatSettingsBody.append(networkRow);chatSettingsMenu.append(chatSettingsBody);document.getElementById('sessionInfoMenu').after(chatSettingsMenu);
+
+const insightPanel=mountInsightsPanel({page:$('page-cc'),api,scope:()=>({owner:chatOwnerID,environmentId:dockerEnvironmentState.activeId||null,chatId:activeChatId}),updateMarkdown:updateChatMessage,onOpenFullView:({view,scopeKey})=>void action(()=>{
+ const tab={id:'insights-'+view,page:'insights',title:view==='changes'?'变更':'产物',insightView:view,insightScope:scopeKey};
+ assertContentTabAvailable(tab);saveChatView();contentTabState=openContentTab(contentTabState,tab);switchPage('insights');
+}),onExitFullView:()=>{contentTabState.tabs=contentTabState.tabs.filter(tab=>tab.id!==contentTabState.activeId||tab.page!=='insights');switchPage('cc');},onScopeChange:()=>{const wasFull=page==='insights';contentTabState.tabs=contentTabState.tabs.filter(tab=>tab.page!=='insights');if(wasFull)switchPage('cc');else renderContentTabs();}});
 $('prompt').addEventListener('input',()=>{const tab=contentTabState.tabs.find(tab=>tab.id===contentTabState.activeId && tab.page==='cc');if(tab)tab.draft=$('prompt').value;renderSessionList();});
 $('prompt').addEventListener('keydown',event=>{if(event.key==='Enter' && !event.shiftKey && !mountCompositionGuard($('prompt')).isComposing(event)){event.preventDefault();if(!busy && !$('send').disabled)$('chatForm').requestSubmit();}});
 $('toggleSidebar').onclick=()=>{if(!sidebarCollapsed){const width=document.querySelector('.proxy-status-line').getBoundingClientRect().width;document.querySelector('.sidebar').style.setProperty('--sidebar-proxy-content-width',width+'px');}sidebarCollapsed=!sidebarCollapsed;document.body.classList.toggle('sidebar-collapsed',sidebarCollapsed);$('toggleSidebar').setAttribute('aria-label',sidebarCollapsed?'展开导航':'收起导航');document.querySelectorAll('.primary-nav-tooltip').forEach(tip=>{tip.disabled=!sidebarCollapsed;if(!sidebarCollapsed)tip.open=false;});try{localStorage.setItem('sidebar-collapsed',String(sidebarCollapsed));}catch{}bounds();};
@@ -1175,7 +1188,7 @@ const popoutController=mountChatPopoutController({api,scope:()=>({owner:chatOwne
   state.submitting=false;for(const event of state.events.splice(0))dispatchWorkspaceEvent(event);
  }catch(error){chatRuns.delete(item.id);throw error;}
 }});
-const popoutButton=document.createElement('app-button');popoutButton.id='openChatWindow';popoutButton.className='content-action';popoutButton.setAttribute('appearance','plain');popoutButton.append(createIcon('external-link','start'),document.createTextNode('独立窗口'));popoutButton.querySelector('wa-icon').slot='start';$('page-cc').querySelector('.session-information').append(popoutButton);popoutButton.onclick=()=>void action(()=>popoutController.open());
+const popoutButton=document.createElement('app-button');popoutButton.id='openChatWindow';popoutButton.className='menu-action chat-settings-search';popoutButton.setAttribute('aria-label','独立窗口');popoutButton.title='独立窗口';popoutButton.append(createIcon('external-link','start'),document.createTextNode('独立窗口'));popoutButton.querySelector('wa-icon').slot='start';networkRow.before(popoutButton);popoutButton.onclick=()=>void action(()=>popoutController.open());
 
 let environmentConfigBusy=false;
 function updateConfigurationActions(){

@@ -40,3 +40,23 @@ test('terminal newline is not a phantom extra line and changing it is a real lin
  assert.equal(summarizeTurnChanges([receipt({before:'',after:'a\nb\n'})],turn).added,2);
  const changed=summarizeTurnChanges([receipt({before:'a',after:'a\n'})],turn);assert.equal(changed.added,1);assert.equal(changed.removed,1);
 });
+
+test('conversation review survives a later round without changes and reload',()=>{
+ const item={id:'c',engine:'deepseek',fileChangeTurn:{...turn,id:'empty'},artifacts:[receipt(),receipt({id:'two',turnId:'second',before:'new\nadded\n',after:'final\n'})]};
+ const view=insightView(JSON.parse(JSON.stringify(item)),[],scope);
+ assert.equal(view.turnChanges.files.length,0);
+ assert.deepEqual(view.changeHistory.map(t=>t.id),['second','t']);
+ assert.equal(view.conversationChanges.files.length,1);
+ assert.equal(view.conversationChanges.files[0].change.before,'old\n');
+ assert.equal(view.conversationChanges.files[0].change.after,'final\n');
+ for(const key of Object.keys(scope)){
+  const denied=insightView(item,[],{...scope,[key]:'other'});
+  assert.equal(denied.conversationChanges,null);assert.deepEqual(denied.changeHistory,[]);
+ }
+});
+test('conversation review keeps unknown differences and excludes unassigned legacy receipts',()=>{
+ const item={id:'c',fileChangeTurn:turn,artifacts:[receipt({unavailable:'binary'}),receipt({id:'legacy',turnId:undefined,path:'/legacy'})]};
+ const view=insightView(item,[],scope);
+ assert.equal(view.conversationChanges.files.length,1);assert.equal(view.conversationChanges.added,null);
+ assert.equal(view.changeHistory[0].added,null);
+});
