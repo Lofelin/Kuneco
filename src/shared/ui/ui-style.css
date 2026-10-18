@@ -1131,7 +1131,9 @@ body.environment-onboarding:not(.auth-mode)>.setup-window-drag{display:block}
 .environment-running-status{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}
 .environment-running-status::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--muted)}
 .environment-running-status[data-running=true]{color:var(--success)}
-.environment-running-status[data-running=true]::before{background:var(--success)}
+.environment-running-status[data-running=true]::before{background:var(--success);animation:environment-running-pulse 1.4s ease-in-out infinite}
+@keyframes environment-running-pulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.35);opacity:.5}}
+@media(prefers-reduced-motion:reduce){.environment-running-status[data-running=true]::before{animation:none}}
 .environment-card-header .environment-container-name{font-size:13px;margin:6px 0 0;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
 .environment-summary-meta{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-top:10px;color:var(--muted);font-size:12px}
 .environment-summary-meta>span{overflow-wrap:anywhere}

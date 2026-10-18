@@ -8,7 +8,6 @@ export function mountEnvironmentLayout({header,details,metadata,local,scope}){
  main.append(el('h3',local?'本机环境':'镜像与容器','preference-heading'));
  if(metadata.children.length)main.append(metadata);else main.append(el('p','使用本机运行时与工作文件。','settings-section-description muted'));
  aside.append(el('h3','环境信息','preference-heading'),facts);overview.append(main,aside);
- if(!local){const subtitle=el('p','Docker 容器环境','environment-container-name');header.querySelector('.environment-identity').append(subtitle);}
  const tabs=el('wa-tab-group',null,'app-section-tabs environment-detail-tabs');tabs.setAttribute('aria-label','环境详情');tabs.activation='auto';
  const panels=[['overview','概览',overview],...network?[['network','网络与防火墙',network]]:[],...reliability?[['status','容器状态',reliability]]:[],['runtimes','运行时',runtimes]];
  const selected=activePanels.get(scope);tabs.active=panels.some(([name])=>name===selected)?selected:'overview';

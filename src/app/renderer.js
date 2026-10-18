@@ -1734,13 +1734,13 @@ async function renderEnvironmentCard(row,id){
   const detail=await api.dockerEnvironments('detail',{id});
   if(owner!==accountState.user?.id || id!==dockerEnvironmentState.activeId || !row.isConnected)return;
   details.replaceChildren();
-  const item=dockerEnvironmentState.environments.find(item=>item.id===id),local=id===null,current=id===dockerEnvironmentState.activeId;
+  const item=dockerEnvironmentState.environments.find(item=>item.id===id),local=id===null;
   row.classList.toggle('environment-has-image-details',!local);
   const identity=document.createElement('div');identity.className='environment-identity';
   const nameLine=document.createElement('div');nameLine.className='environment-name-line';const name=document.createElement('h2');name.textContent=detail.name;
   const status=document.createElement('span');status.className='environment-running-status';status.dataset.running=String(local || Boolean(item?.running));status.textContent=local?'本机':detail.reliability?.worker?.status || item?.statusText || (item?.running?'运行中':'已停止');
   const type=document.createElement('span');setEnvironmentTypeIcon(type,local);nameLine.append(name);nameLine.append(type);
-  if(current){const active=createUI('wa-badge');active.className='small-tag';active.textContent='当前环境';nameLine.append(active);}if(!local)nameLine.append(status);
+  if(!local)nameLine.append(status);
   const metadata=document.createElement('div');metadata.className='environment-summary-meta environment-image-versions';
   const baseVersion=detail.baseSystem?['Node.js '+detail.baseSystem.node,detail.baseSystem.os].filter(Boolean).join(' · '):detail.baseImage || '版本信息未记录';
   if(!local)for(const [title,text] of [['基础镜像版本',baseVersion],['容器镜像版本',detail.containerImage || '未知']]){const pair=document.createElement('div'),label=document.createElement('span'),value=document.createElement('strong');label.textContent=title;value.textContent=text;pair.append(label,value);metadata.append(pair);}
