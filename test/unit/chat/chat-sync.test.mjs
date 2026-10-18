@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {encodeChatPayload,decodeChatPayload} from '../../../src/features/chat/chat-object-store.mjs';
 import {mergeChatPayload,saveChatSnapshot,ChatSyncConflict} from '../../../src/features/chat/chat-sync.mjs';
 const snapshot=(text='hello')=>({activeAISessionId:'a',sessions:[{id:'a',title:'A'}],views:[{id:'a',messages:[{role:'user',text}]}]});
 test('merge independent chats, metadata and message extensions without dropping remote content',()=>{
@@ -26,4 +27,18 @@ test('repeated conflict and network failures do not loop or silently overwrite',
  let calls=0;const base=snapshot(),local=snapshot();local.sessions[0].pinned=true;
  await assert.rejects(saveChatSnapshot({client:{chats:async()=>({revision:2,payload:base}),saveChats:async()=>{calls++;throw Object.assign(new Error(),{status:409});}},payload:local,base,revision:1,owner:'a',isCurrent:()=>true}),ChatSyncConflict);assert.equal(calls,2);
  await assert.rejects(saveChatSnapshot({client:{saveChats:async()=>{throw new Error('offline');}},payload:local,base,revision:1,owner:'a',isCurrent:()=>true}),/offline/);
+});
+
+test('decoded image key order does not reject a completed stream with an independent cloud append',async()=>{
+ const image={dataURL:'data:image/png;base64,AAAA',name:'fixture.png',detail:'high'};
+ const base={sessions:[{id:'a'},{id:'b'}],views:[{id:'a',messages:[{role:'user',text:'image',images:[image]},{role:'assistant',text:'',reasoning:{phase:'process',processMs:5000}}]},{id:'b',messages:[]}]};
+ const blocks=new Map(),packed=await encodeChatPayload(base,async(id,value,scope)=>blocks.set(scope+':'+id,value));
+ const remote=await decodeChatPayload(packed,async(id,scope)=>blocks.get(scope+':'+id));
+ assert.notDeepEqual(Object.keys(remote.views[0].messages[0].images[0]),Object.keys(image));
+ remote.views[1].messages.push({role:'user',text:'cloud update'});
+ const local=structuredClone(base);Object.assign(local.views[0].messages[1],{text:'finished',reasoning:{phase:'completed',processMs:11000}});
+ const merged=mergeChatPayload(base,local,remote);
+ assert.equal(merged.views[0].messages[1].text,'finished');assert.deepEqual(merged.views[0].messages[0].images,[image]);assert.equal(merged.views[1].messages[0].text,'cloud update');
+ remote.views[0].messages[0].images[0].dataURL='data:image/png;base64,BBBB';
+ assert.throws(()=>mergeChatPayload(base,local,remote),ChatSyncConflict,'a genuine concurrent image edit still conflicts');
 });
