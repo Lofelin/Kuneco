@@ -1,8 +1,11 @@
+import {applyPreferences} from '../preferences/preference-effects.mjs';
+import {preferenceDefaults,shouldSend} from '../../shared/preferences.mjs';
 import {updateChatMessage} from '../../vendor/chat-markdown.js';
 import {renderDocumentCards} from './document-attachments.mjs';
 import {mountCompositionGuard} from './composition-guard.mjs';
 import '../../vendor/ui.js';
 const api=window.chatPopout,$=id=>document.getElementById(id);let snapshot=null,timer,pending=false,dirty=false,editRevision=null;
+let preferences={...preferenceDefaults};api.onPreferences(value=>{preferences=applyPreferences(value);});
 const messageText=message=>typeof message==='string'?message:String(message.text??message.rawText??message.content??'');
 function controls(){ $('draft').disabled=!snapshot;$('send').disabled=!snapshot||snapshot.busy||pending||!$('draft').value.trim();$('stop').hidden=!snapshot?.busy; }
 async function action(kind){
@@ -21,4 +24,4 @@ api.onSnapshot(value=>{
 $('draft').addEventListener('input',()=>{if(!dirty)editRevision=snapshot?.revision;dirty=true;clearTimeout(timer);timer=setTimeout(()=>void action('updateDraft'),250);controls();});
 $('send').addEventListener('click',()=>void action('send'));$('stop').addEventListener('click',()=>void action('stop'));$('focus').addEventListener('click',()=>void action('focus'));
 
-const compositionGuard=mountCompositionGuard($('draft'));$('draft').addEventListener('keydown',event=>{if(event.key==='Enter'&&!event.shiftKey&&!compositionGuard.isComposing(event)){event.preventDefault();if(!$('send').disabled)void action('send');}});
+const compositionGuard=mountCompositionGuard($('draft'));$('draft').addEventListener('keydown',event=>{if(shouldSend(event,preferences,api.platform)&&!compositionGuard.isComposing(event)){event.preventDefault();if(!$('send').disabled)void action('send');}});

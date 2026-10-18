@@ -1,3 +1,9 @@
+import {mountShortcuts} from '../features/preferences/shortcuts.mjs';
+import {mountShortcutSettings} from '../features/preferences/shortcut-settings.mjs';
+import {mountPreferenceSettings} from '../features/preferences/preference-settings.mjs';
+import {mountQuitDialog} from '../features/preferences/quit-dialog.mjs';
+import {applyPreferences,refreshTimeElements} from '../features/preferences/preference-effects.mjs';
+import {preferenceDefaults,shouldSend} from '../shared/preferences.mjs';
 import {mountConversationRailResize} from '../features/chat/conversation-rail-resize.mjs';
 import {mountChatPopoutController} from '../features/chat/chat-popout-controller.mjs';
 import {draftScopeKey} from '../features/chat/draft-store.mjs';
@@ -44,6 +50,15 @@ import { resolveBrowserAddress } from '../features/browser/browser-address.mjs';
 let chatRenderContainer=null;
 const $ = id => id==='chat' && chatRenderContainer?chatRenderContainer:document.getElementById(id);
 const api = window.workspace;
+let preferences={...preferenceDefaults};
+mountQuitDialog({document,api});
+document.addEventListener('quit-blocked',()=>toast('请先关闭当前弹窗，再退出应用。'));
+const savePreferences=async patch=>{const value=await api.preferences(patch);updatePreferences(value);return value;};
+const preferenceSettings=mountPreferenceSettings({host:document.querySelector('[data-panel=preferences]'),getPreferences:()=>preferences,save:savePreferences});
+const shortcutSettings=mountShortcutSettings({host:$('shortcutSettings'),platform:api.platform,getPreferences:()=>preferences,save:savePreferences});shortcutSettings.render(false);
+function updatePreferences(value){preferences=applyPreferences(value);preferenceSettings.render();shortcutSettings.render();refreshDisplayedTimes();}
+api.onEvent(({type,data})=>{if(type==='preferences')updatePreferences(data);});
+void api.preferences().then(updatePreferences).catch(error=>preferenceSettings.error(error.message));
 mountConversationRailResize({rail:document.querySelector('.conversation-rail')});
 const browserSettingsUI=mountBrowserSettings({document,api,getScope:()=>({owner:accountState.user?.id,environmentId:dockerEnvironmentState.activeId,label:$('environmentName').textContent || '当前环境'}),formatDate:value=>displayDate(value),onOpenSite:domain=>openBrowserCookies(domain)});
 const chatScroll=mountChatScroll(document.getElementById('chat'),document.getElementById('chatJumpLatest'));
@@ -76,7 +91,7 @@ setupDragStrip.addEventListener('dblclick',event=>{event.preventDefault();cancel
 
 const uiLocale=()=>$('languageSelect').value || 'zh-CN';
 const displayDate=(value,kind='datetime')=>formatDisplayDate(value,uiLocale(),kind);
-function displayEnvironmentDate(value,recent=false){const age=Date.now()-Date.parse(value);return recent && age>=0 && age<=600000?(uiLocale()==='en-US'?'Just now':'刚刚'):displayDate(value);}
+function displayEnvironmentDate(value,recent=false){return displayDate(value);}
 let displayedEnvironmentStatus=null;
 let environmentAllowed = false, environmentDetailsOpen = false, environmentChecking = false;
 $('environmentGate').open=false;
@@ -942,7 +957,7 @@ if(item.chatStatus==='running'){
  status.append(spinner,label,dots);
 }detail.append(status);
  const timestamp=item.updatedAt || item.createdAt;
- if(timestamp && Number.isFinite(Date.parse(timestamp))){const time=document.createElement('time');time.className='chat-item-time';time.dateTime=new Date(timestamp).toISOString();time.textContent=new Intl.DateTimeFormat('en-US',{hour:'2-digit',minute:'2-digit',hour12:true}).format(new Date(timestamp));time.title=displayDate(timestamp);detail.append(time);}
+ if(timestamp && Number.isFinite(Date.parse(timestamp))){const time=document.createElement('time');time.className='chat-item-time';time.dateTime=new Date(timestamp).toISOString();time.textContent=displayDate(timestamp); time.title=displayDate(timestamp);detail.append(time);}
  copy.append(title,detail);button.append(avatar,copy);sessionOrder.bind(button,item);
   button.onclick=()=>void action(async()=>{if(activeChatId===item.id && page==='cc')return;const version=++chatRestoreVersion;saveChatView();const value=await api.selectSession(item.id,{deferAuth:true,viewed:true});if(version===chatRestoreVersion)applySession(value,item);});
   const archive=createUI('app-button');archive.className='icon-button session-archive';archive.disabled=pendingArchives.has(item.id);archive.setAttribute('aria-label',item.archived?'取消归档':'归档对话');archive.title=item.archived?'取消归档':'归档对话';archive.append(createIcon(item.archived?'archive-restore':'archive'));archive.onclick=()=>void action(async()=>{if(chatRuns.has(item.id))throw new Error('请先停止此对话的回复');if(pendingArchives.has(item.id))return;const previous=item.archived,owner=chatOwnerID;pendingArchives.add(item.id);item.archived=!previous;renderSessionList();try{await api.archiveSession(item.id,item.archived);}catch(error){if(owner===chatOwnerID){const state=await api.state().catch(()=>null);const actual=state?.aiSessions?.find(session=>session.id===item.id);item.archived=actual?Boolean(actual.archived):previous;renderSessionList();}throw error;}finally{pendingArchives.delete(item.id);if(owner===chatOwnerID)renderSessionList();}});const pin=createUI('app-button');pin.className='icon-button session-pin'+(item.pinned?' pinned':'');pin.setAttribute('aria-label',item.pinned?'取消固定对话':'固定对话');pin.append(createIcon(item.pinned?'pin-off':'pin'));pin.onclick=()=>{item.pinned=!item.pinned;renderSessionList();persistChatViews();};wrapper.append(button,pin,archive);$(item.archived?'archivedList':'sessionList').append(wrapper);
@@ -1030,7 +1045,7 @@ function updateSendButton(){busy=chatRuns.has(activeChatId);$('chat').classList.
 $('send').onclick=()=>void action(()=>busy?api.cancel(activeChatId):$('chatForm').requestSubmit());
 const chatRecovery=mountChatRecovery({container:$('chatForm'),scope:()=>JSON.stringify([chatOwnerID,chatEnvironmentID,activeChatId]),onRetry:(key,record)=>action(async()=>{if(key!==JSON.stringify([chatOwnerID,chatEnvironmentID,activeChatId])||chatRuns.has(activeChatId))throw Error('请在原对话空闲时重试');await sendChatMessage(record.message);})});
 const contextPicker=mountContextPicker({input:$('prompt'),host:$('chatContextPicker'),load:value=>api.chatContext({...value,chatId:activeChatId}),getScope:()=>JSON.stringify([chatOwnerID,dockerEnvironmentState.activeId,activeChatId,selectedEngine,chatSessions.find(s=>s.id===activeChatId)?.project])});
-const chatSearch=mountChatSearch({chat:document.getElementById('chat'),getScope:()=>JSON.stringify([chatOwnerID,chatEnvironmentID,activeChatId])});
+const chatSearch=mountChatSearch({keyboard:false,chat:document.getElementById('chat'),getScope:()=>JSON.stringify([chatOwnerID,chatEnvironmentID,activeChatId])});
 const chatSettingsMenu=document.createElement('wa-dropdown');chatSettingsMenu.id='chatSettingsMenu';chatSettingsMenu.placement='bottom-end';
 const chatSettingsTrigger=document.createElement('app-button');chatSettingsTrigger.slot='trigger';chatSettingsTrigger.className='icon-button';chatSettingsTrigger.setAttribute('appearance','plain');chatSettingsTrigger.setAttribute('icon-only','');chatSettingsTrigger.setAttribute('aria-label','对话设置');chatSettingsTrigger.title='对话设置';chatSettingsTrigger.append(createIcon('list-settings'));chatSettingsMenu.append(chatSettingsTrigger);
 const chatSettingsBody=document.createElement('div');chatSettingsBody.className='chat-settings-menu';
@@ -1042,7 +1057,7 @@ const insightPanel=mountInsightsPanel({page:$('page-cc'),api,scope:()=>({owner:c
  assertContentTabAvailable(tab);saveChatView();contentTabState=openContentTab(contentTabState,tab);switchPage('insights');
 }),onExitFullView:()=>{contentTabState.tabs=contentTabState.tabs.filter(tab=>tab.id!==contentTabState.activeId||tab.page!=='insights');switchPage('cc');},onScopeChange:()=>{const wasFull=page==='insights';contentTabState.tabs=contentTabState.tabs.filter(tab=>tab.page!=='insights');if(wasFull)switchPage('cc');else renderContentTabs();}});
 $('prompt').addEventListener('input',()=>{const tab=contentTabState.tabs.find(tab=>tab.id===contentTabState.activeId && tab.page==='cc');if(tab)tab.draft=$('prompt').value;renderSessionList();});
-$('prompt').addEventListener('keydown',event=>{if(event.key==='Enter' && !event.shiftKey && !mountCompositionGuard($('prompt')).isComposing(event)){event.preventDefault();if(!busy && !$('send').disabled)$('chatForm').requestSubmit();}});
+$('prompt').addEventListener('keydown',event=>{if(shouldSend(event,preferences,api.platform) && !mountCompositionGuard($('prompt')).isComposing(event)){event.preventDefault();if(!busy && !$('send').disabled)$('chatForm').requestSubmit();}});
 $('toggleSidebar').onclick=()=>{if(!sidebarCollapsed){const width=document.querySelector('.proxy-status-line').getBoundingClientRect().width;document.querySelector('.sidebar').style.setProperty('--sidebar-proxy-content-width',width+'px');}sidebarCollapsed=!sidebarCollapsed;document.body.classList.toggle('sidebar-collapsed',sidebarCollapsed);$('toggleSidebar').setAttribute('aria-label',sidebarCollapsed?'展开导航':'收起导航');document.querySelectorAll('.primary-nav-tooltip').forEach(tip=>{tip.disabled=!sidebarCollapsed;if(!sidebarCollapsed)tip.open=false;});try{localStorage.setItem('sidebar-collapsed',String(sidebarCollapsed));}catch{}bounds();};
 async function goHistory(offset){const next=navigationIndex+offset;if(next<0 || next>=navigationHistory.length)return;const target=navigationHistory[next];historyRestoring=true;try{if(target.page==='cc' && target.sessionId && target.sessionId!==activeChatId){saveChatView();const item=chatSessions.find(item=>item.id===target.sessionId);if(item){const version=++chatRestoreVersion;const value=await api.selectSession(item.id,{deferAuth:true,viewed:true});if(version===chatRestoreVersion)applySession(value,item);}}else switchPage(target.page);navigationIndex=next;$('appBack').disabled=next<=0;$('appForward').disabled=next>=navigationHistory.length-1;}finally{historyRestoring=false;}}
 $('appBack').onclick=()=>void action(()=>goHistory(-1));$('appForward').onclick=()=>void action(()=>goHistory(1));
@@ -1395,8 +1410,8 @@ $('runtimeInstallConfirm').onclick=()=>void action(async()=>{
  finally{setRuntimeInstallLoading(false);environmentConfigBusy=false;$('runtimeInstallConfirm').loading=false;$('runtimeInstallCancel').disabled=false;$('runtimeDisplayName').disabled=false;$('runtimeDescription').disabled=false;$('runtimeInstallBack').disabled=false;$('runtimeInstallClose').disabled=false;$('deepseekApiKey').disabled=false;updateConfigurationActions();}
  if(owner===accountState.user?.id && id===dockerEnvironmentState.activeId){$('runtimeInstallDialog').open=false;await refreshEnvironmentConfiguration();}
 });
-const settingCopy={git:['Git 管理','管理 Git SSH 公钥与代码仓库认证。'],browser:['浏览器','管理浏览器网络、站点数据和 Cookie 同步。'],profile:['个人资料','管理当前账号的基础信息。'],notifications:['通知','管理当前账号在本设备上的通知。'],preferences:['偏好设置','管理账号语言和此设备的界面外观。'],proxy:['代理与出口','管理应用代理的连接与固定出口。'],environment:['本地系统','检测系统语言与时区，管理本机使用条件。'],activity:['连接记录','查看出口核验、连接与恢复状态。']};
-for(const tab of document.querySelectorAll('[data-setting]'))tab.onclick=()=>{const key=tab.dataset.setting;if(key==='git')void gitSettings.ensureLoaded();if(key==='browser'){void loadBrowserCookiePreferences();void browserLibrary.refresh();}if(key==='activity')void loadConnectionRecords();$('verify').classList.toggle('hidden',key!=='proxy');document.querySelectorAll('[data-setting]').forEach(item=>item.classList.toggle('active',item===tab));document.querySelectorAll('[data-panel]').forEach(panel=>panel.classList.toggle('hidden',panel.dataset.panel!==key));$('settingsTitle').textContent=settingCopy[key][0];$('notificationScopeBadge').classList.toggle('hidden',key!=='notifications');$('settingsTitleIcon').src='assets/icons/'+({git:'git-branch',browser:'globe',profile:'user',preferences:'sliders-horizontal',notifications:'bell',proxy:'shield-check',activity:'activity',environment:'monitor'})[key]+'.svg';$('settingsDescription').textContent=settingCopy[key][1];};
+const settingCopy={git:['Git 管理','管理 Git SSH 公钥与代码仓库认证。'],browser:['浏览器','管理浏览器网络、站点数据和 Cookie 同步。'],profile:['个人资料','管理当前账号的基础信息。'],notifications:['通知','管理当前账号在本设备上的通知。'],shortcuts:['快捷键','配置发送方式和常用操作快捷键，仅保存在本设备。'],preferences:['偏好设置','管理语言、外观、阅读、时间显示和退出行为。'],proxy:['代理与出口','管理应用代理的连接与固定出口。'],environment:['本地系统','检测系统语言与时区，管理本机使用条件。'],activity:['连接记录','查看出口核验、连接与恢复状态。']};
+for(const tab of document.querySelectorAll('[data-setting]'))tab.onclick=()=>{const key=tab.dataset.setting;if(key==='git')void gitSettings.ensureLoaded();if(key==='browser'){void loadBrowserCookiePreferences();void browserLibrary.refresh();}if(key==='activity')void loadConnectionRecords();$('verify').classList.toggle('hidden',key!=='proxy');document.querySelectorAll('[data-setting]').forEach(item=>item.classList.toggle('active',item===tab));document.querySelectorAll('[data-panel]').forEach(panel=>panel.classList.toggle('hidden',panel.dataset.panel!==key));$('settingsTitle').textContent=settingCopy[key][0];$('notificationScopeBadge').classList.toggle('hidden',key!=='notifications');$('settingsTitleIcon').src='assets/icons/'+({git:'git-branch',browser:'globe',profile:'user',preferences:'sliders-horizontal',notifications:'bell',shortcuts:'keyboard',proxy:'shield-check',activity:'activity',environment:'monitor'})[key]+'.svg';$('settingsDescription').textContent=settingCopy[key][1];};
 let themePreference='light';try{themePreference=localStorage.getItem('ui-theme') || 'light';}catch{}
 if(!['light','dark','system'].includes(themePreference))themePreference='light';
 const systemTheme=matchMedia('(prefers-color-scheme: dark)');
@@ -1771,7 +1786,7 @@ function renderNetworkTimes(status){
 }
 
 function refreshDisplayedTimes(){
- for(const time of document.querySelectorAll('time[datetime]'))time.textContent=displayDate(time.dateTime,'time');
+ refreshTimeElements(document);
  if(displayedEnvironmentStatus)setEnvironment(displayedEnvironmentStatus);
  renderNetworkTimes(network);renderAuth();renderSessionHeader();
  for(const element of document.querySelectorAll('[data-environment-date]'))element.textContent=displayEnvironmentDate(element.dataset.environmentDate,element.dataset.environmentRecent==='true');
@@ -1779,6 +1794,19 @@ function refreshDisplayedTimes(){
 
 
 
-setInterval(()=>{for(const element of document.querySelectorAll('[data-environment-date]'))element.textContent=displayEnvironmentDate(element.dataset.environmentDate,element.dataset.environmentRecent==='true');},30000);
+setInterval(()=>{refreshTimeElements(document);for(const element of document.querySelectorAll('[data-environment-date]'))element.textContent=displayEnvironmentDate(element.dataset.environmentDate,element.dataset.environmentRecent==='true');},30000);
 
 mountLearningAutomation(api,()=>({runtimes:runtimeRegistry.runtimes,refreshRuntimes:refreshRuntimeRegistry,language:uiLocale(),name:dockerEnvironmentState.environments.find(e=>e.id===dockerEnvironmentState.activeId)?.name || '当前环境'}));
+
+mountShortcuts({document,platform:api.platform,getBindings:()=>preferences.shortcuts,onError:error=>toast(error.message),actions:{
+ newChat:()=>{if(document.body.matches('.auth-mode,.auth-pending,.environment-onboarding'))return false;document.getElementById('railNewSession').click();},
+ searchChat:()=>{if(page!=='cc')return false;chatSearch.open();},
+ focusComposer:()=>{if(page!=='cc'||$('prompt').disabled)return false;$('prompt').focus();},
+ stopReply:()=>{if(page!=='cc'||!chatRuns.has(activeChatId))return false;return api.cancel(activeChatId);},
+ toggleSidebar:()=>$('toggleSidebar').click(),settings:()=>openAccountSettings('preferences'),shortcuts:()=>openAccountSettings('shortcuts'),
+ nextTab:()=>cycleContentTab(1),previousTab:()=>cycleContentTab(-1),
+ closeTab:()=>{const tab=contentTabState.tabs.find(tab=>tab.id===contentTabState.activeId);if(!tab||tab.pinned||contentTabState.tabs.length<2)return false;return closeContentTabView(tab.id);},
+ pinTab:()=>{const tab=contentTabState.tabs.find(tab=>tab.id===contentTabState.activeId);if(!tab)return false;toggleContentTabPin(tab.id);},
+ browser:()=>switchPage('browser'),automation:()=>switchPage('automation'),runtimes:()=>switchPage('runtime'),console:()=>switchPage('console')
+}});
+function cycleContentTab(direction){const tabs=contentTabState.tabs,index=tabs.findIndex(tab=>tab.id===contentTabState.activeId);if(tabs.length<2)return false;return activateContentTab(tabs[(index+direction+tabs.length)%tabs.length]);}

@@ -1,3 +1,4 @@
+import {reducedMotion} from '../../shared/ui/motion.mjs';
 import {renderReviewDiff} from './review-diff.mjs';
 import {renderFileDiffs} from './file-diff.mjs';
 const button=(label,icon,fn)=>{const b=document.createElement('app-button');b.type='button';b.className='content-action';const i=document.createElement('wa-icon');i.slot='start';i.src='assets/icons/'+icon+'.svg';b.append(i,document.createTextNode(label));b.addEventListener('click',fn);return b;};
@@ -25,7 +26,7 @@ export function mountInsightsPanel({page,api,scope,updateMarkdown,onOpenFullView
  const info=document.createElement('section');info.append(menuBody.querySelector('h2'),menuBody.querySelector('dl'));info.hidden=true;usage.hidden=true;detail.append(info,usage);
  const hideDetail=()=>{if(detail.matches(':popover-open'))detail.hidePopover();};
  const positionDetail=()=>{const r=infoMenu.shadowRoot.querySelector('[part~=menu]').getBoundingClientRect();detail.style.width=Math.min(340,innerWidth-24)+'px';detail.style.left=Math.max(12,r.left-detail.offsetWidth-12)+'px';detail.style.top=Math.max(12,Math.min(r.top,innerHeight-detail.offsetHeight-12))+'px';};
- const showDetail=(section,label)=>{hideDetail();info.hidden=section!==info;usage.hidden=section!==usage;detail.setAttribute('aria-label',label);detail.showPopover();positionDetail();if(!matchMedia('(prefers-reduced-motion: reduce)').matches)detail.animate([{opacity:0,transform:'translateX(10px)'},{opacity:1,transform:'translateX(0)'}],{duration:160,easing:'ease-out'});};
+ const showDetail=(section,label)=>{hideDetail();info.hidden=section!==info;usage.hidden=section!==usage;detail.setAttribute('aria-label',label);detail.showPopover();positionDetail();if(!reducedMotion())detail.animate([{opacity:0,transform:'translateX(10px)'},{opacity:1,transform:'translateX(0)'}],{duration:160,easing:'ease-out'});};
  for(const [label,icon,section] of [['会话信息','file-text',info],['用量与上下文','boxes',usage]]){const row=button(label,icon,()=>showDetail(section,label));row.className='session-detail-entry menu-action';row.setAttribute('aria-haspopup','true');const arrow=document.createElement('wa-icon');arrow.src='assets/icons/chevron-left.svg';arrow.slot='end';row.append(arrow);menuBody.append(row);}
  infoMenu.addEventListener('wa-hide',hideDetail);window.addEventListener('resize',hideDetail);
  document.addEventListener('pointerdown',e=>{if(!detail.contains(e.target)&&!infoMenu.contains(e.target))hideDetail();});

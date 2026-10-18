@@ -1,3 +1,4 @@
+import {reducedMotion} from './motion.mjs';
 // Reference: https://science.nasa.gov/resource/the-milky-way-galaxy/ (artist concept).
 // Milky Way inspired star-density texture: central bar, clustered arms and dust lanes.
 // Draw the texture once; only composite it while the creation screen is visible.
@@ -40,8 +41,8 @@ export function mountGalaxy(canvas){
  function resize(){width=canvas.clientWidth;height=canvas.clientHeight;const dpr=Math.min(devicePixelRatio||1,1.5);canvas.width=Math.round(width*dpr);canvas.height=Math.round(height*dpr);ctx.setTransform(dpr,0,0,dpr,0,0);draw();}
  function draw(){ctx.clearRect(0,0,width,height);if(!width || !height)return;const diameter=Math.max(width*2.6,height*2.4);ctx.save();ctx.translate(Math.max(80,(width-Math.min(600,width-48))/4),height*.5);ctx.rotate(-.4);ctx.scale(1,.68);ctx.rotate(angle);ctx.globalAlpha=.8;ctx.drawImage(texture,-diameter/2,-diameter/2,diameter,diameter);ctx.restore();}
  function tick(time){frame=0;if(!last)last=time;angle+=Math.min(time-last,100)*Math.PI*2/48000;last=time;draw();frame=requestAnimationFrame(tick);}
- function update(){const visible=!screen.classList.contains('hidden') && !document.body.classList.contains('auth-mode') && !document.hidden;if(frame){cancelAnimationFrame(frame);frame=0;}last=0;if(visible){draw();if(!reduced.matches)frame=requestAnimationFrame(tick);}}
+ function update(){const visible=!screen.classList.contains('hidden') && !document.body.classList.contains('auth-mode') && !document.hidden;if(frame){cancelAnimationFrame(frame);frame=0;}last=0;if(visible){draw();if(!reducedMotion())frame=requestAnimationFrame(tick);}}
  new ResizeObserver(resize).observe(canvas);new MutationObserver(update).observe(screen,{attributes:true,attributeFilter:['class']});new MutationObserver(update).observe(document.body,{attributes:true,attributeFilter:['class']});
- document.addEventListener('visibilitychange',update);reduced.addEventListener('change',update);resize();update();
+ document.addEventListener('preferences-changed',update);document.addEventListener('visibilitychange',update);reduced.addEventListener('change',update);resize();update();
  return ()=>{cancelAnimationFrame(frame);document.removeEventListener('visibilitychange',update);reduced.removeEventListener('change',update);};
 }

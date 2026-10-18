@@ -4,7 +4,7 @@
 .chat-code-status{font-size:12px;white-space:normal}
 .chat-code-status[data-error]{color:var(--danger,var(--ink))}
 .markdown-body .chat-code-block pre{margin:0;border:0;border-radius:0;max-height:520px;line-height:1.6;tab-size:4}
-.markdown-body .chat-code-block pre>code{display:block;font-size:12px;line-height:1.6;white-space:pre}
+.markdown-body .chat-code-block pre>code{display:block;font-size:var(--code-font-size,13px);line-height:1.6;white-space:pre}
 .markdown-body .chat-code-block.show-line-numbers pre{display:grid;grid-template-columns:max-content minmax(max-content,1fr);gap:14px}
-.markdown-body .chat-code-block.show-line-numbers pre::before{content:attr(data-lines);display:block;font:12px/1.6 ui-monospace,monospace;text-align:right;color:var(--muted);user-select:none;pointer-events:none;border-right:1px solid var(--line);padding-right:12px}
+.markdown-body .chat-code-block.show-line-numbers pre::before{content:attr(data-lines);display:block;font:var(--code-font-size,13px)/1.7 ui-monospace,monospace;text-align:right;color:var(--muted);user-select:none;pointer-events:none;border-right:1px solid var(--line);padding-right:12px}
 .chat-code-toolbar app-button[aria-pressed=true]{color:var(--blue)}

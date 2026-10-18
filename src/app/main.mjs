@@ -1,3 +1,5 @@
+import {createPreferenceStore} from '../features/preferences/preference-store.mjs';
+import {createQuitConfirmation} from '../features/preferences/quit-confirmation.mjs';
 import {createContainerDownloads} from '../features/browser/browser-downloads.mjs';
 import {createShutdownBarrier} from './shutdown.mjs';
 import {createChatPopouts} from '../features/chat/chat-popout-main.mjs';
@@ -524,6 +526,9 @@ async function createWindow() {
   window.webContents.on('will-navigate', event => event.preventDefault());
   window.webContents.on('will-frame-navigate', event => {if(!event.isMainFrame&&!event.url.startsWith('kuneco-artifact://preview/'))event.preventDefault();});
   createBrowserTab();
+  window.webContents.on('did-start-loading',()=>quitConfirmation.cancel());
+  window.webContents.on('render-process-gone',()=>quitConfirmation.cancel());
+  window.on('closed',()=>quitConfirmation.cancel());
   window.on('close', event=>{if(!shutdown.complete){event.preventDefault();app.quit();}});
   window.on('closed', () => { browserVisible = false; window = null; for (const tab of browserTabs.values()) { if (tab.wc && !tab.wc.isDestroyed()) tab.wc.close(); } browserTabs.clear(); });
   await window.loadFile(path.join(here, 'index.html'));
@@ -695,6 +700,9 @@ ipcMain.handle('workspace:dockerEnvironments',guarded(async(action='state',value
  throw new Error('未知环境操作');
  }finally{containerOperation=false;if(account?.user){const ctx=cookieContext();await ctx.sync.sync().catch(ctx.sync.onError);}}
 }));
+let preferenceStore,preferenceLoadError='';
+ipcMain.handle('workspace:preferences',guarded(async patch=>{if(preferenceLoadError)throw Error(preferenceLoadError);if(!preferenceStore)throw Error('偏好设置尚未就绪');if(patch===undefined)return preferenceStore.get();const value=await preferenceStore.save(patch);emit('preferences',value);chatPopouts.preferencesChanged(value);return value;}));
+ipcMain.handle('workspace:quitConfirmation',guarded(value=>quitConfirmation.answer(value)));
 ipcMain.handle('workspace:state', guarded(async () => ({
   containerId:activeContainerId,account:account?.state(),runtimeRegistry:runtimeOwner===(account?.user?.id || null)?registeredRuntimes:null,chatViews:chatViews.filter(v=>(aiSessions.get(v.id)?.environmentId || null)===activeContainerId),chatImportLegacy,chatOwner,
   environment: environmentStatus,
@@ -1107,7 +1115,7 @@ function insightSession(value){
  if(!item||value.owner!==account?.user?.id||value.environmentId!==activeContainerId||(item.environmentId||null)!==activeContainerId||accountChanging||containerOperation)throw new Error('对话账号或环境已变化');
  return item;
 }
-const chatPopouts=createChatPopouts({BrowserWindow,ipcMain,parent:()=>window,scope:()=>({owner:chatOwner,environmentId:activeContainerId}),basePath:here});
+const chatPopouts=createChatPopouts({BrowserWindow,ipcMain,parent:()=>window,scope:()=>({owner:chatOwner,environmentId:activeContainerId}),basePath:here,preferences:()=>preferenceStore?.get()});
 ipcMain.handle('workspace:chatPopout',guarded(async(action,value)=>{chatPopouts.closeInvalid();if(action==='sync'){if(value?.scope?.owner!==chatOwner || value.scope.environmentId!==activeContainerId)return;insightSession(value.scope);chatPopouts.publish(value);return true;}if(action==='open'){insightSession(value);return chatPopouts.open(value);}if(action==='closeInvalid'){chatPopouts.closeInvalid();return true;}throw new Error('未知窗口操作');}));
 ipcMain.handle('workspace:chatInsights',guarded(async value=>{const item=insightSession(value);return {...insightView(item,chatViews,{owner:account?.user?.id,environmentId:activeContainerId,chatId:item.id}),running:runs.has(item.id)};}));
 ipcMain.handle('workspace:chatArtifact',guarded(async value=>{
@@ -1306,6 +1314,8 @@ app.whenReady().then(async () => {
  protocol.handle('kuneco-artifact',request=>{const u=new URL(request.url),entry=artifactPages.get(u.pathname.slice(1));if(u.hostname!=='preview'||!entry||entry.owner!==dockerOwner()||entry.environment!==activeContainerId)return new Response('产物所属环境已变化',{status:403});return new Response(entry.html,{headers:{'content-type':'text/html; charset=utf-8','Content-Security-Policy':artifactCSP,'Cache-Control':'no-store'}});});
   try{verifyKeychainMigration({directory:app.getPath('userData'),storage:safeStorage,migration:keychainMigration});}
   catch(error){console.error(error.message);app.exit(1);return;}
+  preferenceStore=createPreferenceStore(path.join(app.getPath('userData'),'ui-preferences.json'));
+  try{await preferenceStore.load();}catch(error){preferenceLoadError=error.message;}
   app.setName('Kuneco');
   Menu.setApplicationMenu(Menu.buildFromTemplate([...(process.platform==='darwin'?[{label:'Kuneco',role:'appMenu'}]:[]),{role:'fileMenu'},{role:'editMenu'},{label:'显示',submenu:[{role:'resetZoom'},{role:'zoomIn'},{role:'zoomOut'},{type:'separator'},{role:'togglefullscreen'}]},{role:'windowMenu'}]));
   app.configureHostResolver({ enableBuiltInResolver: false, secureDnsMode: 'off' });
@@ -1359,14 +1369,15 @@ const shutdown=createShutdownBarrier([
  async()=>{await dockerEnvs?.shutdownTasks();if(gateway){gateway.block('应用退出');await gateway.stop({strict:true});}},
  async()=>{const transport=directBrowserTransport || await directBrowserTransportPromise;await transport?.close();}
 ]);
+const quitConfirmation=createQuitConfirmation({id:randomUUID,enabled:()=>preferenceStore?.get().confirmQuit!==false,tasks:()=>[...[...runs.values()].map(task=>'对话 · '+(aiSessions.get(task.chatId)?.title||'未命名对话')),...[...(learningAutomations?.running.keys()||[])].map(id=>'自动化 · '+(learningAutomations.items.find(item=>item.id===id)?.name||'定时对话'))],prompt:data=>{if(!window||window.isDestroyed())throw Error('主窗口不可用');window.show();window.focus();emit('quitConfirmation',data);},focus:()=>{window?.show();window?.focus();}});
 let quitAttempt;
 app.on('before-quit',event=>{
  if(shutdown.complete)return;
  event.preventDefault();
- if(quitAttempt)return;
- quitAttempt=shutdown.run().then(()=>app.quit(),async()=>{
+ if(quitAttempt){if(quitConfirmation.pending){window?.show();window?.focus();}return;}
+ quitAttempt=(async()=>{if(!shutdown.requested&&!await quitConfirmation.request())return;return shutdown.run().then(()=>app.quit(),async()=>{
   const result=await dialog.showMessageBox({type:'error',title:'退出清理尚未完成',message:'任务或网络资源清理失败，应用尚未退出。',detail:'请检查容器服务后重试。账号数据会保留；不会跳过清理强制退出。',buttons:['重试退出','暂不退出'],defaultId:0,cancelId:1});
   return result.response===0;
- }).then(retry=>{quitAttempt=null;if(retry)app.quit();},error=>{quitAttempt=null;console.error('退出清理提示失败',error);});
+ });})().then(retry=>{quitAttempt=null;if(retry)app.quit();},error=>{quitAttempt=null;console.error('退出清理提示失败',error);});
 });
 app.on('window-all-closed', () => app.quit());

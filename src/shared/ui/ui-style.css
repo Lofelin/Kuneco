@@ -2363,3 +2363,20 @@ app-button[data-icon-action]:not([disabled]):not([loading]):is(:hover,:active){c
 #proxyDialog>p.muted{margin:0;line-height:20px}
 #proxyManualPanel>.field-row{margin:0 0 12px}
 #proxyFileChoose{--file-picker-min-height:96px;--file-picker-padding:16px}
+/* Device preferences reuse the shared settings rows and spacing tokens. */
+.settings-body :is([data-panel="preferences"],[data-panel="shortcuts"]) section{margin-top:28px}
+.settings-body :is([data-panel="preferences"],[data-panel="shortcuts"]) section>.preference-heading{margin-top:0}
+.settings-body [data-panel="shortcuts"] section:first-child{margin-top:0}
+.settings-body :is([data-panel="preferences"],[data-panel="shortcuts"]) :is(wa-select,.shortcut-controls){width:var(--settings-value-width);max-width:100%;flex-shrink:0}
+.preference-reading-preview,.preference-time-preview{padding:var(--settings-row-padding-block) var(--settings-row-padding-inline);overflow-wrap:anywhere}
+.preference-reading-preview p{font-size:var(--chat-font-size,14px);line-height:1.7;margin:0 0 8px}
+.preference-reading-preview code{font-size:var(--code-font-size,13px);line-height:1.7;white-space:pre-wrap}
+.preference-time-preview{color:var(--muted);font-size:var(--settings-row-title-size)}
+@container(max-width:480px){.settings-body :is([data-panel="preferences"],[data-panel="shortcuts"]) .notification-setting-row{flex-wrap:wrap}.settings-body :is([data-panel="preferences"],[data-panel="shortcuts"]) .notification-setting-copy{flex-basis:100%}}
+
+/* Reading size affects content, never global controls or settings labels. */
+.bubble:not(.error),#messages article>div,.bubble .markdown-body{font-size:var(--chat-font-size,14px);line-height:1.7}
+:is(.bubble,#messages,.preference-reading-preview) code{font-size:var(--code-font-size,13px);line-height:1.7}
+#prompt::part(textarea),#draft::part(textarea),.message-editor wa-textarea::part(textarea){font-size:var(--chat-font-size,14px);line-height:1.7}
+html[data-reduced-motion="true"]{--sidebar-motion-duration:0s;--wa-transition-fast:0ms;--wa-transition-normal:0ms;--wa-transition-slow:0ms}
+html[data-reduced-motion="true"] *,html[data-reduced-motion="true"] *::before,html[data-reduced-motion="true"] *::after{animation-duration:0.001ms!important;animation-iteration-count:1!important;transition-duration:0s!important;scroll-behavior:auto!important}

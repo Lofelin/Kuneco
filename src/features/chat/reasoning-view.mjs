@@ -1,3 +1,4 @@
+import {reducedMotion} from '../../shared/ui/motion.mjs';
 import {renderActivities} from '../runtimes/runtime-activity.mjs';
 import {isReasoningTerminal,reasoningSnapshot,updateReasoningState} from './reasoning-state.mjs';
 const views=new Set();
@@ -26,7 +27,7 @@ export function reasoningView(content,options={},render){
  details.dataset.phase=state.phase;
  details.dataset.complete=String(isReasoningTerminal(state.phase));
  const label=details.querySelector('summary span');
- if(previousPhase && previousPhase!==state.phase && !globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches)label.animate?.([{opacity:0,transform:'translateY(4px)'},{opacity:1,transform:'translateY(0)'}],{duration:200,easing:'ease-out'});
+ if(previousPhase && previousPhase!==state.phase && !reducedMotion())label.animate?.([{opacity:0,transform:'translateY(4px)'},{opacity:1,transform:'translateY(0)'}],{duration:200,easing:'ease-out'});
  const tick=()=>{
   const value=reasoningSnapshot(state);state.durationMs=value.durationMs;
   const measured=state.kind==='process'?`用时 ${seconds(value.processMs)}`:value.thinkingMs || state.text.trim()?`已思考 ${seconds(value.thinkingMs)}`:`等待 ${seconds(value.waitingMs)}`;

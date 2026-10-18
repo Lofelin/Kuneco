@@ -14,6 +14,7 @@ Kuneco 采用单仓库、按能力组织的目录。参考字节公开项目 [Fl
 | `src/features/chat/` | 对话状态、同步、消息、网络与内容渲染 |
 | `src/features/runtimes/` | AI 运行时安装、认证、执行和提供方协议 |
 | `src/features/automation/` | 自动化调度、题库及界面 |
+| `src/features/preferences/` | 本设备偏好持久化、快捷键配置、阅读与动态效果、退出确认 |
 | `src/features/notifications/` | 通知偏好、投递控制及设置界面 |
 | `src/features/terminal/` | 终端会话与界面 |
 | `src/features/projects/` | 项目文件选择、导入与挂载 |

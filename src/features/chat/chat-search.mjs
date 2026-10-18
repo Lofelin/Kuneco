@@ -22,7 +22,7 @@ export function findChatMatches(chat,query){
  return matches;
 }
 
-export function mountChatSearch({chat,host=chat?.parentElement?.querySelector('.session-header'),getScope=()=>''}={}){
+export function mountChatSearch({chat,host=chat?.parentElement?.querySelector('.session-header'),getScope=()=>'',keyboard=true}={}){
  if(!chat || !host)throw new Error('Chat search needs chat and header elements');
  const doc=chat.ownerDocument,win=doc.defaultView,page=chat.closest('.page') || chat.parentElement;
  const createButton=(label,icon)=>{const el=doc.createElement('app-button');el.setAttribute('type','button');el.setAttribute('appearance','plain');el.setAttribute('icon-only','');el.className='icon-button';el.setAttribute('aria-label',label);el.title=label;const image=doc.createElement('wa-icon');image.setAttribute('src',`assets/icons/${icon}.svg`);image.setAttribute('aria-hidden','true');el.append(image);return el;};
@@ -51,7 +51,7 @@ export function mountChatSearch({chat,host=chat?.parentElement?.querySelector('.
  const open=()=>{if(getScope()!==scope){scope=getScope();close({focus:false});}bar.hidden=false;trigger.setAttribute('aria-expanded','true');refresh();input.focus();input.select?.();};
  const search=()=>{restoreFolds();refresh();if(matches.length)showMatch(0);};
  trigger.addEventListener('click',open);closeButton.addEventListener('click',()=>close());previous.addEventListener('click',()=>showMatch(index-1));next.addEventListener('click',()=>showMatch(index+1));input.addEventListener('input',search);input.addEventListener('wa-clear',()=>{input.value='';search();});
- const keydown=event=>{if(page.hidden || page.classList.contains('hidden') || !page.isConnected)return;if((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase()==='f'){event.preventDefault();open();}else if(!bar.hidden && bar.contains(event.target)){if(event.key==='Escape'){event.preventDefault();close();}else if(event.key==='Enter'){event.preventDefault();showMatch(index+(event.shiftKey?-1:1));}}};
+ const keydown=event=>{if(event.defaultPrevented || event.isComposing || event.keyCode===229 || page.hidden || page.classList.contains('hidden') || !page.isConnected)return;if(keyboard && (event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase()==='f'){event.preventDefault();open();}else if(!bar.hidden && bar.contains(event.target)){if(event.key==='Escape'){event.preventDefault();close();}else if(event.key==='Enter'){event.preventDefault();showMatch(index+(event.shiftKey?-1:1));}}};
  // A manual fold choice takes precedence over temporary search expansion.
  const manualFold=event=>{const summary=event.target.closest?.('summary');if(summary && chat.contains(summary))expanded.delete(summary.parentElement);};
  doc.addEventListener('keydown',keydown);chat.addEventListener('click',manualFold);

@@ -1,7 +1,7 @@
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 const key=value=>JSON.stringify([value?.owner,value?.environmentId??null,value?.chatId]);
-export function createChatPopouts({BrowserWindow,ipcMain,parent,scope,basePath}){
+export function createChatPopouts({BrowserWindow,ipcMain,parent,scope,basePath,preferences=()=>({})}){
  const windows=new Map();const page=path.join(basePath,'features/chat/chat-popout.html'),url=pathToFileURL(page).href;
  const current=value=>Boolean(value?.owner && value.owner===scope()?.owner && (value.environmentId??null)===(scope()?.environmentId??null));
  const channel='kuneco:chat-popout-action';
@@ -22,7 +22,7 @@ export function createChatPopouts({BrowserWindow,ipcMain,parent,scope,basePath})
   const entry={window:child,scope:{owner:value.owner,environmentId:value.environmentId??null,chatId:value.chatId},snapshot:null};windows.set(id,entry);
   child.webContents.setWindowOpenHandler(()=>({action:'deny'}));
   child.webContents.on('will-navigate',event=>event.preventDefault());child.webContents.on('will-frame-navigate',event=>event.preventDefault());child.webContents.on('will-attach-webview',event=>event.preventDefault());
-  child.webContents.on('did-finish-load',()=>{if(entry.snapshot)child.webContents.send('kuneco:chat-popout-snapshot',entry.snapshot);});
+  child.webContents.on('did-finish-load',()=>{child.webContents.send('kuneco:preferences',preferences());if(entry.snapshot)child.webContents.send('kuneco:chat-popout-snapshot',entry.snapshot);});
   child.once('ready-to-show',()=>child.show());child.on('closed',()=>windows.delete(id));
   const ownerWindow=parent();const close=()=>{if(!child.isDestroyed())child.close();};ownerWindow?.once('closed',close);child.once('closed',()=>ownerWindow?.removeListener('closed',close));
   void child.loadFile(page);return {opened:true};
@@ -32,5 +32,5 @@ export function createChatPopouts({BrowserWindow,ipcMain,parent,scope,basePath})
   entry.snapshot=structuredClone(snapshot);entry.window.webContents.send('kuneco:chat-popout-snapshot',entry.snapshot);
  }
  function closeInvalid(){for(const entry of windows.values())if(!current(entry.scope)&&!entry.window.isDestroyed())entry.window.close();}
- return {open,publish,closeInvalid,closeAll(){for(const entry of windows.values())if(!entry.window.isDestroyed())entry.window.close();},dispose(){for(const entry of windows.values())if(!entry.window.isDestroyed())entry.window.close();ipcMain.removeHandler(channel);}};
+ return {open,publish,closeInvalid,preferencesChanged(value){for(const entry of windows.values())if(!entry.window.isDestroyed())entry.window.webContents.send('kuneco:preferences',value);},closeAll(){for(const entry of windows.values())if(!entry.window.isDestroyed())entry.window.close();},dispose(){for(const entry of windows.values())if(!entry.window.isDestroyed())entry.window.close();ipcMain.removeHandler(channel);}};
 }
