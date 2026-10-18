@@ -10,3 +10,5 @@ export function browserRoute(mode,url){
  if(mode==='direct')return 'direct';
  return 'proxy';
 }
+// Preserve the selected mode, including the existing automatic transport.
+export const normalizeBrowserMode=mode=>['direct','mixed','proxy'].includes(mode)?mode:'proxy';

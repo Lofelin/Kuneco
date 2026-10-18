@@ -15,6 +15,7 @@ import {listExternalContainers,inspectExternal,claimExternal,releaseExternal} fr
 import {execFile,spawn} from 'node:child_process';
 import {access,mkdir,readFile,writeFile,rename,rm} from 'node:fs/promises';
 import {homedir} from 'node:os';
+import {createReadStream} from 'node:fs';
 import path from 'node:path';
 import {randomUUID,createHash} from 'node:crypto';
 import {EventEmitter} from 'node:events';
@@ -39,11 +40,11 @@ export function directTaskArguments({prefix,name,image,projectMounts=[],task,com
 export class DockerEnvironments {
  constructor({directory,sourceRoot,encrypt,decrypt,defaultLocalEnabled=false}){Object.assign(this,{directory,sourceRoot,encrypt,decrypt,defaultLocalEnabled});this.context='colima-dingtu';this.endpoint='unix://'+path.join(homedir(),'.colima','dingtu','docker.sock');this.busy=false;}
  async binary(name){for(const location of [path.join(process.resourcesPath||this.sourceRoot,'container-engine','bin',name),path.join(this.sourceRoot,'vendor','container-engine','bin',name),'/opt/homebrew/bin/'+name,'/usr/local/bin/'+name]){try{await access(location);return location;}catch{}}throw new Error('容器引擎组件未安装，请初始化容器引擎');}
- async command(args,{input,timeout=30000,endpoint=this.endpoint,maxBuffer=4*1024*1024}={}){
+ async command(args,{input,inputFile,timeout=30000,endpoint=this.endpoint,maxBuffer=4*1024*1024}={}){
   const binary=await this.binary('docker');
   return new Promise((resolve,reject)=>{
    const child=execFile(binary,['--host',endpoint,...args],{cwd:this.sourceRoot,timeout,maxBuffer,env:{...process.env,DOCKER_HOST:'',DOCKER_CONTEXT:this.context,DOCKER_BUILDKIT:'0',PATH:path.join(this.sourceRoot,'vendor','container-engine','bin')+':'+(process.env.PATH || '/usr/bin:/bin')}},(error,stdout,stderr)=>{if(error)return reject(new Error('Docker 操作失败：'+String(stderr || error.message).replace(/([a-z][a-z0-9+.-]*:\/\/)[^\s/@]+:[^\s@]+@/gi,'$1***@').slice(-600)));resolve(stdout.trim() || stderr.trim());});
-   child.stdin.on('error',()=>{});child.stdin.end(input);
+   child.stdin.on('error',()=>{});if(inputFile){const source=createReadStream(inputFile);source.on('error',error=>{child.kill();reject(error);});child.on('close',()=>source.destroy());source.pipe(child.stdin);}else child.stdin.end(input);
   });
  }
  async engineProcess(binary,args,{timeout,env,onProgress}){
@@ -378,7 +379,7 @@ export class DockerEnvironments {
  }
  async previewRuntimes(){const runtimes=[];for(const id of ['cc','codex']){try{const version=await this.command(['run','--rm','--network','none','--read-only','--cap-drop','ALL','--security-opt','no-new-privileges','--entrypoint',id==='cc'?'claude':'codex',IMAGE,'--version'],{timeout:20000});runtimes.push({id,name:id==='cc'?'Claude Code':'Codex',version});}catch{}}return {runtimes,checkedAt:new Date().toISOString()};}
  async runtimeInfo(owner,id,detect){const {item,prefix}=await this.get(owner,id);if(!detect)return item.registry || {hostName:item.name,runtimes:[]};if((await this.command(['inspect','--format','{{.State.Running}}',item.external?.id || prefix+'-worker'],{endpoint:item.external?.endpoint || this.endpoint}))!=='true')throw new Error('容器尚未运行，请先启动');const result=await this.detectCommands(args=>this.exec(owner,id,args));const registry={...result,hostName:item.name,runtimes:result.runtimes.map(runtime=>({...runtime,...(item.runtimeMetadata?.[runtime.id] || {})}))};await this.update(owner,id,{registry});return registry;}
- async exec(owner,id,args,options={}){const {prefix,item}=await this.get(owner,id);if(item.external)return this.command(['exec',...(options.input!==undefined?['-i']:[]),item.external.id,...args],{...options,endpoint:item.external.endpoint});return this.command(['exec','--user','1000:1000','--workdir','/workspace',...(options.input!==undefined?['-i']:[]),prefix+'-worker',...args],options);}
+ async exec(owner,id,args,options={}){const {prefix,item}=await this.get(owner,id);if(item.external)return this.command(['exec',...((options.input!==undefined||options.inputFile)?['-i']:[]),item.external.id,...args],{...options,endpoint:item.external.endpoint});return this.command(['exec','--user','1000:1000','--workdir','/workspace',...((options.input!==undefined||options.inputFile)?['-i']:[]),prefix+'-worker',...args],options);}
  async runRuntimeInstaller(owner,id,args,options={}){
   const assertCurrent=this.taskLaunchGuard();
   const {item,prefix}=await this.get(owner,id);

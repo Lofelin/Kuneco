@@ -1,5 +1,5 @@
 /* Sole owner of table geometry, borders, scrolling and row interaction. */
-app-table,.app-table{display:block;box-sizing:border-box;width:100%;max-width:100%;min-height:0;overflow:auto;padding:0;margin:0;border:1px solid var(--line);border-radius:var(--data-list-radius,9px);background:var(--surface);font-size:12px;line-height:1.6;text-align:left}
+app-table,.app-table{display:block;box-sizing:border-box;width:100%;max-width:100%;min-height:0;max-height:var(--data-list-max-height,none);overflow:auto;padding:0;margin:0;border:1px solid var(--line);border-radius:var(--data-list-radius,9px);background:var(--surface);font-size:12px;line-height:1.6;text-align:left}
 .app-table table{width:100%;border-collapse:separate;border-spacing:0;table-layout:fixed;color:var(--muted);font:inherit;text-align:inherit;margin:0}
 .app-table th,.app-table td{box-sizing:border-box;padding:var(--data-list-row-padding,12px) 20px;text-align:left;vertical-align:middle;overflow-wrap:anywhere;white-space:normal;border:0;border-bottom:1px solid var(--line);font:inherit}
 .app-table th{position:sticky;top:0;z-index:2;padding-block:var(--data-list-heading-padding,12px);background:var(--data-list-header-bg,var(--soft));font-weight:400;color:var(--muted);white-space:nowrap}

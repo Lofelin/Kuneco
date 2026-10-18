@@ -1,5 +1,7 @@
 import {mountChatPopoutController} from '../features/chat/chat-popout-controller.mjs';
 import {draftScopeKey} from '../features/chat/draft-store.mjs';
+import {mountBrowserLibraryUI} from '../features/browser/browser-library-ui.mjs';
+import {mountBrowserToolbar} from '../features/browser/browser-toolbar.mjs';
 import {renderDocumentCards} from '../features/chat/document-attachments.mjs';
 import {mountCompositionGuard} from '../features/chat/composition-guard.mjs';
 import {mountChatRecovery} from '../features/chat/chat-recovery.mjs';
@@ -7,6 +9,7 @@ import {mountSessionOrder} from '../features/chat/session-order.mjs';
 import {mountToolApprovalCards} from '../features/chat/tool-approval-cards.mjs';
 import {mountChatSearch} from '../features/chat/chat-search.mjs';
 import {mountDraftPersistence} from '../features/chat/draft-persistence.mjs';
+import {mountBrowserSettings,mountBrowserModeSwitches} from '../features/browser/browser-settings.mjs';
 import {mountInsightsPanel} from '../features/chat/insights-panel.mjs';
 import {containerDisplayRows,networkDisplayRows} from '../features/environments/container-display-rows.mjs';
 import {mountContextPicker} from '../features/chat/context-picker.mjs';
@@ -40,6 +43,7 @@ import { resolveBrowserAddress } from '../features/browser/browser-address.mjs';
 let chatRenderContainer=null;
 const $ = id => id==='chat' && chatRenderContainer?chatRenderContainer:document.getElementById(id);
 const api = window.workspace;
+const browserSettingsUI=mountBrowserSettings({document,api,getScope:()=>({owner:accountState.user?.id,environmentId:dockerEnvironmentState.activeId,label:$('environmentName').textContent || '当前环境'}),formatDate:value=>displayDate(value),onOpenSite:domain=>openBrowserCookies(domain)});
 const chatScroll=mountChatScroll(document.getElementById('chat'),document.getElementById('chatJumpLatest'));
 const gitSettings=mountGitSettings({host:$('gitSettings'),api,getScope:()=>[accountState.user?.id,dockerEnvironmentState.activeId,chatSessions.find(item=>item.id===activeChatId)?.project || '']});
 const notificationSettings=mountNotificationSettings({host:$('notificationSettings'),api});
@@ -129,7 +133,7 @@ $('environmentRetry').onclick = () => void recheckEnvironment({showDetails:true}
 $('browserTabs').addEventListener('wa-tab-show',event=>{if(event.detail.name && event.detail.name!==browserTabsState.activeId)void action(()=>api.browser('select',event.detail.name));});
 let suggestionsOpen = false, suggestionIndex = 0, suggestionItems = [], addressEditing = false;
 let addressHistory = [];
-try { addressHistory = JSON.parse(localStorage.getItem('browser-history') || '[]').filter(item => typeof item.url === 'string' && /^https?:\/\//.test(item.url) && typeof item.title === 'string').slice(0, 100); } catch {}
+// Browser history is loaded from the account/environment-scoped main-process library.
 const protocolLabel = value => ({ http: 'HTTP / HTTPS', https: 'HTTPS（TLS 入口）', socks5: 'SOCKS5' })[value] || value;
 let accountState={user:null,status:'signed-out'},proxySaveTimer,proxySaveVersion=0,loginScreenEnabled=false,credentialBusy=false,credentialMode='choice';
 let dockerEnvironmentState={activeId:null,localEnabled:true,environments:[],engine:{}};
@@ -144,6 +148,21 @@ let currentProxyConfig=null,editingProxy=false,importPrepared=false;
 let proxyFileDirectory='',proxyFileParent='',proxyFileSelection=null,proxyFileVersion=0;
 const chatRuns=new Map();
 let page = 'cc', network = { state: 'blocked' }, hasPassword = false, busy = false, browserTabsState = { tabs: [], activeId: null }, reply, approvals = [];
+const browserModeSwitches=mountBrowserModeSwitches({document,getMode:()=>browserTabsState.mode || 'proxy',save:mode=>api.browserSettings(mode),onSaved:renderBrowserTabs});
+let browserNetworkChanging=false;
+for(const item of document.querySelectorAll('[data-browser-network]'))item.addEventListener('click',()=>void action(async()=>{
+ $('browserNetworkMenu').open=false;if(browserNetworkChanging)return;
+ browserNetworkChanging=true;const trigger=$('browserNetworkMenu').querySelector('app-button');trigger.loading=true;trigger.disabled=true;
+ try{if(item.dataset.browserNetwork!==browserTabsState.mode)renderBrowserTabs(await api.browserSettings(item.dataset.browserNetwork));}
+ finally{browserNetworkChanging=false;trigger.loading=false;trigger.disabled=false;renderBrowserTabs(browserTabsState);}
+}));
+
+let browserPreferences={showFullUrl:true};
+const browserLibraryHost=document.createElement('div');browserLibraryHost.id='browserLibrarySettings';browserLibraryHost.className='browser-library-settings';$('browserSettingsPanel').append(browserLibraryHost);
+const browserLibrary=mountBrowserLibraryUI({document,api,chooseDownloadDirectory:directory=>openFilePicker('directory','container-download',directory),host:browserLibraryHost,onOpenURL:async url=>{await api.browser('navigate',url);switchPage('browser');},onChanged:data=>{browserPreferences=data.settings;addressHistory=data.history||[];}});
+const browserToolbar=mountBrowserToolbar({document,api,library:browserLibrary,getState:()=>browserTabsState,isBrowser:()=>page==='browser',onBounds:bounds,onError:error=>toast(error.message||String(error)),onAnnotation:async value=>{const message='网页批注：'+value.title+'\n'+value.url+'\n'+(value.selection?'选中内容：'+value.selection+'\n':'')+value.note;if(value.image&&!['deepseek','codex'].includes(selectedEngine))throw Error('当前对话不支持图片附件，请选择支持图片的运行时或取消附带截图');const draft=deepseekComposer.payload($('prompt').value);$('prompt').value=[$('prompt').value,message].filter(Boolean).join('\n\n');if(value.image)deepseekComposer.restore({...draft,images:[...draft.images,{dataURL:value.image,name:'网页批注.png',detail:'auto'}]});switchPage('cc');$('prompt').focus();}});
+function browserAddress(url){return url;}
+
 let lastToastText='',lastToastAt=0;
 function toast(message,category='operations') {const text=String(message).replace(/^Error invoking remote method '[^']+': Error: /, '');if(text===lastToastText && Date.now()-lastToastAt<5000)return;lastToastText=text;lastToastAt=Date.now();notificationSettings.deliver(text,category,message=>$('toast').create(message,{duration:5000,size:'s'}));}
 async function action(fn) { try { return await fn(); } catch (error) { toast(error.message,'errors'); } }
@@ -162,23 +181,35 @@ function renderProxyStorageScope(){
  const label=!accountState.user?'仅本设备':dockerEnvironmentState.activeId?'账号 · 当前环境':'账号 · 所有设备同步';
  $('proxyStorageScope').replaceChildren(createIcon(accountState.user?'cloud':'monitor'),document.createTextNode(label));
 }
-function bounds() {
+let browserBoundsRevision=0,browserPreviewRequest=null,browserPreviewTab=null;
+async function bounds() {
+  const revision=++browserBoundsRevision;
   const rect = $('browserViewport').getBoundingClientRect();
   const menu = $('addressSuggestions').getBoundingClientRect();
   const top = suggestionsOpen ? Math.max(rect.y, menu.bottom) : rect.y;
-  const overlayBlocksBrowser=Boolean(document.querySelector('app-dialog[open]')) || [...document.querySelectorAll('wa-dropdown[open]')].some(dropdown=>{
+  const dialogOpen=Boolean(document.querySelector('app-dialog[open]'));
+  const menuOpen= [...document.querySelectorAll('wa-dropdown[open]')].some(dropdown=>{
     const panel=dropdown.shadowRoot?.querySelector('[part~="menu"]');
     if(!panel)return true;
     const box=panel.getBoundingClientRect();
     return box.width>0 && box.height>0 && box.left<rect.right && box.right>rect.left && box.top<rect.bottom && box.bottom>top;
   });
+  const preview=$('browserMenuPreview');
+  if(menuOpen&&!dialogOpen&&page==='browser'&&environmentAllowed){
+    if(browserPreviewTab!==browserTabsState.activeId||preview.hidden){
+      browserPreviewRequest ||= api.browser('menuPreview').catch(()=>null).finally(()=>{browserPreviewRequest=null;});
+      const frame=await browserPreviewRequest;if(revision!==browserBoundsRevision)return;
+      if(frame?.tabId===browserTabsState.activeId){preview.src=frame.image;await preview.decode().catch(()=>{});if(revision!==browserBoundsRevision)return;preview.hidden=false;browserPreviewTab=frame.tabId;}
+    }
+  }else{preview.hidden=true;preview.removeAttribute('src');browserPreviewTab=null;}
+  const overlayBlocksBrowser=dialogOpen||menuOpen;
   void api.bounds({ x: rect.x, y: top, width: rect.width, height: Math.max(1, rect.bottom - top), visible: environmentAllowed && !overlayBlocksBrowser && page === 'browser' && (browserTabsState.mode!=='proxy' || network.state === 'ready') }).catch(() => {});
 }
 let browserCookieRows=[],browserCookieRequest=0;
-function clearBrowserCookies(){browserCookieRequest++;browserCookieRows=[];$('browserCookieList').replaceChildren();$('browserCookiesDialog').open=false;}
+function clearBrowserCookies(){browserSettingsUI.invalidate();cookiePreferenceRequest++;browserCookieRequest++;browserCookieRows=[];$('browserCookieList').replaceChildren();$('browserCookiesDialog').open=false;}
 function renderBrowserCookies(){
  const query=$('browserCookieFilter').value.trim().toLowerCase();
- const rows=browserCookieRows.filter(cookie=>(cookie.domain+' '+cookie.name).toLowerCase().includes(query));
+ const rows=browserCookieRows.filter(cookie=>(!browserCookieSiteDomain || cookie.domain.replace(/^\./,'').toLowerCase()===browserCookieSiteDomain) && (cookie.domain+' '+cookie.name).toLowerCase().includes(query));
  $('browserCookieList').replaceChildren();
  for(const cookie of rows){
   const entry=document.createElement('details'),heading=document.createElement('summary');
@@ -188,33 +219,37 @@ function renderBrowserCookies(){
   for(const [label,value] of [['值',cookie.value],['域名',cookie.domain],['路径',cookie.path],['过期时间',cookie.session?'会话 Cookie':displayDate(new Date(cookie.expirationDate*1000).toISOString())],['Secure',cookie.secure?'是':'否'],['HttpOnly',cookie.httpOnly?'是':'否'],['SameSite',cookie.sameSite || '未指定']]){const dt=document.createElement('dt'),dd=document.createElement('dd');dt.textContent=label;dd.textContent=value;facts.append(dt,dd);}
   entry.append(facts);$('browserCookieList').append(entry);
  }
- $('browserCookieStatus').textContent=rows.length?'共 '+rows.length+' 个 Cookie':query?'没有匹配的 Cookie':'当前账号与环境暂无 Cookie';
+ $('browserCookieStatus').textContent=rows.length?'共 '+rows.length+' 个 Cookie':query?'没有匹配的 Cookie':browserCookieSiteDomain?'该站点暂无 Cookie':'当前账号与环境暂无 Cookie';
+}
+let browserCookieSiteDomain=null;
+function openBrowserCookies(domain=null){
+ browserCookieSiteDomain=domain?.toLowerCase() || null;$('browserCookieFilter').value='';$('browserCookiesDialog').label=domain?'Cookie · '+domain:'Cookie';$('browserCookieTitle').textContent=$('browserCookiesDialog').label;$('closeBrowserCookiesLabel').textContent=domain?'返回数据':'关闭';$('closeBrowserCookies').querySelector('wa-icon').src=domain?'assets/icons/arrow-left.svg':'assets/icons/x.svg';$('browserCookiesDialog').open=true;bounds();void loadBrowserCookies();
 }
 async function loadBrowserCookies(){
  const request=++browserCookieRequest,owner=accountState.user?.id,environmentId=dockerEnvironmentState.activeId;
  browserCookieRows=[];$('browserCookieList').replaceChildren();$('browserCookieStatus').textContent='正在读取…';
- $('browserCookieScope').textContent=($('environmentName').textContent || '当前环境')+' · '+(accountState.user?.email || '当前账号')+' · Cookie 按账号和环境隔离';
+ $('browserCookieScope').textContent=($('environmentName').textContent || '当前环境')+' · 数据按账号和环境隔离';
  try{const data=await api.browserCookies();if(request!==browserCookieRequest || !$('browserCookiesDialog').open)return;
  if(owner!==accountState.user?.id || environmentId!==dockerEnvironmentState.activeId || data.owner!==owner || (data.environmentId || null)!==(environmentId || null))throw new Error('账号或环境已切换，请重新打开设置');
  browserCookieRows=data.cookies;renderBrowserCookies();if(data.syncError)$('browserCookieStatus').textContent=data.syncError;
  }catch(error){if(request===browserCookieRequest)$('browserCookieStatus').textContent=error.message;}
 }
-$('browserCookieSettings').onclick=()=>{$('browserMoreMenu').open=false;$('browserCookieFilter').value='';$('browserCookiesDialog').open=true;bounds();void loadBrowserCookies();};
+$('browserCookieSettings').onclick=()=>{$('browserMoreMenu').open=false;openBrowserCookies();};
 let cookiePreferenceRequest=0;
 function renderCookieDescription(){
  const cloud=$('browserCookieMode').value==='account';
  $('browserCookieScopeIcon').src='assets/icons/'+(cloud?'cloud':'monitor')+'.svg';
- $('browserCookieScopeLabel').textContent=cloud?'账号 · 当前环境':'仅本设备';
+ $('browserCookieScopeLabel').textContent=cloud?'跟随环境':'仅本设备';
  $('browserCookieModeIcon').src='assets/icons/'+($('browserCookieMode').value==='account'?'cloud':'monitor')+'.svg';
- $('browserCookieDescription').textContent=$('browserCookieMode').value==='account'?'Cookie 加密保存到当前账号的当前环境，同步恢复该环境的登录状态。':'Cookie 仅保存在本设备，不上传云端。切回本设备后，已有云端副本保留。';
+ $('browserCookieDescription').textContent=$('browserCookieMode').value==='account'?'Cookie 加密保存到当前账号的当前环境，同步该环境的 Cookie；部分网站仍可能要求重新登录。':'Cookie 仅保存在本设备，不上传云端。切回本设备后，已有云端副本保留。';
 }
 async function loadBrowserCookiePreferences(settings){
  const request=++cookiePreferenceRequest,owner=accountState.user?.id,environmentId=dockerEnvironmentState.activeId;
  $('browserCookieMode').disabled=true;$('browserCookieSettingsStatus').textContent='';
- try{const data=await api.browserCookies(settings);
+ try{const data=settings?await api.browserCookies({...settings,owner,environmentId:environmentId || null}):await api.browserData('status');
  if(request!==cookiePreferenceRequest || owner!==accountState.user?.id || environmentId!==dockerEnvironmentState.activeId)return;
  $('browserCookieMode').value=data.settings.mode;
- renderCookieDescription();$('browserCookieSettingsStatus').textContent=data.syncError || '';
+ renderCookieDescription();browserSettingsUI.renderSync(data);
  }catch(error){if(request===cookiePreferenceRequest)$('browserCookieSettingsStatus').textContent=error.message;}
  finally{if(request===cookiePreferenceRequest){$('browserCookieMode').disabled=false;}}
 }
@@ -587,7 +622,7 @@ function setNetwork(status) {
   $('connectionState').textContent = status.recovering?'恢复中':names[status.state] || '未连接';$('connectionState').dataset.state=state;
   $('exitIp').textContent = status.ip || '尚未核验';$('exitIpLabel').textContent=status.ip && status.state!=='ready'?'上次核验 IP':'出口 IP';
   renderNetworkTimes(status);
-  $('footerStatus').textContent = status.state === 'ready' ? `● 应用代理就绪 · ${status.ip}` : browserTabsState.mode==='mixed'?'● 代理未连接 · 已阻止访问':browserTabsState.mode==='direct'?'● 代理未连接 · 浏览器直连':'● 应用联网已锁定';
+  $('footerStatus').textContent = status.state === 'ready' ? `● 应用代理就绪 · ${status.ip}` : browserTabsState.mode==='direct'?'● 代理未连接 · 浏览器直连':'● 应用联网已锁定';
   $('localAddress').textContent = status.state==='ready'?(status.address || '已连接'):'等待连接';
   $('prompt').disabled=draftPersistence.loading || !activeChatId;
   $('chatProxyTooltip').disabled=chatNetworkReady();if(chatNetworkReady())$('chatProxyTooltip').open=false;
@@ -632,7 +667,7 @@ $('chat').addEventListener('click',event=>{
  const link=event.target.closest?.('.markdown-body a');if(!link)return;event.preventDefault();
  let url;try{url=new URL(link.getAttribute('href'));}catch{return;}
  if(!['http:','https:'].includes(url.protocol))return;
- void action(async()=>{await api.browser('navigate',url.href);switchPage('browser');});
+ void action(async()=>{await api.browserLibrary('openLink',{url:url.href});const key=/^(localhost|127\.|\[::1\])/.test(url.hostname)?'localLinks':'webLinks';if(browserPreferences[key]!=='external')switchPage('browser');});
 });
 const approvalCards=mountToolApprovalCards({host:$('approval'),scope:()=>[chatOwnerID,chatEnvironmentID,activeChatId],decide:(id,allow)=>api.approval(id,allow),onError:message=>toast(message,'chat')});
 function renderApproval(){approvalCards.render();}
@@ -738,22 +773,15 @@ $('proxyDialog').addEventListener('wa-after-hide',event=>{if(event.target!==$('p
 function renderBrowserTabs(state) {
   const changedTab = browserTabsState.activeId !== state.activeId;
   browserTabsState = state;
-  $('browserModeSelect').value=state.mode || 'proxy';
+  browserModeSwitches.render(state.mode);
+  $('browserNetworkLabel').textContent=({direct:'直接连接',proxy:'使用应用代理',mixed:'自动选择'})[state.mode]||'使用应用代理';
+  for(const item of document.querySelectorAll('[data-browser-network]'))item.checked=item.dataset.browserNetwork===state.mode;
   const direct=state.mode==='direct',mixed=state.mode==='mixed';
   $('browserViewport').querySelector('.browser-empty h2').textContent=mixed?'自动选择访问线路':direct?'使用本机网络浏览':'在同一出口下浏览';
-  $('browserViewport').querySelector('.browser-empty p').textContent=mixed?'使用应用代理；代理不可用时停止访问，不自动直连。':direct?'输入网址或关键词，无需连接代理。':'连接代理后输入网址或关键词，默认使用 Google 搜索。';
-  if(network.state!=='ready')$('footerStatus').textContent=mixed?'● 代理未连接 · 已阻止访问':direct?'● 代理未连接 · 浏览器直连':'● 应用联网已锁定';
+  $('browserViewport').querySelector('.browser-empty p').textContent=mixed?'优先使用代理，首次连接失败时尝试直连；成功后按域名固定线路。':direct?'输入网址或关键词，无需连接代理。':'连接代理后输入网址或关键词，默认使用 Google 搜索。';
+  if(network.state!=='ready')$('footerStatus').textContent=mixed?'● 自动选择 · 代理未连接时尝试直连':direct?'● 代理未连接 · 浏览器直连':'● 应用联网已锁定';
   $('navigate').disabled=state.mode==='proxy' && network.state!=='ready';
-  if (changedTab) { addressEditing = false; closeSuggestions(); }
-  for (const tab of state.tabs) {
-    if (tab.started && !tab.loading && !tab.error && /^https?:\/\//.test(tab.url)) {
-      const previous = addressHistory.find(item => item.url === tab.url);
-      if (previous?.title !== tab.title) {
-        addressHistory = [{ url: tab.url, title: tab.title }, ...addressHistory.filter(item => item.url !== tab.url)].slice(0, 100);
-        try { localStorage.setItem('browser-history', JSON.stringify(addressHistory)); } catch {}
-      }
-    }
-  }
+  if (changedTab) { addressEditing = false; closeSuggestions(); browserToolbar.tabChanged(); }
   $('browserTabs').replaceChildren();
   for (const tab of state.tabs) {
     const item=document.createElement('wa-tab');item.panel=tab.id;item.className=`browser-tab tab-select ${tab.id===state.activeId?'active':''}`;item.dataset.url=tab.url;item.id='browser-tab-'+tab.id;
@@ -767,8 +795,8 @@ function renderBrowserTabs(state) {
   const active = state.tabs.find(tab => tab.id === state.activeId);
   if (active) {
     $('browserMessage').classList.toggle('has-error', Boolean(active.error));
-    if (!addressEditing) $('address').value = active.url;
-    $('browserMessage').textContent = active.error || (active.loading ? (mixed?'正在自动选择访问线路…':state.mode==='direct'?'正在通过本机网络加载…':'正在通过应用代理加载…') : active.started ? (mixed?'使用应用代理，不自动回退直连。':state.mode==='direct'?'页面使用本机网络直接连接。':'页面使用应用代理。') : '输入网址或关键词，默认使用 Google 搜索。');
+    if (!addressEditing) $('address').value = browserAddress(active.url);
+    $('browserMessage').textContent = active.error || (active.loading ? (mixed?'正在自动选择访问线路…':state.mode==='direct'?'正在通过本机网络加载…':'正在通过应用代理加载…') : active.started ? (mixed?(active.route==='direct'?'自动选择 · 当前域名使用本机直连。':active.route==='proxy'?'自动选择 · 当前域名使用应用代理。':'自动选择 · 尚未确定当前域名线路。'):state.mode==='direct'?'页面使用本机网络直接连接。':'页面使用应用代理。') : '输入网址或关键词，默认使用 Google 搜索。');
   }
   bounds();
 }
@@ -818,9 +846,9 @@ function renderSuggestions(reset = true) {
 }
 $('newTab').onclick = () => action(() => { closeSuggestions(); addressEditing = false; return api.browser('new'); });
 $('navigate').onclick = () => { const url = resolveBrowserAddress($('address').value); closeSuggestions(); addressEditing = false; $('address').blur(); void action(() => api.browser('navigate', url)); };
-$('address').onfocus = () => { addressEditing = true; $('address').select(); renderSuggestions(); };
+$('address').onfocus = () => { $('address').value=browserTabsState.tabs.find(t=>t.id===browserTabsState.activeId)?.url || $('address').value; addressEditing = true; $('address').select(); renderSuggestions(); };
 $('address').oninput = () => { addressEditing = true; renderSuggestions(); };
-$('address').onblur = () => { addressEditing = false; closeSuggestions(); };
+$('address').onblur = () => { addressEditing = false; closeSuggestions();$('address').value=browserAddress(browserTabsState.tabs.find(t=>t.id===browserTabsState.activeId)?.url || $('address').value); };
 $('address').onkeydown = event => {
   if (event.isComposing) return;
   if (event.key === 'Escape') { event.preventDefault(); closeSuggestions(); }
@@ -1075,7 +1103,12 @@ function handleWorkspaceEvent(type,data){
   if (type === 'environment') setEnvironment(data);
   if (type === 'network'){setNetwork(data);updateConfigurationActions();}
   if (type === 'requestFailure') activity(`${data.reason} · ${data.target} · ${data.code}`);
+  browserToolbar.handleEvent(type,data);
+  if(type==='browserLibrary'){browserPreferences=data.settings;addressHistory=data.history||[];}
+  if(type==='browserLibraryReset'){addressHistory=[];void browserLibrary.refresh();}
+  if(type==='browserLibraryError'||type==='browserAgentBlocked')toast(data.message);
   if (type === 'browserTabs') renderBrowserTabs(data);
+  if (type === 'browserCookieSync') browserSettingsUI.renderSync(data);
   if(type==='chatNetworkMode'){const item=chatSessions.find(item=>item.id===data.id);if(item)item.networkMode=data.networkMode;renderSessionList();renderChatAvailability();renderAuth();}
   if (type === 'browserError') { $('browserMessage').textContent = data; toast(data,'browser'); }
   if (type === 'ccStart') {if(selectedEngine!=='deepseek' && reply)reasoningView(reply,{kind:'process',phase:'process'},updateChatMessage);if(data.model){selectedCodexModel=data.model;const current=chatSessions.find(item=>item.id===activeChatId);if(current)current.model=data.model;renderRuntime();renderSessionHeader();}const item=chatSessions.find(item=>item.id===activeChatId);if(item){item.updatedAt=data.updatedAt || new Date().toISOString();item.chatStatus='running';renderSessionList();} busy = true;deepseekComposer.render(); $('send').disabled = false;updateSendButton(); $('ccState').textContent = 'CC 正在处理…'; }
@@ -1344,8 +1377,8 @@ $('runtimeInstallConfirm').onclick=()=>void action(async()=>{
  finally{setRuntimeInstallLoading(false);environmentConfigBusy=false;$('runtimeInstallConfirm').loading=false;$('runtimeInstallCancel').disabled=false;$('runtimeDisplayName').disabled=false;$('runtimeDescription').disabled=false;$('runtimeInstallBack').disabled=false;$('runtimeInstallClose').disabled=false;$('deepseekApiKey').disabled=false;updateConfigurationActions();}
  if(owner===accountState.user?.id && id===dockerEnvironmentState.activeId){$('runtimeInstallDialog').open=false;await refreshEnvironmentConfiguration();}
 });
-const settingCopy={git:['Git 管理','管理 Git SSH 公钥与代码仓库认证。'],browser:['浏览器','管理此设备内置浏览器的连接方式。'],profile:['个人资料','管理当前账号的基础信息。'],notifications:['通知','管理当前账号在本设备上的通知。'],preferences:['偏好设置','管理账号语言和此设备的界面外观。'],proxy:['代理与出口','管理应用代理的连接与固定出口。'],environment:['本地系统','检测系统语言与时区，管理本机使用条件。'],activity:['连接记录','查看出口核验、连接与恢复状态。']};
-for(const tab of document.querySelectorAll('[data-setting]'))tab.onclick=()=>{const key=tab.dataset.setting;if(key==='git')void gitSettings.ensureLoaded();if(key==='browser')void loadBrowserCookiePreferences();if(key==='activity')void loadConnectionRecords();$('verify').classList.toggle('hidden',key!=='proxy');document.querySelectorAll('[data-setting]').forEach(item=>item.classList.toggle('active',item===tab));document.querySelectorAll('[data-panel]').forEach(panel=>panel.classList.toggle('hidden',panel.dataset.panel!==key));$('settingsTitle').textContent=settingCopy[key][0];$('notificationScopeBadge').classList.toggle('hidden',key!=='notifications');$('settingsTitleIcon').src='assets/icons/'+({git:'git-branch',browser:'globe',profile:'user',preferences:'sliders-horizontal',notifications:'bell',proxy:'shield-check',activity:'activity',environment:'monitor'})[key]+'.svg';$('settingsDescription').textContent=settingCopy[key][1];};
+const settingCopy={git:['Git 管理','管理 Git SSH 公钥与代码仓库认证。'],browser:['浏览器','管理浏览器网络、站点数据和 Cookie 同步。'],profile:['个人资料','管理当前账号的基础信息。'],notifications:['通知','管理当前账号在本设备上的通知。'],preferences:['偏好设置','管理账号语言和此设备的界面外观。'],proxy:['代理与出口','管理应用代理的连接与固定出口。'],environment:['本地系统','检测系统语言与时区，管理本机使用条件。'],activity:['连接记录','查看出口核验、连接与恢复状态。']};
+for(const tab of document.querySelectorAll('[data-setting]'))tab.onclick=()=>{const key=tab.dataset.setting;if(key==='git')void gitSettings.ensureLoaded();if(key==='browser'){void loadBrowserCookiePreferences();void browserLibrary.refresh();}if(key==='activity')void loadConnectionRecords();$('verify').classList.toggle('hidden',key!=='proxy');document.querySelectorAll('[data-setting]').forEach(item=>item.classList.toggle('active',item===tab));document.querySelectorAll('[data-panel]').forEach(panel=>panel.classList.toggle('hidden',panel.dataset.panel!==key));$('settingsTitle').textContent=settingCopy[key][0];$('notificationScopeBadge').classList.toggle('hidden',key!=='notifications');$('settingsTitleIcon').src='assets/icons/'+({git:'git-branch',browser:'globe',profile:'user',preferences:'sliders-horizontal',notifications:'bell',proxy:'shield-check',activity:'activity',environment:'monitor'})[key]+'.svg';$('settingsDescription').textContent=settingCopy[key][1];};
 let themePreference='light';try{themePreference=localStorage.getItem('ui-theme') || 'light';}catch{}
 if(!['light','dark','system'].includes(themePreference))themePreference='light';
 const systemTheme=matchMedia('(prefers-color-scheme: dark)');
@@ -1407,7 +1440,7 @@ $('proxyFilePath').onkeydown=event=>{if(event.key==='Enter'){event.preventDefaul
 let pickerResolve=null,pickerKind='file',pickerDirectory='',pickerParent='',pickerSelection=null,pickerScope='host',pickerContext=null;
 function finishFilePicker(value=null){const resolve=pickerResolve;pickerResolve=null;$('filePicker').open=false;if(resolve)resolve(value);}
 async function loadFilePicker(directory){
- const data=pickerScope==='container'?await api.project({action:'browse',path:directory}):await api.browseFiles({directory,kind:pickerKind});pickerDirectory=data.directory;pickerParent=data.parent;if(pickerContext && (pickerContext.owner!==accountState.user?.id || pickerContext.environment!==dockerEnvironmentState.activeId))throw new Error('账号或环境已变化，请重新选择');pickerSelection=pickerKind==='directory'?pickerDirectory:null;
+ const data=pickerScope.startsWith('container')?await api.project({action:pickerScope==='container-download'?'browseDownloadDirectory':'browse',path:directory}):await api.browseFiles({directory,kind:pickerKind});pickerDirectory=data.directory;pickerParent=data.parent;if(pickerContext && (pickerContext.owner!==accountState.user?.id || pickerContext.environment!==dockerEnvironmentState.activeId))throw new Error('账号或环境已变化，请重新选择');pickerSelection=pickerKind==='directory'?pickerDirectory:null;
  $('filePickerPath').value=pickerDirectory;$('filePickerUp').disabled=pickerParent===pickerDirectory;$('filePickerConfirm').disabled=!pickerSelection;$('filePickerEntries').replaceChildren();
  for(const entry of data.entries){const row=createUI('app-button');row.className='file-picker-entry';row.dataset.path=entry.path;row.setAttribute('role','listitem');row.append(createIcon(entry.directory?'folder':'file-text'),document.createTextNode(entry.name));
   row.onclick=()=>{if(entry.directory)void action(()=>loadFilePicker(entry.path));else{pickerSelection=entry.path;$('filePickerEntries').querySelectorAll('app-button').forEach(button=>button.classList.toggle('active',button===row));$('filePickerConfirm').disabled=false;}};
@@ -1416,7 +1449,7 @@ async function loadFilePicker(directory){
  if(!data.entries.length){const empty=document.createElement('div');empty.className='app-empty-state file-picker-empty';const description=document.createElement('p');description.textContent='此目录没有可选择的项目。';empty.append(description);$('filePickerEntries').append(empty);}
  $('filePickerHint').textContent=pickerKind==='file'?'选择不超过 1 MB 的 TXT 或 CSV 导出文件。':'进入目标目录后，点击“选择此文件夹”。';
 }
-async function openFilePicker(kind,scope='host'){pickerScope=scope;pickerContext={owner:accountState.user?.id,environment:dockerEnvironmentState.activeId};pickerKind=kind;$('filePickerTitle').textContent=kind==='file'?'导入 TXT / CSV':scope==='container'?'选择容器文件夹':'选择本机项目文件夹';$('filePicker').label=$('filePickerTitle').textContent;$('filePickerConfirmLabel').textContent=kind==='file'?'导入文件':'选择此文件夹';await loadFilePicker();$('filePicker').open=true;return new Promise(resolve=>{pickerResolve=resolve;});}
+async function openFilePicker(kind,scope='host',directory){if(pickerResolve)throw new Error('请先完成当前文件夹选择');pickerScope=scope;pickerContext={owner:accountState.user?.id,environment:dockerEnvironmentState.activeId};pickerKind=kind;$('filePickerTitle').textContent=kind==='file'?'导入 TXT / CSV':scope==='container-download'?'下载保存位置':scope==='container'?'选择容器文件夹':'选择本机项目文件夹';$('filePicker').label=$('filePickerTitle').textContent;$('filePickerConfirmLabel').textContent=kind==='file'?'导入文件':'选择此文件夹';await loadFilePicker(directory);$('filePicker').open=true;return new Promise(resolve=>{pickerResolve=resolve;});}
 $('filePickerClose').onclick=$('filePickerCancel').onclick=()=>finishFilePicker();
 $('filePickerConfirm').onclick=()=>{if(pickerSelection)finishFilePicker(pickerSelection);};
 $('filePicker').addEventListener('wa-after-hide',()=>{if(pickerResolve)finishFilePicker();bounds();});
@@ -1727,7 +1760,6 @@ function refreshDisplayedTimes(){
  for(const element of document.querySelectorAll('[data-environment-date]'))element.textContent=displayEnvironmentDate(element.dataset.environmentDate,element.dataset.environmentRecent==='true');
 }
 
-$('browserModeSelect').addEventListener('change',()=>void action(async()=>{const select=$('browserModeSelect');select.disabled=true;try{renderBrowserTabs(await api.browserSettings(select.value));$('browserModeStatus').textContent='';}catch(error){select.value=browserTabsState.mode || 'proxy';throw error;}finally{select.disabled=false;}}));
 
 
 setInterval(()=>{for(const element of document.querySelectorAll('[data-environment-date]'))element.textContent=displayEnvironmentDate(element.dataset.environmentDate,element.dataset.environmentRecent==='true');},30000);

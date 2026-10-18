@@ -17,5 +17,7 @@ iptables -A OUTPUT -o lo -j ACCEPT
 iptables -A OUTPUT -d "$DINGTU_GATEWAY_IP" -p tcp --dport 8080 -j ACCEPT
 ip6tables -P OUTPUT DROP
 ip6tables -A OUTPUT -o lo -j ACCEPT
+# Keep downloads in the environment's persistent workspace, including older volumes.
+setpriv --reuid=1000 --regid=1000 --init-groups --bounding-set=-all mkdir -p /workspace/Download
 touch /tmp/kuneco-worker-ready
 exec setpriv --reuid=1000 --regid=1000 --init-groups --bounding-set=-all sleep infinity

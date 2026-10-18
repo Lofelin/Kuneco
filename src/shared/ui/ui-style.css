@@ -796,6 +796,8 @@ body{--field-border:var(--line);--field-border-hover:color-mix(in srgb,var(--mut
 :is(wa-input,wa-number-input,wa-textarea):not([disabled]):focus-within::part(base),wa-select:not([disabled]):is(:focus-within,[open])::part(combobox){border-color:var(--field-border-focus);outline-color:var(--field-focus-ring);box-shadow:none}
 #profileName:focus-within::part(base){border-color:var(--field-border-focus);box-shadow:none}
 wa-select::part(listbox),wa-dropdown::part(menu){border-color:var(--field-border)}
+/* Checked fill is semantic, independent of the neutral focus border. */
+wa-checkbox{--wa-form-control-activated-color:var(--ink)}
 :is(wa-checkbox,wa-radio)::part(control){border-color:var(--field-border)}
 :is(wa-checkbox,wa-radio):not([disabled]):hover::part(control){border-color:var(--field-border-hover)}
 :is(wa-checkbox,wa-radio):not([disabled]):focus-within::part(control){border-color:var(--field-border-focus)}
@@ -1306,22 +1308,12 @@ wa-dropdown:has(wa-dropdown-item:hover) wa-dropdown-item:not(:hover){background:
 .chat-network-mode wa-icon{width:11.2px!important;height:11.2px!important;min-width:11.2px!important;min-height:11.2px!important;font-size:11.2px!important}
 .session-row-container.selected .chat-network-mode{background:var(--selected)}
 
-/* Connection modes form comparable cards, stacking when space is limited. */
-.browser-connection-options{display:block;container-type:inline-size}
-.browser-connection-options::part(form-control-input){display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
-.browser-connection-options wa-radio{position:relative;display:flex;align-items:flex-start;min-width:0;height:100%;margin:0;padding:12px 14px;border:1px solid var(--line);border-radius:8px;background:var(--surface);transition:background .15s,border-color .15s}
-.browser-connection-options wa-radio::part(control){position:absolute;top:15px;right:12px;margin:0}
-.browser-connection-options wa-radio::part(label){display:block;margin:0;width:100%;min-width:0}
-.browser-connection-options .connection-option-copy{display:flex;flex-direction:column;gap:6px}
-.browser-connection-options strong{padding-right:28px;font-size:14px;line-height:22px;font-weight:550;color:var(--ink)}
-.browser-connection-options .connection-option-copy>span{font-size:12px;line-height:1.5;color:var(--muted);text-wrap:pretty}
-.browser-connection-options wa-radio:hover{border-color:var(--field-border-hover)}
-.browser-connection-options wa-radio:state(checked){border-color:var(--field-border-focus);background:var(--soft)}
-@container(max-width:650px){
- .browser-connection-options wa-radio{grid-column:1/-1;padding:12px 14px}
- .browser-connection-options .connection-option-copy{gap:6px}
- .browser-connection-options wa-radio::part(control){top:15px}
-}
+/* Network choices reuse the shared settings rows. */
+.browser-connection-options{display:block}
+.browser-connection-options::part(form-control-input){display:flex;flex-direction:column;gap:0}
+.browser-connection-options wa-radio{position:relative;margin:0;min-width:0;border-radius:0}
+.browser-connection-options wa-radio::part(control){position:absolute;top:50%;right:var(--settings-row-padding-inline);transform:translateY(-50%);margin:0}
+.browser-connection-options wa-radio::part(label){display:block;margin:0;width:100%;min-width:0;padding-right:36px;box-sizing:border-box}
 
 .chat-network-mode[data-mode="proxy"]{color:var(--success)}
 .chat-network-mode[data-mode="direct"]{color:var(--blue)}
@@ -1364,7 +1356,7 @@ app-button.session-pin,app-button.session-archive{--icon-hit-size:22px}
 .session-archive{right:8px}
 .session-pin wa-icon,.session-archive wa-icon{width:12px!important;height:12px!important;min-width:12px!important;min-height:12px!important;font-size:12px!important}
 
-#browserCookiesDialog{--width:720px}
+
 .cookie-toolbar{display:flex;gap:10px;align-items:center}.cookie-toolbar wa-input{flex:1}
 #browserCookieList{max-height:30vh;overflow:auto;border-top:1px solid var(--line)}
 #browserCookieList details{border-bottom:1px solid var(--line);padding:12px 0}
@@ -1378,7 +1370,8 @@ app-button.session-pin,app-button.session-archive{--icon-hit-size:22px}
 .cookie-preference-copy{min-width:0;flex:1}.cookie-preference-copy .preference-heading{margin:0 0 6px}.cookie-preference-copy p{margin:0;font-size:12px;line-height:1.6}
 .browser-cookie-preferences .cookie-preference-row wa-select{width:240px;flex-shrink:0}
 #browserCookieSettingsStatus:empty{display:none}
-.small-tag wa-icon{width:12px!important;height:12px!important;font-size:12px!important;vertical-align:-2px;margin-right:5px}
+wa-badge.small-tag::part(base){display:inline-flex;align-items:center;gap:5px;line-height:14px}
+.small-tag wa-icon{width:12px!important;height:12px!important;font-size:12px!important;flex:none;margin:0;vertical-align:middle}
 @media(max-width:1100px){.cookie-preference-row{gap:16px}.browser-cookie-preferences .cookie-preference-row wa-select{width:200px}}
 
 .cookie-preference-card{border:1px solid var(--line);border-radius:12px;background:var(--wa-color-surface-default,white);overflow:hidden}.cookie-preference-copy strong{display:block;margin-bottom:6px;font-size:14px}
@@ -1760,7 +1753,7 @@ body{--field-border-hover:var(--line);--field-border-focus:var(--line);--field-f
 :is(wa-input,wa-number-input,wa-textarea):not([disabled]):is(:hover,:focus-within)::part(base),wa-select:not([disabled]):is(:hover,:focus-within,[open])::part(combobox){border-color:var(--line)!important;outline:0!important;box-shadow:none!important}
 :is(app-button,input,select,textarea,a,[tabindex]):focus-visible{outline:2px solid var(--field-focus-ring)!important;outline-offset:2px}
 app-button::part(base):focus-visible{outline:2px solid var(--field-focus-ring)!important;outline-offset:2px}
-:is(.learning-template,.environment-created-next):is(:hover,:focus-visible,:active),.browser-connection-options wa-radio:state(checked){border-color:var(--line)!important;background:var(--soft)}
+:is(.learning-template,.environment-created-next):is(:hover,:focus-visible,:active){border-color:var(--line)!important;background:var(--soft)}
 .environment-detail-icon-button:hover::part(base){border-color:var(--line)}
 /* Plain actions are transparent in every pointer state; keyboard focus stays visible. */
 app-button:is([appearance=plain],.transparent-action,.text-button),app-button.transparent-action{background:transparent!important;border-color:transparent!important;box-shadow:none!important}
@@ -2013,6 +2006,7 @@ wa-switch{--wa-form-control-activated-color:var(--ink)}
 .notification-save-status{min-height:20px;font-size:12px;margin:12px 0}
 
 /* Shared settings section rhythm: measure gaps between actual element boxes. */
+.settings-heading-compact{column-gap:4px}
 .settings-body{--settings-title-description-gap:4px;--settings-section-content-gap:8px}
 .settings-body :is(.preference-heading,.profile-section-heading,.proxy-config-toolbar){margin-bottom:var(--settings-section-content-gap)}
 .settings-body .proxy-config-toolbar>.preference-heading{margin:0}
@@ -2037,10 +2031,6 @@ wa-switch{--wa-form-control-activated-color:var(--ink)}
 }
 .settings-body :is(.notification-setting-copy,.cookie-preference-copy) strong{display:block;margin:0;font-size:var(--settings-row-title-size);line-height:var(--settings-row-title-line-height)}
 .settings-body :is(.notification-setting-copy,.cookie-preference-copy) p{margin:var(--settings-row-copy-gap) 0 0;line-height:18px}
-.settings-body .browser-connection-options wa-radio{box-sizing:border-box;min-height:var(--settings-row-height);padding:var(--settings-row-padding-block) var(--settings-row-padding-inline)}
-.settings-body .browser-connection-options .connection-option-copy{gap:var(--settings-row-copy-gap)}
-.settings-body .browser-connection-options strong{font-size:13px;line-height:20px}
-.settings-body .browser-connection-options .connection-option-copy>span{line-height:18px}
 .settings-body .profile-details{padding:0;gap:0}
 .settings-body .profile-details>div{box-sizing:border-box;min-height:var(--settings-row-height);padding:var(--settings-row-padding-block) var(--settings-row-padding-inline);display:flex;flex-direction:column;justify-content:center}
 .settings-body .profile-details dt{line-height:18px;margin-bottom:var(--settings-row-copy-gap)}
@@ -2198,6 +2188,33 @@ body.chat-mode .content-tabs-viewport{padding-right:48px}
 
 .git-inline-status{display:inline-flex;align-items:center;gap:6px;max-width:100%}
 
+/* Browser settings use the shared settings rows, table and dialog shells. */
+#browserSettingsPanel>section:first-child{margin-top:0}
+#browserSettingsPanel section+section{margin-top:28px}
+#browserModeStatus:empty{display:none}
+#browserSettingsPanel .cookie-preference-row+ .cookie-preference-row{border-top:1px solid var(--line)}
+.browser-dialog{--width:640px}
+.browser-dialog-compact{--width:480px}
+.browser-dialog-compact .browser-data-dialog-content{gap:8px}
+.browser-data-dialog-title{display:flex;align-items:center;flex-wrap:wrap;gap:10px;overflow-wrap:anywhere}
+.browser-data-dialog-content{display:flex;flex-direction:column;gap:12px}
+.browser-data-dialog-content > p{margin:0;line-height:20px;overflow-wrap:anywhere}
+.browser-data-dialog-content > p:empty{display:none}
+.browser-dialog .cookie-toolbar{flex-wrap:wrap}
+.browser-dialog .cookie-toolbar wa-input{min-width:0;flex:1 1 180px}
+.browser-data-copy{display:flex;flex-direction:column;gap:4px}
+.browser-data-copy p{margin:0;line-height:20px}
+.browser-data-copy p:empty{display:none}
+.browser-library-status{margin:0;line-height:20px}
+.browser-library-status:empty{display:none}
+#browserSiteTable{--data-list-max-height:min(320px,38vh)}
+
+.browser-dialog > [slot=footer]{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px}
+
+@media(max-width:850px){#browserSettingsPanel .cookie-preference-row{flex-wrap:wrap}#browserSettingsPanel .cookie-preference-row wa-select{max-width:100%}}
+
+#browserModeSelect+.muted+.proxy-summary-card{margin-top:8px}
+
 #gitRefresh[data-state="error"] #gitRefreshLabel,
 #gitCopy[data-state="error"] wa-icon,
 #gitGenerate[data-state="error"] #gitGenerateLabel{color:var(--danger,#dc2626)}
@@ -2216,10 +2233,19 @@ body.chat-mode .content-tabs-viewport{padding-right:48px}
  .window-insights .chat-insights{position:relative;flex-basis:calc(var(--insights-size) - 10px);width:calc(var(--insights-size) - 10px);background:transparent}
 }
 
+/* Browser capability sections reuse the global settings and dialog contracts. */
+.browser-library-settings{display:contents}
+.browser-findbar{display:flex;align-items:center;gap:8px;padding:8px 0;flex-wrap:wrap}
+.browser-findbar wa-input{flex:1;min-width:160px}
+.browser-findbar>span{color:var(--muted);font-size:12px;white-space:nowrap}
+.browser-toolbar{flex-wrap:wrap}
 
 .chat-document-chip,.chat-document-card{display:flex;align-items:center;gap:8px;min-width:0;padding:8px;border:1px solid var(--line);border-radius:8px;font-size:12px}.chat-document-card{flex-wrap:wrap}.chat-document-card strong{overflow-wrap:anywhere}.chat-document-card small{color:var(--muted)}.message-documents{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}#sessionEffort{max-width:130px}
 
 .chat-insights .app-empty-state>p{margin:0}
+
+.browser-header-actions{display:flex;align-items:center;gap:8px;flex:none}
+#browserMenuPreview{position:absolute;inset:0;width:100%;height:100%;object-fit:fill;z-index:1;pointer-events:none}
 
 #gitCopy[data-state="success"] wa-icon{color:var(--success)}
 #gitKeySelectStatus:empty{display:none}
@@ -2231,3 +2257,6 @@ body.chat-mode .content-tabs-viewport{padding-right:48px}
 .form-field-group>.settings-section-description{display:block}
 .form-field-group>[role=status]:empty,.form-field-group>[role=alert]:empty{display:none}
 #proxyManualPanel>.field-row:first-child{align-items:flex-start}
+
+.browser-download-reset[data-state=success]::part(base){color:var(--success)}
+.browser-download-reset[data-state=error]::part(base){color:var(--danger)}

@@ -7,9 +7,7 @@ contextBridge.executeInMainWorld({ func: function installBrowserPolicy() {
   for (const name of Object.getOwnPropertyNames(globalThis).filter(name => /^(?:RTC|webkitRTC)/.test(name)).concat(['RTCPeerConnection','webkitRTCPeerConnection','WebTransport'])) {
     Object.defineProperty(globalThis, name, { value: undefined, configurable: false, writable: false });
   }
-  if (globalThis.navigator?.mediaDevices) {
-    Object.defineProperty(navigator.mediaDevices, 'getUserMedia', { value: () => Promise.reject(new DOMException('Media capture is disabled.', 'NotAllowedError')), configurable: false, writable: false });
-  }
+  // Media capture is governed by the account/environment scoped Electron permission handlers.
   for (const name of ['getUserMedia','webkitGetUserMedia','mozGetUserMedia']) {
     if (globalThis.navigator && name in navigator) Object.defineProperty(navigator, name, { value: (_constraints, _success, fail) => fail?.(new DOMException('Media capture is disabled.', 'NotAllowedError')), configurable: false, writable: false });
   }

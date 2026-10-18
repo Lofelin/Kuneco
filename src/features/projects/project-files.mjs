@@ -18,9 +18,9 @@ export async function validateProjectImport(selected){
  }
  await visit(root);return root;
 }
-const directoryScript=`const fs=require('fs'),p=require('path');const root=fs.realpathSync(process.argv[1]),current=fs.realpathSync(process.argv[2]||root);if(current!==root&&!current.startsWith(root+'/'))throw Error('目录超出当前环境工作区');if(!fs.statSync(current).isDirectory())throw Error('请选择目录');const entries=fs.readdirSync(current,{withFileTypes:true}).filter(e=>e.isDirectory()).map(e=>({name:e.name,path:p.join(current,e.name),directory:true})).sort((a,b)=>a.name.localeCompare(b.name));console.log(JSON.stringify({directory:current,parent:current===root?root:p.dirname(current),entries}));`;
-export async function browseEnvironmentProject(docker,owner,id,directory){
- const root=await docker.workingDirectory(owner,id);
+const directoryScript=`const fs=require('fs'),p=require('path');const root=fs.realpathSync(process.argv[1]),current=fs.realpathSync(process.argv[2]||root);if(current!==root&&!current.startsWith(root.endsWith('/')?root:root+'/'))throw Error('目录超出当前环境工作区');if(!fs.statSync(current).isDirectory())throw Error('请选择目录');const entries=fs.readdirSync(current,{withFileTypes:true}).filter(e=>e.isDirectory()).map(e=>({name:e.name,path:p.join(current,e.name),directory:true})).sort((a,b)=>a.name.localeCompare(b.name));console.log(JSON.stringify({directory:current,parent:current===root?root:p.dirname(current),entries}));`;
+export async function browseEnvironmentProject(docker,owner,id,directory,{containerRoot=false}={}){
+ const root=containerRoot?'/':await docker.workingDirectory(owner,id);
  return JSON.parse(await docker.exec(owner,id,['node','-e',directoryScript,root,directory || root]));
 }
 export async function selectEnvironmentProject(docker,owner,id,directory){
