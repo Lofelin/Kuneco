@@ -3,6 +3,8 @@ import {createShutdownBarrier} from './shutdown.mjs';
 import {createChatPopouts} from '../features/chat/chat-popout-main.mjs';
 import {normalizeDocuments,documentPrompt} from '../features/chat/document-attachments.mjs';
 import {createBrowserFeatures,browserLoadError,isLocalURL} from '../features/browser/browser-features.mjs';
+import {createBrowserAgentTool} from '../features/browser/browser-agent.mjs';
+import {z} from 'zod';
 import {createToolApprovalBroker} from '../features/runtimes/tool-approval.mjs';
 import {sandboxHTML,artifactCSP} from '../features/chat/artifact-sandbox.mjs';
 import {usageDetails,recordArtifacts,insightView} from '../features/chat/chat-insights.mjs';
@@ -48,7 +50,7 @@ import path from 'node:path';
 import { isIP } from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { randomUUID, createHash } from 'node:crypto';
-import { query } from '@anthropic-ai/claude-agent-sdk';
+import { query,createSdkMcpServer,tool } from '@anthropic-ai/claude-agent-sdk';
 import { ProxyGateway, proxyEnvironment, validateProxy } from '../features/proxy/proxy.mjs';
 import { parseAuthStatus, detectAIAuth } from '../features/runtimes/ai-auth.mjs';
 import { readCodexModel, listCodexModels } from '../features/runtimes/codex-runner.mjs';
@@ -1223,13 +1225,14 @@ ipcMain.handle('workspace:cc', guarded(async (prompt,rewind,chatId=activeAISessi
   emitChat('ccStart', {updatedAt:currentChat?.updatedAt,model:currentChat?.model});
   void (async () => {
     try {
+      const browserTool=createBrowserAgentTool({features:browserFeatures,scope:{owner:requestOwner,environmentId},signal:controller.signal,getScope:()=>({owner:dockerOwner(),environmentId:activeContainerId}),getTabs:()=>[...browserTabs.values()],getActive:()=>browserTabs.get(activeTabId),openURL:url=>createBrowserTab(url),navigate:navigateBrowserTab,networkReady:browserNetworkReady});
       if(engine==='deepseek'){
         if(!containerSpawn)throw new Error('DeepSeek 仅在当前容器环境可用');
-        const usage=await runDeepSeek({onUsage:usage=>{latestUsage=Number.isSafeInteger(usage?.total_tokens)?usage.total_tokens:null;latestUsageDetails=usageDetails('deepseek',usage);},onCompaction:record=>{delete currentChat.contextPrefix;currentChat.compression=record;if(Number.isSafeInteger(record.usage?.total_tokens)){const entry={at:record.at,totalTokens:record.usage.total_tokens,purpose:'compaction',details:usageDetails('deepseek',record.usage)};(currentChat.tokenUsage||=[]).push(entry);emitChat('ccUsage',{sessionId:currentChat.id,entry});}void persistAISessions();},project:workingDirectory,onActivity:activity=>emitChat('ccActivity',activity),networkMode:requiresProxy?'proxy':'direct',spawnProcess:launch,sessionId:currentChat.deepseekSessionId || chatId,history:currentChat.contextPrefix?deepSeekPrefix(currentChat.contextPrefix):undefined,model:model,prompt,signal:controller.signal,onText:text=>emitChat('ccText',text),onReasoning:text=>emitChat('ccReasoning',text),onFinish:reason=>{if(reason==='length')emitChat('ccNotice','回复达到长度限制，可继续追问。');}});latestUsage=Number.isSafeInteger(usage?.total_tokens)?usage.total_tokens:null;latestUsageDetails=usageDetails('deepseek',usage);
+        const usage=await runDeepSeek({browserTool,onUsage:usage=>{latestUsage=Number.isSafeInteger(usage?.total_tokens)?usage.total_tokens:null;latestUsageDetails=usageDetails('deepseek',usage);},onCompaction:record=>{delete currentChat.contextPrefix;currentChat.compression=record;if(Number.isSafeInteger(record.usage?.total_tokens)){const entry={at:record.at,totalTokens:record.usage.total_tokens,purpose:'compaction',details:usageDetails('deepseek',record.usage)};(currentChat.tokenUsage||=[]).push(entry);emitChat('ccUsage',{sessionId:currentChat.id,entry});}void persistAISessions();},project:workingDirectory,onActivity:activity=>emitChat('ccActivity',activity),networkMode:requiresProxy?'proxy':'direct',spawnProcess:launch,sessionId:currentChat.deepseekSessionId || chatId,history:currentChat.contextPrefix?deepSeekPrefix(currentChat.contextPrefix):undefined,model:model,prompt,signal:controller.signal,onText:text=>emitChat('ccText',text),onReasoning:text=>emitChat('ccReasoning',text),onFinish:reason=>{if(reason==='length')emitChat('ccNotice','回复达到长度限制，可继续追问。');}});latestUsage=Number.isSafeInteger(usage?.total_tokens)?usage.total_tokens:null;latestUsageDetails=usageDetails('deepseek',usage);
         delete currentChat.contextPrefix;emitChat('ccResult',{error:false});return;
       }
       if(engine==='codex') {
-        await runCodex({useLocalModel:!activeContainerId,spawnProcess:launch || undefined,executable:activeContainerId?'codex':codexPath,project:workingDirectory,model:model,reasoningEffort:preparedChat.reasoningEffort,images:[...(!nativeCodexId?currentChat.contextPrefix?.flatMap(m=>m.images || []) || []:[]),...prompt.images],prompt:!nativeCodexId?replayPrompt(currentChat.contextPrefix,prompt.text):prompt.text,sessionId:nativeCodexId,gateway:owner,signal:controller.signal,canStart:canContinue,onEvent:(type,value)=>{if(type==='session'){currentChat.codexSessionId=value;if(activeAISessionId===currentChat.id)codexSessionId=value;}else if(type==='usage'){latestUsage=totalUsageTokens('codex',value);latestUsageDetails=usageDetails('codex',value);}else emitChat({text:'ccText',tool:'ccTool',process:'ccProcess',activity:'ccActivity',error:'ccError'}[type],type==='tool'?{name:value}:value);}});
+        await runCodex({browserTool,useLocalModel:!activeContainerId,spawnProcess:launch || undefined,executable:activeContainerId?'codex':codexPath,project:workingDirectory,model:model,reasoningEffort:preparedChat.reasoningEffort,images:[...(!nativeCodexId?currentChat.contextPrefix?.flatMap(m=>m.images || []) || []:[]),...prompt.images],prompt:!nativeCodexId?replayPrompt(currentChat.contextPrefix,prompt.text):prompt.text,sessionId:nativeCodexId,gateway:owner,signal:controller.signal,canStart:canContinue,onEvent:(type,value)=>{if(type==='session'){currentChat.codexSessionId=value;if(activeAISessionId===currentChat.id)codexSessionId=value;}else if(type==='usage'){latestUsage=totalUsageTokens('codex',value);latestUsageDetails=usageDetails('codex',value);}else emitChat({text:'ccText',tool:'ccTool',process:'ccProcess',activity:'ccActivity',error:'ccError'}[type],type==='tool'?{name:value}:value);}});
         delete currentChat.contextPrefix;emitChat('ccResult',{sessionId:currentChat.codexSessionId,error:false});return;
       }
       const snapshotOwner=dockerOwner(),snapshotEnvironment=activeContainerId;
@@ -1239,6 +1242,7 @@ ipcMain.handle('workspace:cc', guarded(async (prompt,rewind,chatId=activeAISessi
        return snapshotEnvironment?JSON.parse(await dockerEnvs.exec(snapshotOwner,snapshotEnvironment,['node','--input-type=module','-e',snapshotSource+"\nconsole.log(JSON.stringify(await readTextSnapshot(process.argv[1])));",file],{timeout:5000,maxBuffer:300000})):readTextSnapshot(file);
       }});
       const execution = query({ prompt: (async function* () { yield { type: 'user', message: { role: 'user', content: !nativeSessionId?replayPrompt(currentChat.contextPrefix,prompt):prompt }, parent_tool_use_id: null, session_id: '' }; })(), options: {
+        mcpServers:{kuneco:createSdkMcpServer({name:'kuneco',version:'1.0.0',tools:[tool('KunecoBrowser',browserTool.definition.description,{action:z.string(),tabId:z.string().optional(),url:z.string().optional(),selector:z.string().optional(),text:z.string().optional(),amount:z.number().optional(),name:z.string().optional(),input:z.record(z.string(),z.unknown()).optional()},async args=>{try{return {content:[{type:'text',text:JSON.stringify(await browserTool.execute(args))}]};}catch(error){return {isError:true,content:[{type:'text',text:error.message}]};}})]})},
         cwd: workingDirectory, pathToClaudeCodeExecutable: activeContainerId?'claude':claudePath, model:model || undefined,
         env: chatRuntimeEnvironment(requiresProxy?proxyEnvironment(process.env, owner.url):directChatEnvironment(process.env)), settingSources: ['user','project','local'],
         spawnClaudeCodeProcess: launch || createRestrictedCCSpawner({port:owner.port,canStart:()=>environmentStatus.allowed && gateway === owner && owner.status.state === 'ready' && !controller.signal.aborted}),

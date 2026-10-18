@@ -6,7 +6,7 @@ import {proxyEnvironment} from '../proxy/proxy.mjs';
 import {createRestrictedCCSpawner} from './cc-network-guard.mjs';
 import {readCodexModel} from './codex-runner.mjs';
 export function codexStreamArguments(){return ['app-server','--listen','stdio://','-c','web_search="live"'];}
-export async function runCodexStream({executable,project,prompt,images=[],sessionId,gateway,signal,canStart,onEvent,spawnProcess,model:chosenModel,useLocalModel=true,reasoningEffort}){
+export async function runCodexStream({executable,project,prompt,images=[],sessionId,gateway,signal,canStart,onEvent,spawnProcess,model:chosenModel,useLocalModel=true,reasoningEffort,browserTool}){
  if(signal?.aborted)throw new Error('请求已取消。');
  const env=chatRuntimeEnvironment(gateway.status?.mode==='direct'?directChatEnvironment(process.env):proxyEnvironment(process.env,gateway.url));
  delete env.OPENAI_BASE_URL;delete env.OPENAI_API_KEY;delete env.CODEX_API_KEY;
@@ -23,6 +23,20 @@ export async function runCodexStream({executable,project,prompt,images=[],sessio
  lines.on('line',line=>{
   let event;try{event=JSON.parse(line);}catch{return;}
   if(event.method && event.id!==undefined){
+   if(event.method==='item/tool/call'){
+    void (async()=>{
+     let result;
+     try{
+      if(settled || signal?.aborted)return;
+      const params=event.params || {};
+      if(!browserTool || params.tool!==browserTool.definition.name || params.namespace)throw new Error('浏览器工具不可用');
+      if(params.threadId!==threadId || (turnId && params.turnId!==turnId))throw new Error('浏览器工具请求不属于当前会话');
+      const value=await browserTool.execute(params.arguments);
+      result={contentItems:[{type:'inputText',text:typeof value==='string'?value:JSON.stringify(value ?? null)}],success:true};
+     }catch(error){result={contentItems:[{type:'inputText',text:String(error?.message || error)}],success:false};}
+     if(!settled && !signal?.aborted && !child.stdin.destroyed && !child.stdin.writableEnded)child.stdin.write(JSON.stringify({id:event.id,result})+'\n');
+    })();return;
+   }
    let result;if(['item/commandExecution/requestApproval','item/fileChange/requestApproval'].includes(event.method))result={decision:'acceptForSession'};
    else if(event.method==='item/permissions/requestApproval')result={permissions:event.params?.permissions || {},scope:'session'};
    child.stdin.write(JSON.stringify(result?{id:event.id,result}:{id:event.id,error:{code:-32601,message:'Client handler unavailable for '+event.method}})+'\n');return;
@@ -32,7 +46,7 @@ export async function runCodexStream({executable,project,prompt,images=[],sessio
    if(event.error){fail(event.error.message);return;}
    if(method==='initialize'){
     child.stdin.write(JSON.stringify({method:'initialized'})+'\n');
-    request(sessionId?'thread/resume':'thread/start',{...(sessionId?{threadId:sessionId}:{}),cwd:project,model:model || undefined,modelProvider:'openai',approvalPolicy:'never',sandbox:'danger-full-access',baseInstructions:'',developerInstructions:''});
+    request(sessionId?'thread/resume':'thread/start',{...(sessionId?{threadId:sessionId}:{}),cwd:project,model:model || undefined,modelProvider:'openai',approvalPolicy:'never',sandbox:'danger-full-access',baseInstructions:'',developerInstructions:'',...(!sessionId && browserTool?{dynamicTools:[{...browserTool.definition,type:'function'}]}:{})});
    }else if(method==='thread/start' || method==='thread/resume'){
     threadId=event.result?.thread?.id;if(!threadId){fail('Codex 未返回会话 ID。');return;}onEvent('session',threadId);
     request('turn/start',{threadId,...(reasoningEffort?{effort:reasoningEffort}:{}),input:[{type:'text',text:prompt},...images.map(image=>typeof image==='string'?{type:'localImage',path:image}:{type:'image',url:image.dataURL})],model:model || undefined,approvalPolicy:'never',sandboxPolicy:{type:'dangerFullAccess'}});
@@ -56,6 +70,6 @@ export async function runCodexStream({executable,project,prompt,images=[],sessio
   else if(event.method==='error' && !p.willRetry)fail(p.error?.message);
  });
  signal?.addEventListener('abort',abort,{once:true});startTimer=setTimeout(()=>fail('Codex 启动超时，请重试。'),30000);
- request('initialize',{clientInfo:codexClientInfo,capabilities:{experimentalApi:false}});
+ request('initialize',{clientInfo:codexClientInfo,capabilities:{experimentalApi:Boolean(browserTool)}});
  try{await done;}finally{clearTimeout(startTimer);signal?.removeEventListener('abort',abort);lines.close();child.stdin.end();child.kill('SIGTERM');}
 }

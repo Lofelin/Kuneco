@@ -9,7 +9,7 @@ const MAX_OUTPUT=32000;
 const within=(root,file)=>file===root || file.startsWith(root+path.sep);
 const text=(value,name,max=50000)=>{if(typeof value!=='string'||!value.trim()||value.length>max)throw new Error(name+' 无效');return value;};
 const schema=(name,description,properties,required)=>({type:'function',function:{name,description,parameters:{type:'object',properties,required,additionalProperties:false}}});
-export async function createDeepSeekTools({cwd,home=homedir(),signal,onActivity=()=>{}}){
+export async function createDeepSeekTools({cwd,home=homedir(),signal,onActivity=()=>{},browserTool}){
  const root=await realpath(cwd);const catalog=deepSeekSkills((await scanSkillCatalog({cwd:root,home})).entries);const skills=new Map(catalog.map(s=>[s.name,s]));
  const definitions=[
   schema('Skill','Load a named skill and follow its instructions using the available tools. Completion means instructions were loaded; subsequent commands have separate results. Available skills: '+JSON.stringify(catalog.map(({name,description})=>({name,description}))),{skill:{type:'string'},args:{type:'string'}},['skill']),
@@ -17,6 +17,7 @@ export async function createDeepSeekTools({cwd,home=homedir(),signal,onActivity=
   schema('Write','Write UTF-8 text to a file in the current project. Only perform changes requested by the user; parent directory must exist.',{path:{type:'string'},content:{type:'string'}},['path','content']),
   schema('Bash','Execute a shell command in the current project inside this environment container. Run only actions authorized by the user. Do not automatically retry commands with side effects. Inherit the current environment network route.',{command:{type:'string'},timeout_ms:{type:'integer',minimum:100,maximum:120000}},['command'])
  ];
+ if(browserTool)definitions.push({type:'function',function:{name:browserTool.definition.name,description:browserTool.definition.description,parameters:browserTool.definition.inputSchema}});
  async function projectFile(value,write=false){const requested=path.resolve(root,text(value,'path',4096));let resolved;try{resolved=await realpath(requested);}catch(error){if(!write||error.code!=='ENOENT')throw error;resolved=path.join(await realpath(path.dirname(requested)),path.basename(requested));}if(!within(root,resolved))throw new Error('文件路径超出当前项目');return resolved;}
  async function bash(input,progress){
   const command=text(input.command,'command');const timeout=input.timeout_ms??120000;if(!Number.isInteger(timeout)||timeout<100||timeout>120000)throw new Error('timeout_ms 无效');
@@ -46,7 +47,9 @@ export async function createDeepSeekTools({cwd,home=homedir(),signal,onActivity=
    else if(name==='Read'){const file=await projectFile(input.path);if((await stat(file)).size>MAX_OUTPUT)throw new Error('文件过大，请使用 Bash 按范围读取');result={path:file,content:await readFile(file,'utf8')};}
    else if(name==='Write'){const file=await projectFile(input.path,true);if(typeof input.content!=='string'||input.content.length>200000)throw new Error('content 无效或过大');signal?.throwIfAborted();const before=await readTextSnapshot(file);await writeFile(file,input.content);const after=await readTextSnapshot(file);result={path:file,writtenBytes:Buffer.byteLength(input.content),changes:[before.available&&after.available?{path:file,before:before.text,after:after.text}:{path:file,unavailable:before.reason||after.reason}]};}
    else if(name==='Bash')result=await bash(input,output=>onActivity({...activity,output,durationMs:Date.now()-started}));
+   else if(browserTool && name===browserTool.definition.name)result=await browserTool.execute(input);
    else throw new Error('未知工具：'+name);
+   if(result===null || typeof result!=='object')result={result};
    const failed=Boolean(result.error)||name==='Bash'&&result.exitCode!==0;
    onActivity({...activity,status:signal?.aborted?'stopped':failed?'failed':'completed',output:name==='Bash'?result.output:result,...(result.changes?{changes:result.changes}:{}),...(name==='Bash'?{exitCode:result.exitCode}:{}),...(result.error?{error:result.error}:{}),durationMs:Date.now()-started});
    return JSON.stringify({...result,...(signal?.aborted?{error:'执行已停止，不要自动重试'}:{})});

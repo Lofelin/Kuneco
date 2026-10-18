@@ -121,7 +121,7 @@ export async function configureDeepSeek(directory,input,request){
  await writeFile(temporary,JSON.stringify({apiKey:input.apiKey,model,models}),{mode:0o600});await chmod(temporary,0o600);await rename(temporary,file);
  return {model,models};
 }
-export async function runDeepSeekCLI(command,input,{directory=path.join(homedir(),'.config','dingtu-deepseek'),request=requestDeepSeek,onText=()=>{},onReasoning=()=>{},onActivity=()=>{},onCompaction=()=>{},onUsage=()=>{},signal}={}){
+export async function runDeepSeekCLI(command,input,{directory=path.join(homedir(),'.config','dingtu-deepseek'),request=requestDeepSeek,onText=()=>{},onReasoning=()=>{},onActivity=()=>{},onCompaction=()=>{},onUsage=()=>{},signal,browserTool}={}){
  if(command==='configure-install')return configureDeepSeek(directory,input,(route)=>request(undefined,input.apiKey,route,undefined,{installation:true}));
  if(command==='configure')return configureDeepSeek(directory,input,(route,body)=>request(process.env.HTTP_PROXY,input.apiKey,route,body));
  const config=JSON.parse(await readFile(path.join(directory,'credentials.json'),'utf8'));
@@ -165,7 +165,7 @@ export async function runDeepSeekCLI(command,input,{directory=path.join(homedir(
  const totalImageBytes=allImages.reduce((total,p)=>total+(p.image_url.url.startsWith('data:')?Buffer.from(p.image_url.url.split(',')[1],'base64').length:0),0);if(totalImageBytes>200*1024*1024)throw new Error('对话图片总大小超过 200 MiB，请新建对话');
  if(allImages.length>600)throw new Error('对话图片累计超过 600 张，请新建对话');
  const options={direct:input.networkMode==='direct',onText,onReasoning,signal};
- const tools=input.project===undefined?null:await createDeepSeekTools({cwd:input.project,signal,onActivity});
+ const tools=input.project===undefined?null:await createDeepSeekTools({cwd:input.project,signal,onActivity,browserTool});
  const body={model,messages,stream:true,stream_options:{include_usage:true},thinking:{type:message.thinking},...(tools?{tools:tools.definitions,tool_choice:'auto'}:{})};
  let executedTools=0;const uploaded=[],imageReferences=new Map();
  try{
@@ -212,9 +212,30 @@ export async function runDeepSeekCLI(command,input,{directory=path.join(homedir(
  }catch(error){if(error.recovery&&executedTools>0)error.recovery={...error.recovery,executionUnknown:true,manualRetry:false};throw error;}finally{for(const id of uploaded)await request(process.env.HTTP_PROXY,config.apiKey,'/files/'+id,null,{direct:options.direct}).catch(()=>{});}
 
 }
+// A bridge belongs to one CLI invocation; pending calls never survive EOF or cancellation.
+export function readDeepSeekInput(stream,{signal,send=()=>{}}={}){
+ let buffer='',initialized=false,legacy=false,closed=false,sequence=0,resolveInput,rejectInput;const pending=new Map();
+ const input=new Promise((resolve,reject)=>{resolveInput=resolve;rejectInput=reject;});
+ const close=(error=new Error('浏览器工具连接已关闭'))=>{if(closed)return;closed=true;stream.off('data',data);stream.off('end',end);stream.off('error',close);signal?.removeEventListener('abort',abort);if(!initialized)rejectInput(error);for(const item of pending.values())item.reject(error);pending.clear();};
+ const abort=()=>close(new Error('请求已取消'));
+ const accept=value=>{
+  if(!initialized){const definition=value?.browserTool?.definition;
+   if(definition && (typeof definition.name!=='string' || !definition.name || typeof definition.description!=='string' || !definition.inputSchema))throw new Error('浏览器工具定义无效');
+   const browserTool=definition?{definition,execute:args=>{if(closed || signal?.aborted)return Promise.reject(new Error('浏览器工具连接已关闭'));const id=String(++sequence);return new Promise((resolve,reject)=>{pending.set(id,{resolve,reject});try{send({type:'browser-tool-request',id,input:args});}catch(error){pending.delete(id);reject(error);}});}}:undefined;
+   initialized=true;resolveInput({input:value,browserTool});return;
+  }
+  if(value?.type!=='browser-tool-result' || typeof value.id!=='string')throw new Error('浏览器工具回复无效');
+  const item=pending.get(value.id);if(!item)return;pending.delete(value.id);value.error?item.reject(new Error(String(value.error))):item.resolve(value.result);
+ };
+ const data=chunk=>{try{buffer+=chunk;if(buffer.length>300*1024*1024)throw new Error('输入过大');if(legacy)return;let at;while((at=buffer.indexOf('\n'))!==-1){const line=buffer.slice(0,at);if(!line.trim()){buffer=buffer.slice(at+1);continue;}let value;try{value=JSON.parse(line);}catch(error){if(!initialized){legacy=true;return;}throw error;}buffer=buffer.slice(at+1);accept(value);}}catch(error){close(error);}};
+ const end=()=>{try{if(buffer.trim())accept(JSON.parse(buffer));else if(!initialized)accept({});}catch(error){close(error);return;}close();};
+ stream.setEncoding('utf8');stream.on('data',data);stream.on('end',end);stream.on('error',close);signal?.addEventListener('abort',abort,{once:true});if(signal?.aborted)abort();
+ return {input,close};
+}
 if(process.argv[1] && import.meta.url===pathToFileURL(process.argv[1]).href){
  const controller=new AbortController();const stop=()=>controller.abort(new Error('请求已取消'));process.on('SIGTERM',stop);process.on('SIGINT',stop);
- try{let text='';for await(const chunk of process.stdin){text+=chunk;if(text.length>300*1024*1024)throw new Error('输入过大');}const value=await runDeepSeekCLI(process.argv[2],text?JSON.parse(text):{},{signal:controller.signal,onUsage:usage=>console.log(JSON.stringify({type:'usage',usage})),onCompaction:record=>console.log(JSON.stringify({type:'compaction',record})),onActivity:activity=>console.log(JSON.stringify({type:'activity',activity})),onText:text=>console.log(JSON.stringify({type:'delta',text})),onReasoning:text=>console.log(JSON.stringify({type:'reasoning',text}))});console.log(JSON.stringify(process.argv[2]==='chat'?{type:'done',usage:value.usage,finishReason:value.finishReason}:value));}
- catch(error){if(process.argv[2]==='chat'&&error.recovery)console.log(JSON.stringify({type:'error',message:error.message,recovery:error.recovery}));console.error(error.code==='ENOENT'?'尚未配置 DeepSeek API Key':error.message);process.exitCode=1;}
- finally{closeDeepSeekConnections();}
+ const send=value=>console.log(JSON.stringify(value));const bridge=readDeepSeekInput(process.stdin,{signal:controller.signal,send});
+ try{const {input,browserTool}=await bridge.input;const value=await runDeepSeekCLI(process.argv[2],input,{browserTool,signal:controller.signal,onUsage:usage=>send({type:'usage',usage}),onCompaction:record=>send({type:'compaction',record}),onActivity:activity=>send({type:'activity',activity}),onText:text=>send({type:'delta',text}),onReasoning:text=>send({type:'reasoning',text})});send(process.argv[2]==='chat'?{type:'done',usage:value.usage,finishReason:value.finishReason}:value);}
+ catch(error){if(process.argv[2]==='chat'&&error.recovery)send({type:'error',message:error.message,recovery:error.recovery});console.error(error.code==='ENOENT'?'尚未配置 DeepSeek API Key':error.message);process.exitCode=1;}
+ finally{bridge.close();process.stdin.pause();closeDeepSeekConnections();}
 }
