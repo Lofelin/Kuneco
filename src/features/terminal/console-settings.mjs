@@ -1,5 +1,5 @@
 import {consoleFonts} from '../../shared/console-preferences.mjs';
-export function mountConsoleSettings({host,getPreferences,save,api}){
+export function mountConsoleSettings({host,getPreferences,save,api,chooseDirectory}){
  const doc=host.ownerDocument,controls=new Map();let ready=false,scope=null,version=0;
  const el=(tag,text,cls)=>{const e=doc.createElement(tag);if(text)e.textContent=text;if(cls)e.className=cls;return e;};
  const status=el('p',null,'muted');status.setAttribute('role','status');
@@ -9,12 +9,12 @@ export function mountConsoleSettings({host,getPreferences,save,api}){
   label.id=key+'-label';hint.id=key+'-hint';copy.append(label,hint);
   const control=el(options?(segmented?'wa-radio-group':'wa-select'):'wa-switch');control.id=key;control.size='s';control.setAttribute('aria-labelledby',label.id);control.setAttribute('aria-describedby',hint.id);
   if(segmented){control.className='app-segmented';control.orientation='horizontal';}
-  for(const [value,text] of options||[]){const option=el(segmented?'wa-radio':'wa-option',text);option.value=String(value);if(segmented)option.appearance='button';if(key==='consoleFont'){option.className='font-preview-option';option.style.setProperty('--option-font-family',consoleFonts[value]);}control.append(option);}
+  for(const [value,text] of options||[]){const option=el(segmented?'wa-radio':'wa-option',text);option.value=String(value);if(segmented)option.appearance='button';if(key==='consoleTheme'){const icon=el('wa-icon');icon.src='assets/icons/'+({light:'sun',dark:'moon',system:'monitor'})[value]+'.svg';icon.setAttribute('aria-hidden','true');option.prepend(icon);}if(key==='consoleFont'){option.className='font-preview-option';option.style.setProperty('--option-font-family',consoleFonts[value]);}control.append(option);}
   controls.set(key,control);row.append(copy,control);card.append(row);
   control.addEventListener('change',async()=>{if(!ready||control.disabled)return;const value=options?(number?Number(control.value):control.value):control.checked;render(false);status.textContent='正在保存…';try{await save({[key]:value});status.textContent='已保存到本设备';}catch(error){status.textContent='保存失败：'+error.message;}finally{render(true);}});
  }
  const display=group('显示','调整终端显示，立即应用到当前终端。');
- row(display,'consoleTheme','配色','选择终端配色，或跟随应用主题。',[['system','跟随应用'],['light','浅色'],['dark','深色']],{segmented:true});
+ row(display,'consoleTheme','配色','选择终端配色，或跟随应用主题。',[['light','浅色'],['dark','深色'],['system','跟随应用']],{segmented:true});
  row(display,'consoleFont','终端字体','使用等宽字体；未安装的字体由系统等宽字体替代。',[['default','默认等宽'],['menlo','Menlo'],['monaco','Monaco'],['consolas','Consolas'],['system','系统等宽']]);
  row(display,'consoleFontSize','字号','调整终端文字大小。',Array.from({length:15},(_,i)=>[i+10,(i+10)+' px']),{number:true});
  row(display,'consoleLineHeight','行高','调整终端行间距离。',[[1,'紧凑'],[1.2,'标准'],[1.4,'宽松']],{segmented:true,number:true});
@@ -28,10 +28,13 @@ export function mountConsoleSettings({host,getPreferences,save,api}){
  const connection=group('连接','连接行为与当前环境的启动目录。');
  row(connection,'consoleAutoConnect','进入控制台时自动连接','关闭后需点击“连接终端”；不会断开已有会话。');
  const directoryRow=el('div',null,'notification-setting-row'),directoryCopy=el('div',null,'notification-setting-copy'),directoryLabel=el('strong','默认工作目录'),directoryHint=el('p','正在读取当前环境…');directoryLabel.id='consoleDirectory-label';directoryHint.id='consoleDirectory-hint';directoryCopy.append(directoryLabel,directoryHint);
- const directory=el('wa-input');directory.id='consoleDirectory';directory.size='s';directory.placeholder='使用环境默认目录';directory.setAttribute('aria-labelledby',directoryLabel.id);directory.setAttribute('aria-describedby',directoryHint.id);directory.disabled=true;directoryRow.append(directoryCopy,directory);connection.append(directoryRow);host.append(status);
- directory.addEventListener('change',async()=>{if(!scope||directory.disabled)return;const current=scope,revision=version;directory.disabled=true;status.textContent='正在保存目录…';try{const result=await api.console('directory-save',{scope:current.scope,path:directory.value});if(revision===version){scope=result;directory.value=result.path;status.textContent='已保存，下次连接生效';}}catch(error){if(revision===version){directory.value=current.path;status.textContent='保存失败：'+error.message;}}finally{if(revision===version)directory.disabled=!scope;}});
+ const directoryControls=el('div',null,'console-directory-controls'),directory=el('app-button'),directoryText=el('span','选择文件夹'),folder=el('wa-icon');folder.slot='start';folder.src='assets/icons/folder-open.svg';directory.className='content-action';directory.id='consoleDirectory';directory.size='s';directory.append(folder,directoryText);directory.setAttribute('aria-labelledby',directoryLabel.id);directory.setAttribute('aria-describedby',directoryHint.id);directory.disabled=true;
+ const reset=el('app-button'),resetIcon=el('wa-icon');reset.id='consoleDirectoryReset';reset.appearance='plain';reset.setAttribute('aria-label','恢复环境默认目录');reset.title='恢复环境默认目录';resetIcon.src='assets/icons/rotate-ccw.svg';reset.append(resetIcon);reset.disabled=true;directoryControls.append(directory,reset);directoryRow.append(directoryCopy,directoryControls);connection.append(directoryRow);host.append(status);
+ function renderDirectory(busy=false){directory.disabled=busy||!scope;reset.disabled=busy||!scope?.path;directoryText.textContent=scope?.path||scope?.defaultPath||'选择文件夹';directory.title=scope?'选择工作目录：'+directoryText.textContent:'选择文件夹';}
+ async function changeDirectory(pick){if(!scope||directory.disabled)return;const current=scope,revision=version;renderDirectory(true);try{const path=pick?await chooseDirectory(current.path||current.defaultPath,current.scope):'';if(path===null||path===undefined||revision!==version)return;status.textContent='正在保存目录…';const result=await api.console('directory-save',{scope:current.scope,path});if(revision===version){scope=result;status.textContent='已保存，下次连接生效';}}catch(error){if(revision===version)status.textContent='保存失败：'+error.message;}finally{if(revision===version)renderDirectory();}}
+ directory.addEventListener('click',()=>void changeDirectory(true));reset.addEventListener('click',()=>void changeDirectory(false));
  function render(enabled=ready){ready=enabled;for(const [key,control] of controls){control.disabled=!ready;const value=getPreferences()[key];if(control.tagName==='WA-SWITCH')control.checked=value;else control.value=String(value);}}
- async function refresh(){const revision=++version;scope=null;directory.disabled=true;directory.value='';directoryHint.textContent='正在读取当前环境…';try{const value=await api.console('directory');if(revision!==version)return;scope=value.available?value:null;directory.disabled=!scope;directory.value=value.path||'';directory.placeholder=value.defaultPath||'使用环境默认目录';directoryHint.textContent=scope?'当前环境：'+value.name+'。填写容器内绝对路径，留空使用 '+value.defaultPath+'；下次连接生效。':value.message;}catch(error){if(revision===version)directoryHint.textContent=error.message;}}
+ async function refresh(){const revision=++version;scope=null;renderDirectory();directoryHint.textContent='正在读取当前环境…';try{const value=await api.console('directory');if(revision!==version)return;scope=value.available?value:null;renderDirectory();directoryHint.textContent=scope?'当前环境：'+value.name+'。选择容器内文件夹；环境默认目录为 '+value.defaultPath+'，下次连接生效。':value.message;}catch(error){if(revision===version)directoryHint.textContent=error.message;}}
  api.onEvent(({type})=>{if(['chatAccountChanged','account'].includes(type))void refresh();});
  render(false);return {render,refresh,error(message){status.textContent=message;render(false);}};
 }

@@ -998,6 +998,13 @@ ipcMain.handle('workspace:console',guarded(async(action,value={})=>{
  if(action==='close'){if(value.token===consoleSession?.token)closeConsole();return true;}
  if(!dockerOwner() || !activeContainerId){closeConsole();if(['status','directory'].includes(action))return {available:false,message:'请选择 Docker 容器环境后使用控制台。'};throw new Error('控制台仅连接当前账号的 Docker 容器');}
  if(accountChanging || containerOperation)throw new Error('环境正在切换，请稍后重试');
+ if(action==='directory-browse'){
+  const owner=dockerOwner(),id=activeContainerId;
+  if(value.scope!==JSON.stringify([owner,id]))throw new Error('当前环境已变化，请重新选择');
+  const result=await browseEnvironmentProject(dockerEnvs,owner,id,value.path,{containerRoot:true});
+  if(owner!==dockerOwner()||id!==activeContainerId||accountChanging||containerOperation)throw new Error('当前环境已变化，请重新选择');
+  return result;
+ }
  if(action==='directory'||action==='directory-save'){
   const owner=dockerOwner(),id=activeContainerId,scope=JSON.stringify([owner,id]);
   const {item}=await dockerEnvs.get(owner,id);

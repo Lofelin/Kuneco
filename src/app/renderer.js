@@ -56,7 +56,7 @@ mountQuitDialog({document,api});
 document.addEventListener('quit-blocked',()=>toast('请先关闭当前弹窗，再退出应用。'));
 const savePreferences=async patch=>{const value=await api.preferences(patch);updatePreferences(value);return value;};
 const preferenceSettings=mountPreferenceSettings({host:document.querySelector('[data-panel=preferences]'),getPreferences:()=>preferences,save:savePreferences});
-const consoleSettings=mountConsoleSettings({host:document.querySelector('[data-panel=console]'),getPreferences:()=>preferences,save:savePreferences,api});
+const consoleSettings=mountConsoleSettings({host:document.querySelector('[data-panel=console]'),getPreferences:()=>preferences,save:savePreferences,api,chooseDirectory:(directory,scope)=>openFilePicker('directory','container-console',directory,scope)});
 const shortcutSettings=mountShortcutSettings({host:$('shortcutSettings'),platform:api.platform,getPreferences:()=>preferences,save:savePreferences});shortcutSettings.render(false);
 function updatePreferences(value){preferences=applyPreferences(value);preferenceSettings.render();consoleSettings.render(true);shortcutSettings.render();refreshDisplayedTimes();}
 api.onEvent(({type,data})=>{if(type==='preferences')updatePreferences(data);});
@@ -1471,10 +1471,11 @@ async function selectProxyFile(files){
 $('proxyFileChoose').onclick=()=>void selectProxyFile();
 $('proxyFileChoose').addEventListener('files-selected',event=>void selectProxyFile(event.detail.files));
 
-let pickerResolve=null,pickerKind='file',pickerDirectory='',pickerParent='',pickerSelection=null,pickerScope='host',pickerContext=null;
-function finishFilePicker(value=null){const resolve=pickerResolve;pickerResolve=null;$('filePicker').open=false;if(resolve)resolve(value);}
+let pickerResolve=null,pickerKind='file',pickerDirectory='',pickerParent='',pickerSelection=null,pickerScope='host',pickerContext=null,pickerConsoleScope=null,pickerLoadRevision=0;
+function finishFilePicker(value=null){pickerLoadRevision++;const resolve=pickerResolve;pickerResolve=null;$('filePicker').open=false;if(resolve)resolve(value);}
 async function loadFilePicker(directory){
- const data=pickerScope.startsWith('container')?await api.project({action:pickerScope==='container-download'?'browseDownloadDirectory':'browse',path:directory}):await api.browseFiles({directory,kind:pickerKind});pickerDirectory=data.directory;pickerParent=data.parent;if(pickerContext && (pickerContext.owner!==accountState.user?.id || pickerContext.environment!==dockerEnvironmentState.activeId))throw new Error('账号或环境已变化，请重新选择');pickerSelection=pickerKind==='directory'?pickerDirectory:null;
+ const revision=++pickerLoadRevision;pickerSelection=null;$('filePickerConfirm').disabled=true;
+ const data=pickerScope==='container-console'?await api.console('directory-browse',{path:directory,scope:pickerConsoleScope}):pickerScope.startsWith('container')?await api.project({action:pickerScope==='container-download'?'browseDownloadDirectory':'browse',path:directory}):await api.browseFiles({directory,kind:pickerKind});if(revision!==pickerLoadRevision)return;pickerDirectory=data.directory;pickerParent=data.parent;if(pickerContext && (pickerContext.owner!==accountState.user?.id || pickerContext.environment!==dockerEnvironmentState.activeId))throw new Error('账号或环境已变化，请重新选择');pickerSelection=pickerKind==='directory'?pickerDirectory:null;
  $('filePickerPath').value=pickerDirectory;$('filePickerUp').disabled=pickerParent===pickerDirectory;$('filePickerConfirm').disabled=!pickerSelection;$('filePickerEntries').replaceChildren();
  for(const entry of data.entries){const row=createUI('app-button');row.className='file-picker-entry';row.dataset.path=entry.path;row.setAttribute('role','listitem');row.append(createIcon(entry.directory?'folder':'file-text'),document.createTextNode(entry.name));
   row.onclick=()=>{if(entry.directory)void action(()=>loadFilePicker(entry.path));else{pickerSelection=entry.path;$('filePickerEntries').querySelectorAll('app-button').forEach(button=>button.classList.toggle('active',button===row));$('filePickerConfirm').disabled=false;}};
@@ -1483,7 +1484,7 @@ async function loadFilePicker(directory){
  if(!data.entries.length){const empty=document.createElement('div');empty.className='app-empty-state file-picker-empty';const description=document.createElement('p');description.textContent='此目录没有可选择的项目。';empty.append(description);$('filePickerEntries').append(empty);}
  $('filePickerHint').textContent=pickerKind==='file'?'选择不超过 1 MB 的 TXT 或 CSV 导出文件。':'进入目标目录后，点击“选择此文件夹”。';
 }
-async function openFilePicker(kind,scope='host',directory){if(pickerResolve)throw new Error('请先完成当前文件夹选择');pickerScope=scope;pickerContext={owner:accountState.user?.id,environment:dockerEnvironmentState.activeId};pickerKind=kind;$('filePickerTitle').textContent=kind==='file'?'导入 TXT / CSV':scope==='container-download'?'下载保存位置':scope==='container'?'选择容器文件夹':'选择本机项目文件夹';$('filePicker').label=$('filePickerTitle').textContent;$('filePickerConfirmLabel').textContent=kind==='file'?'导入文件':'选择此文件夹';await loadFilePicker(directory);$('filePicker').open=true;return new Promise(resolve=>{pickerResolve=resolve;});}
+async function openFilePicker(kind,scope='host',directory,consoleScope=null){if(pickerResolve)throw new Error('请先完成当前文件夹选择');pickerScope=scope;pickerConsoleScope=consoleScope;pickerContext={owner:accountState.user?.id,environment:dockerEnvironmentState.activeId};pickerKind=kind;$('filePickerTitle').textContent=kind==='file'?'导入 TXT / CSV':scope==='container-console'?'默认工作目录':scope==='container-download'?'下载保存位置':scope==='container'?'选择容器文件夹':'选择本机项目文件夹';$('filePicker').label=$('filePickerTitle').textContent;$('filePickerConfirmLabel').textContent=kind==='file'?'导入文件':'选择此文件夹';await loadFilePicker(directory);$('filePicker').open=true;return new Promise(resolve=>{pickerResolve=resolve;});}
 $('filePickerClose').onclick=$('filePickerCancel').onclick=()=>finishFilePicker();
 $('filePickerConfirm').onclick=()=>{if(pickerSelection)finishFilePicker(pickerSelection);};
 $('filePicker').addEventListener('wa-after-hide',()=>{if(pickerResolve)finishFilePicker();bounds();});

@@ -2400,3 +2400,7 @@ wa-option.font-preview-option,wa-option.font-preview-option::part(label){font-fa
 
 .settings-body [data-panel="console"] :is(wa-input,wa-select){width:var(--settings-value-width);max-width:100%;flex-shrink:0}
 .settings-body [data-panel="console"] wa-radio-group.app-segmented{flex-shrink:0}
+
+.console-directory-controls{display:flex;align-items:center;justify-content:flex-end;gap:8px;max-width:var(--settings-value-width);min-width:0}
+.console-directory-controls .content-action{min-width:0;max-width:100%}
+.console-directory-controls .content-action::part(label){overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
