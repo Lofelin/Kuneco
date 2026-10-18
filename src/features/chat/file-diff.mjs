@@ -1,3 +1,4 @@
+import {cachedChangeRows} from './diff-row-cache.mjs';
 export function diffLines(before,after){
  const lines=value=>value.match(/[^\n]*\n|[^\n]+$/g)||[];
  const a=lines(before),b=lines(after);let start=0,end=0;
@@ -9,16 +10,22 @@ export function diffLines(before,after){
  rows.push(...a.slice(a.length-end).map(text=>({type:'context',text})));let old=1,next=1;return rows.map(row=>({...row,text:row.text.replace(/\n$/,''),old:row.type==='addition'?null:old++,next:row.type==='deletion'?null:next++}));
 }
 export function parseUnifiedDiff(diff){let old=0,next=0,active=false;const rows=[];for(const line of diff.split('\n')){const h=/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);if(h){old=+h[1];next=+h[2];active=true;rows.push({type:'hunk',text:line});continue;}if(!active||line.startsWith('\\')||![' ','+','-'].includes(line[0]))continue;const type=line[0]==='+'?'addition':line[0]==='-'?'deletion':'context';rows.push({type,text:line.slice(1),old:type==='addition'?null:old++,next:type==='deletion'?null:next++});}return rows;}
+export function changeRows(change){return cachedChangeRows(change,snapshot=>snapshot.before!==null?diffLines(snapshot.before,snapshot.after):parseUnifiedDiff(snapshot.diff));}
 export function renderFileDiffs(panel,activity){
  for(const change of activity.changes||[]){
   const details=document.createElement('details');details.className='activity-file-diff';const summary=document.createElement('summary');summary.textContent='文件差异 · '+change.path;details.append(summary);const id=change.path;
   details.open=activity.diffExpanded?.[id]??false;summary.addEventListener('click',()=>{(activity.diffExpanded||={})[id]=!details.open;details.dispatchEvent(new CustomEvent('reasoning-toggle',{bubbles:true}));});
   if(change.unavailable){const p=document.createElement('p');p.textContent='差异不可用：'+change.unavailable;details.append(p);panel.append(details);continue;}
-  const rows=typeof change.before==='string'&&typeof change.after==='string'?diffLines(change.before,change.after):parseUnifiedDiff(change.diff||'');
+  let rows,rendered=false;
   const modes=document.createElement('wa-radio-group');modes.className='diff-modes app-segmented';modes.setAttribute('aria-label','差异视图');modes.orientation='horizontal';modes.size='s';const content=document.createElement('div');let mode=activity.diffMode||'unified';
-  const render=()=>{content.replaceChildren();content.className='file-diff-content '+mode;modes.value=mode;
+  const render=()=>{rows??=changeRows(change);rendered=true;content.replaceChildren();content.className='file-diff-content '+mode;modes.value=mode;
    if(!rows.length){const p=document.createElement('p');p.textContent='没有文本行差异';content.append(p);return;}
    const create=side=>{const pre=document.createElement('pre');pre.setAttribute('aria-label',side==='old'?'修改前':side==='new'?'修改后':'统一差异');for(const row of rows){const line=document.createElement('span');line.className='diff-line '+row.type;const visible=side==='old'?row.type!=='addition':side==='new'?row.type!=='deletion':true;const number=side==='old'?row.old:row.next;line.textContent=visible?(side?String(number??'').padStart(4)+'  ':String(row.old??'').padStart(4)+' '+String(row.next??'').padStart(4)+' '+({addition:'+',deletion:'-',context:' ',hunk:' '}[row.type]))+row.text:' ';pre.append(line);}return pre;};if(mode==='split')content.append(create('old'),create('new'));else content.append(create());};
-  for(const [value,label] of [['unified','统一'],['split','左右对照']]){const option=document.createElement('wa-radio');option.appearance='button';option.value=value;option.textContent=label;modes.append(option);}modes.addEventListener('change',()=>{activity.diffMode=mode=modes.value;render();details.dispatchEvent(new CustomEvent('reasoning-toggle',{bubbles:true}));});details.append(modes,content);render();panel.append(details);
+  for(const [value,label] of [['unified','统一'],['split','左右对照']]){const option=document.createElement('wa-radio');option.appearance='button';option.value=value;option.textContent=label;modes.append(option);}modes.value=mode;modes.addEventListener('change',()=>{activity.diffMode=mode=modes.value;render();details.dispatchEvent(new CustomEvent('reasoning-toggle',{bubbles:true}));});details.append(modes,content);
+  // The summary click precedes the native toggle. Build synchronously so the
+  // first expanded frame (including keyboard activation) already has content.
+  summary.addEventListener('click',()=>{if(!details.open&&!rendered)render();});
+  details.addEventListener('toggle',()=>{if(details.open&&!rendered)render();});
+  if(details.open)render();panel.append(details);
  }
 }
