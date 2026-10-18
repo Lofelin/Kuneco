@@ -2380,3 +2380,11 @@ app-button[data-icon-action]:not([disabled]):not([loading]):is(:hover,:active){c
 #prompt::part(textarea),#draft::part(textarea),.message-editor wa-textarea::part(textarea){font-size:var(--chat-font-size,14px);line-height:1.7}
 html[data-reduced-motion="true"]{--sidebar-motion-duration:0s;--wa-transition-fast:0ms;--wa-transition-normal:0ms;--wa-transition-slow:0ms}
 html[data-reduced-motion="true"] *,html[data-reduced-motion="true"] *::before,html[data-reduced-motion="true"] *::after{animation-duration:0.001ms!important;animation-iteration-count:1!important;transition-duration:0s!important;scroll-behavior:auto!important}
+
+.shortcut-toolbar{display:flex;align-items:center;justify-content:space-between;gap:16px}
+.shortcut-toolbar>wa-input{width:min(48%,420px);min-width:0}
+.shortcut-toolbar>app-button{flex-shrink:0}
+#shortcutSettings>[role=status]:empty{display:none}
+#shortcutSettings [hidden]{display:none!important}
+#shortcutSettings>.app-empty-state{min-height:240px}
+@container(max-width:480px){.shortcut-toolbar>wa-input{width:auto;flex:1}}
