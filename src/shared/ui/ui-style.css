@@ -1,4 +1,5 @@
 @import '../../features/chat/turn-changes.css';
+@import '../../features/chat/turn-change-card.css';
 @import '../../features/chat/diagrams.css';
 @import "../../features/chat/chat-recovery.css";
 @import "../../features/chat/session-order.css";

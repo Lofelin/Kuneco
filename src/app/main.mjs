@@ -1,3 +1,4 @@
+import {undoTurnChanges} from '../features/chat/turn-change-undo.mjs';
 import {stageCodexDocuments,originalDocumentPrompt} from '../features/runtimes/codex-documents.mjs';
 import {proxyLogEvent} from '../features/environments/proxy-log-event.mjs';
 import {EnvironmentEvents,observeEnvironmentOperations,observeRuntimeLaunch} from '../features/environments/environment-events.mjs';
@@ -1172,6 +1173,34 @@ function insightSession(value){
 const chatPopouts=createChatPopouts({BrowserWindow,ipcMain,parent:()=>window,scope:()=>({owner:chatOwner,environmentId:activeContainerId}),basePath:here,preferences:()=>preferenceStore?.get()});
 ipcMain.handle('workspace:chatPopout',guarded(async(action,value)=>{chatPopouts.closeInvalid();if(action==='sync'){if(value?.scope?.owner!==chatOwner || value.scope.environmentId!==activeContainerId)return;insightSession(value.scope);chatPopouts.publish(value);return true;}if(action==='open'){insightSession(value);return chatPopouts.open(value);}if(action==='closeInvalid'){chatPopouts.closeInvalid();return true;}throw new Error('未知窗口操作');}));
 ipcMain.handle('workspace:chatInsights',guarded(async value=>{const item=insightSession(value);return {...insightView(item,chatViews,{owner:account?.user?.id,environmentId:activeContainerId,chatId:item.id}),running:runs.has(item.id)};}));
+ipcMain.handle('workspace:chatUndo',guarded(async value=>{
+ const item=insightSession(value),owner=dockerOwner(),environment=activeContainerId,generation=chatGeneration;
+ if(runs.size||learningAutomations?.running.size)throw new Error('请先等待正在执行的任务结束，再撤销文件变更');
+ const turn=insightView(item,chatViews,{owner,environmentId:environment,chatId:item.id}).changeHistory.find(t=>t.id===value.turnId);
+ const metadata=item.fileChangeTurns?.find(t=>t.id===value.turnId)||(item.fileChangeTurn?.id===value.turnId?item.fileChangeTurn:null);
+ if(!turn?.undo?.available)throw new Error(turn?.undo?.reason||'没有可撤销的本轮变更');
+ const task=runs.begin(item.id,{engine:item.engine,requestId:randomUUID(),networkMode:'direct'});
+ containerOperation=true;
+ try{
+  const request={root:metadata.project,files:turn.files.map(file=>file.change).filter(change=>change.beforeExists!==change.afterExists||change.before!==change.after)};
+  let result;
+  if(environment){const source=await readFile(new URL('../features/chat/turn-change-undo.mjs',import.meta.url),'utf8');result=JSON.parse(await dockerEnvs.exec(owner,environment,['node','--input-type=module','-e',source+"\nlet input='';for await(const chunk of process.stdin)input+=chunk;console.log(JSON.stringify(await undoTurnChanges(JSON.parse(input))));"],{input:JSON.stringify(request),timeout:30000,maxBuffer:200000}));}
+  else result=await undoTurnChanges(request);
+  const attention=[...(result.rollback?.conflicts||[]),...(result.rollback?.errors||[]).map(entry=>entry.path)];
+  const recovery=result.recovery||[];
+  if(result.backups?.length)metadata.undoBackups=result.backups;
+  if(!result.ok){
+   const details=[result.message||'文件撤销失败'];
+   if(attention.length||recovery.length){metadata.undoFailure='上次撤销未能完整恢复，请先人工检查文件及恢复备份';details.push(metadata.undoFailure,...attention,...recovery.map(entry=>entry.path+'：'+entry.backup));}
+   if(result.backups?.length)details.push('保留的恢复备份：',...result.backups.map(entry=>entry.path+' → '+entry.backup));
+   if(result.backups?.length||metadata.undoFailure)await persistAISessions().catch(()=>{});
+   throw new Error(details.join('\n'));
+  }
+  metadata.revertedAt=new Date().toISOString();
+  if(generation!==chatGeneration||owner!==dockerOwner()||environment!==activeContainerId)throw new Error('文件已撤销，但对话环境已变化，请重新打开原对话');
+  try{await persistAISessions();}catch{throw new Error('文件已撤销，但会话记录保存失败。恢复备份：'+(result.backups||[]).map(entry=>entry.backup).join('；'));}return result;
+ }finally{containerOperation=false;runs.finish(task);}
+}));
 ipcMain.handle('workspace:chatArtifact',guarded(async value=>{
  const item=insightSession(value),owner=dockerOwner(),environment=activeContainerId;
  const artifact=insightView(item,chatViews).artifacts.find(a=>a.id===value.id);if(!artifact)throw new Error('没有此真实产物记录');
@@ -1251,7 +1280,7 @@ ipcMain.handle('workspace:cc', guarded(async (prompt,rewind,chatId=activeAISessi
   const engine=preparedChat.engine;
   const controller=runs.begin(chatId,{engine,requestId,networkMode:chatRequestRoute(preparedChat,gateway?.status)});
   const fileChangeTurn={id:randomUUID(),owner:requestOwner,environmentId,chatId};
-  preparedChat.fileChangeTurn=fileChangeTurn;
+  preparedChat.fileChangeTurn=fileChangeTurn;(preparedChat.fileChangeTurns||=[]).push(fileChangeTurn);
   const emitChat=(type,data)=>{if(type==='ccActivity')recordArtifacts(preparedChat,data,fileChangeTurn.id);emit(type,data,{chatId,requestId,owner:requestOwner,environmentId});};
   const valid=()=>!controller.signal.aborted && generation===chatGeneration && requestOwner===(account?.user?.id || null) && environmentId===activeContainerId && aiSessions.get(chatId)===preparedChat;
   try {
@@ -1297,7 +1326,8 @@ ipcMain.handle('workspace:cc', guarded(async (prompt,rewind,chatId=activeAISessi
   const currentChat=preparedChat;if(currentChat){currentChat.updatedAt=new Date().toISOString();persistAISessions();}
   const usageOwner=chatOwner;
   let latestUsage=null,latestUsageDetails=null;
-  emitChat('ccStart', {updatedAt:currentChat?.updatedAt,model:currentChat?.model});
+  fileChangeTurn.project=workingDirectory;
+  emitChat('ccStart', {updatedAt:currentChat?.updatedAt,model:currentChat?.model,turnId:fileChangeTurn.id});
   void (async () => {
     try {
       const browserTool=createBrowserAgentTool({features:browserFeatures,scope:{owner:requestOwner,environmentId},signal:controller.signal,getScope:()=>({owner:dockerOwner(),environmentId:activeContainerId}),getTabs:()=>[...browserTabs.values()],getActive:()=>browserTabs.get(activeTabId),openURL:url=>createBrowserTab(url),navigate:navigateBrowserTab,networkReady:browserNetworkReady});

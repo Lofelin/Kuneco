@@ -1,5 +1,5 @@
 import path from 'node:path';
-import {summarizeTurnChanges} from './turn-changes.mjs';
+import {summarizeTurnChanges,turnUndoAvailability} from './turn-changes.mjs';
 // Usage totals and context occupancy deliberately have separate meanings.
 const number=value=>Number.isSafeInteger(value)&&value>=0?value:null;
 export function usageDetails(engine,value){
@@ -12,14 +12,17 @@ export function recordArtifacts(item,activity,turnId){
  if(activity?.status!=='completed')return;
  for(const raw of activity.changes||[]){const change={...raw,path:typeof raw.path==='string'&&!path.isAbsolute(raw.path)&&item.project?path.resolve(item.project,raw.path):raw.path};if(typeof change.path!=='string'||!change.path)continue;
   const entries=item.artifacts||=[];const id=(turnId?turnId+':':'')+activity.id+':'+change.path;if(entries.some(x=>x.id===id || (!turnId&&x.activityId===activity.id&&x.path===change.path)))continue;
-  entries.push({id,...(turnId?{turnId}:{}),path:change.path,at:new Date().toISOString(),activityId:activity.id,provider:activity.provider,version:entries.filter(x=>x.path===change.path).length+1,...(typeof change.before==='string'&&typeof change.after==='string'?{before:change.before,after:change.after}:{}),...(change.diff?{diff:change.diff}:{}),...(change.unavailable?{unavailable:change.unavailable}:{})});
+  entries.push({id,...(turnId?{turnId}:{}),path:change.path,at:new Date().toISOString(),activityId:activity.id,provider:activity.provider,version:entries.filter(x=>x.path===change.path).length+1,...(typeof change.before==='string'&&typeof change.after==='string'?{before:change.before,after:change.after}:{}),...(typeof change.beforeExists==='boolean'?{beforeExists:change.beforeExists}:{}),...(typeof change.afterExists==='boolean'?{afterExists:change.afterExists}:{}),...(change.diff?{diff:change.diff}:{}),...(change.unavailable?{unavailable:change.unavailable}:{})});
  }
 }
 export function insightView(item,views=[],scope){
  for(const message of views.find(v=>v.id===item.id)?.messages||[])for(const activity of message.reasoning?.activities||[])recordArtifacts(item,activity);
  const validScope=!scope||!!item.fileChangeTurn&&['owner','environmentId','chatId'].every(k=>item.fileChangeTurn[k]===scope[k]);
  const receipts=validScope?(item.artifacts||[]).filter(a=>a.turnId):[];
- const changeHistory=[...new Set(receipts.map(a=>a.turnId))].reverse().map(id=>({...summarizeTurnChanges(receipts,{id}),at:receipts.find(a=>a.turnId===id)?.at}));
- const conversationChanges=receipts.length?summarizeTurnChanges(receipts.map(a=>({...a,turnId:'conversation'})),{id:'conversation'}):null;
- const seenMaintenance=new Set();const records=(item.tokenUsage||[]).filter(r=>{if(r.purpose!=='compaction')return true;const key=r.at+':'+r.totalTokens;if(seenMaintenance.has(key))return false;seenMaintenance.add(key);return true;});item.tokenUsage=records;return {chatId:item.id,engine:item.engine,model:item.model,artifacts:item.artifacts||[],changeHistory,conversationChanges,turnChanges:summarizeTurnChanges(item.artifacts,item.fileChangeTurn,scope),usage:records.filter(r=>r.purpose!=='compaction').at(-1)||null,totalTokens:records.length?records.reduce((n,r)=>n+(r.totalTokens||0),0):null,compression:item.compression||null};
+ const metadata=id=>item.fileChangeTurns?.find(t=>t.id===id)||(item.fileChangeTurn?.id===id?item.fileChangeTurn:null);
+ const decorate=turn=>turn?{...turn,undo:turnUndoAvailability(turn,metadata(turn.id))}:null;
+ const changeHistory=[...new Set(receipts.map(a=>a.turnId))].reverse().map(id=>({...decorate(summarizeTurnChanges(receipts,{id})),at:receipts.find(a=>a.turnId===id)?.at}));
+ const activeReceipts=receipts.filter(a=>!metadata(a.turnId)?.revertedAt);
+ const conversationChanges=activeReceipts.length?summarizeTurnChanges(activeReceipts.map(a=>({...a,turnId:'conversation'})),{id:'conversation'}):null;
+ const seenMaintenance=new Set();const records=(item.tokenUsage||[]).filter(r=>{if(r.purpose!=='compaction')return true;const key=r.at+':'+r.totalTokens;if(seenMaintenance.has(key))return false;seenMaintenance.add(key);return true;});item.tokenUsage=records;return {chatId:item.id,engine:item.engine,model:item.model,artifacts:item.artifacts||[],changeHistory,conversationChanges,turnChanges:decorate(summarizeTurnChanges(item.artifacts,item.fileChangeTurn,scope)),usage:records.filter(r=>r.purpose!=='compaction').at(-1)||null,totalTokens:records.length?records.reduce((n,r)=>n+(r.totalTokens||0),0):null,compression:item.compression||null};
 }

@@ -1,3 +1,4 @@
+import {renderTurnChangeCard} from './turn-change-card.mjs';
 import {reducedMotion} from '../../shared/ui/motion.mjs';
 import {renderReviewDiff} from './review-diff.mjs';
 import {renderFileDiffs} from './file-diff.mjs';
@@ -31,7 +32,7 @@ export function mountInsightsPanel({page,api,scope,updateMarkdown,onOpenFullView
  infoMenu.addEventListener('wa-hide',hideDetail);window.addEventListener('resize',hideDetail);
  document.addEventListener('pointerdown',e=>{if(!detail.contains(e.target)&&!infoMenu.contains(e.target))hideDetail();});
  detail.addEventListener('keydown',e=>{if(e.key==='Escape'){e.stopPropagation();hideDetail();page.querySelector('#sessionInfoTrigger').focus();}});
- let current='',version=0,data=null,activeArtifact=null,preferences={},turnTimer;
+ let current='',version=0,data=null,activeArtifact=null,preferences={};const undoStates=new Map();
  const tabs=()=>preferences.openTabs||['changes'];
  const addTab=view=>{preferences.openTabs=[...new Set([...tabs(),view])];preferences.view=view;};
  const key=()=>JSON.stringify(scope());const save=()=>{try{localStorage.setItem('chat-insights:'+current,JSON.stringify(preferences));}catch{}};
@@ -48,17 +49,45 @@ export function mountInsightsPanel({page,api,scope,updateMarkdown,onOpenFullView
  }catch(e){if(current===requestKey)host.replaceChildren(text('p','预览失败：'+e.message));}}
  const countLabel=file=>file?.added===null?'无法统计':`+${file?.added??0} −${file?.removed??0}`;
  const appendCounts=(host,value)=>{if(value?.added===null){host.append(text('span','无法统计'));return;}const a=text('span','+'+(value?.added??0)),d=text('span','−'+(value?.removed??0));a.className='change-additions';d.className='change-deletions';host.append(a,document.createTextNode(' '),d);};
- function openChanges(id){addTab('changes');preferences.dismissedTurn=data?.turnChanges?.id;preferences.reviewTurn=id;page.querySelector('#sessionInfoMenu').open=false;setOpen(true);save();render();void refresh(true);}
+ function openChanges(id){addTab('changes');preferences.reviewTurn=id;page.querySelector('#sessionInfoMenu').open=false;setOpen(true);save();render();void refresh(true);}
+ async function confirmUndo(turn){
+  const dialog=document.createElement('app-dialog');dialog.label='撤销本轮文件变更';
+  const description=text('p','将恢复这 '+turn.files.length+' 个文件的修改前状态。撤销前核对文件内容；检测到后续修改时停止，并保留恢复备份。');
+  const list=document.createElement('ul');for(const file of turn.files)list.append(text('li',file.path));
+  let decide;const choice=new Promise(resolve=>decide=resolve);
+  const cancel=button('取消','x',()=>{decide(false);dialog.open=false;});cancel.slot='footer';
+  const confirm=button('确认撤销','check',()=>{decide(true);dialog.open=false;});confirm.classList.add('primary');confirm.slot='footer';
+  dialog.append(description,list,cancel,confirm);document.body.append(dialog);dialog.addEventListener('wa-after-hide',event=>{if(event.target===dialog){decide(false);dialog.remove();}});
+  await dialog.updateComplete;dialog.open=true;return choice;
+ }
+ async function undoTurn(turn){
+  const requestKey=current,requestScope={...scope()};if(undoStates.get(turn.id)?.pending||!turn.undo?.available||data?.running)return;
+  if(!await confirmUndo(turn)||requestKey!==current||key()!==requestKey)return;
+  undoStates.set(turn.id,{pending:true});renderTurnChanges();
+  try{const result=await api.chatUndo({...requestScope,turnId:turn.id});undoStates.set(turn.id,{reverted:true,backups:result?.backups});}
+  catch(error){undoStates.set(turn.id,{error:error.message});}
+  if(current===requestKey){await refresh(true);renderTurnChanges();}
+ }
  function renderTurnChanges(){
-  clearTimeout(turnTimer);turnBar.replaceChildren();turnBar.hidden=true;
+  turnBar.hidden=true;
   changesEntry.replaceChildren();const icon=document.createElement('wa-icon');icon.src='assets/icons/file-text.svg';icon.slot='start';changesEntry.append(icon,text('strong','变更'));const totals=text('span','');totals.className='change-entry-totals';const files=data?.conversationChanges?.files||[];totals.append(text('span',files.length+' 个文件'));if(files.length){const known=files.filter(f=>Number.isFinite(f.added)&&Number.isFinite(f.removed));if(known.length){totals.append(document.createTextNode(' · '));appendCounts(totals,{added:known.reduce((n,f)=>n+f.added,0),removed:known.reduce((n,f)=>n+f.removed,0)});}}changesEntry.append(totals);changesEntry.disabled=!scope().chatId;
-  const turn=data?.turnChanges;if(!turn?.files.length||preferences.dismissedTurn===turn.id)return;
-  const at=data.changeHistory?.find(t=>t.id===turn.id)?.at;const remaining=Date.parse(at)+30000-Date.now();if(!Number.isFinite(remaining)||remaining<=0)return;turnTimer=setTimeout(()=>{turnBar.hidden=true;turnBar.replaceChildren();},remaining);
-  const summary=button(`${turn.files.length} 个文件已更改 · ${countLabel(turn)}`,'file-text',()=>openChanges(turn.id));summary.id='turnChangesSummary';summary.setAttribute('aria-controls','artifactWindowPanel');summary.title='打开侧栏查看本轮文件变更';turnBar.append(summary);turnBar.hidden=false;
+  const turns=data?.changeHistory||[];
+  const live=new Set(turns.map(turn=>turn.id));
+  for(const host of page.querySelectorAll('.turn-change-card'))if(!live.has(host.dataset.turnId))host.remove();
+  const chat=column.querySelector('#chat');
+  for(const turn of [...turns].reverse()){
+   if(!turn.files.length)continue;
+   let host=[...page.querySelectorAll('.turn-change-card')].find(node=>node.dataset.turnId===turn.id);
+   if(!host){host=document.createElement('section');host.dataset.turnId=turn.id;}
+   const nodes=[...chat.querySelectorAll('.bubble.assistant')];
+   const message=nodes.find(node=>node.messageFileChangeTurnId===turn.id);
+   if(message)message.append(host);else{turnBar.append(host);turnBar.hidden=false;}
+   renderTurnChangeCard(host,turn,{running:Boolean(data?.running),undoState:undoStates.get(turn.id),onReview:path=>{preferences.reviewFile=path||null;if(path)(preferences.reviewExpanded||={})[turn.id+':'+path]=true;openChanges(turn.id);},onUndo:()=>void undoTurn(turn)});
+  }
  }
  function renderChanges(){
   aside.classList.add('changes-review');
-  const change=data?.conversationChanges;
+  const change=preferences.reviewTurn&&preferences.reviewTurn!=='conversation'?data?.changeHistory?.find(turn=>turn.id===preferences.reviewTurn):data?.conversationChanges;
   const toolbar=document.createElement('div');toolbar.className='changes-review-toolbar';aside.append(toolbar);
   const files=document.createElement('wa-select');files.size='s';files.pill=true;files.className='changes-file-select';files.setAttribute('aria-label','当前会话变更文件');
   const all=document.createElement('wa-option');all.value='__all__';all.textContent='全部文件';files.append(all);
