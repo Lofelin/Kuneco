@@ -2040,7 +2040,7 @@ wa-switch{--wa-form-control-activated-color:var(--ink)}
 
 /* Read-only facts are denser than interactive settings rows. */
 .proxy-summary-card{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:8px 16px}
-.settings-body .settings-facts{display:grid;grid-template-columns:120px minmax(0,1fr);gap:0 16px;margin:0;padding:0}
+.settings-facts{display:grid;grid-template-columns:120px minmax(0,1fr);gap:0 16px;margin:0;padding:0}
 .settings-facts :is(dt,dd){display:flex;align-items:center;min-width:0;box-sizing:border-box;min-height:40px;margin:0;padding:8px 0;font-size:13px;line-height:20px;overflow-wrap:anywhere}
 .settings-facts dt{color:var(--muted);font-weight:400}
 .settings-facts dd{color:var(--ink)}
@@ -2425,20 +2425,10 @@ wa-tab-group.environment-detail-tabs wa-tab-panel{--padding:28px var(--environme
 .environments-body .environment-expanded{max-width:none;margin:0}
 .environment-expanded>.environment-card-header{padding:14px var(--environment-content-inset);gap:18px}
 .environment-tabbed-details{display:block;border:0;padding:0;margin:0}
-.environment-overview-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(260px,320px);gap:32px;align-items:start}
-.environment-overview-main,.environment-overview-aside{min-width:0}
-.environment-overview-grid h3{margin:0 0 16px;font-size:14px;line-height:20px;font-weight:600}
-.environment-overview-main .environment-image-versions{display:flex;flex-direction:column;align-items:stretch;gap:0;margin:0}
-.environment-overview-main .environment-image-versions>div{padding:16px 0;min-width:0;gap:8px}
-.environment-overview-main .environment-image-versions>div:first-child{padding-top:0}
-.environment-overview-main .environment-image-versions>div+div{border-top:1px solid var(--line)}
-.environment-overview-main .environment-image-versions strong{font-size:13px;line-height:20px}
-.environment-overview-main .environment-container-identifiers>div{grid-template-columns:90px minmax(0,1fr)}
-.environment-overview-aside{padding:20px;border:1px solid var(--line);border-radius:var(--interaction-radius);background:var(--surface)}
-.environment-overview-aside .environment-inline-facts{display:flex;flex-direction:column;gap:16px;margin:0}
-.environment-overview-aside .environment-inline-facts>div{display:grid;grid-template-columns:84px minmax(0,1fr);gap:12px;font-size:13px;line-height:20px}
+.environment-overview-grid{display:block;min-width:0}
+.environment-overview-main{min-width:0}
+.environment-overview-grid h3{margin:0 0 8px;font-size:14px;line-height:20px;font-weight:600}
 .environment-detail-tabs .preference-heading{margin-top:0}
-@media(max-width:1000px){.environment-overview-grid{grid-template-columns:minmax(0,1fr);gap:24px}.environment-overview-aside{width:100%;box-sizing:border-box}}
 @media(max-width:760px){.environment-expanded>.environment-card-header{padding-block:14px}wa-tab-group.environment-detail-tabs wa-tab-panel{--padding:20px var(--environment-content-inset)}}
 
 /* Compact environment metadata uses the shared action component for navigation. */
