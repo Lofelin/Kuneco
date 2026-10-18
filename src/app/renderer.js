@@ -189,17 +189,6 @@ function browserAddress(url){return url;}
 let lastToastText='',lastToastAt=0;
 function toast(message,category='operations') {const text=String(message).replace(/^Error invoking remote method '[^']+': Error: /, '');if(text===lastToastText && Date.now()-lastToastAt<5000)return;lastToastText=text;lastToastAt=Date.now();notificationSettings.deliver(text,category,message=>$('toast').create(message,{duration:5000,size:'s'}));}
 async function action(fn) { try { return await fn(); } catch (error) { toast(error.message,'errors'); } }
-let connectionRecordEntries=[];
-function activity(message){if(accountState.user)return;renderConnectionRecords([{time:new Date().toISOString(),message},...connectionRecordEntries].slice(0,12));}
-let connectionRecordsVersion=0;
-function renderConnectionRecords(entries,empty='等待你的第一次连接。'){
- connectionRecordEntries=entries;
- renderAppTable($('activity'),{label:'连接记录',columns:[{key:'time',label:'时间',width:'190px',render:item=>{const time=document.createElement('time');time.dateTime=item.time;time.textContent=displayDate(item.time,'datetime');return time;}},{key:'message',label:'连接详情'}],rows:entries,minWidth:560,empty});
-}
-async function loadConnectionRecords(){
- const owner=accountState.user?.id,environmentId=dockerEnvironmentState.activeId,version=++connectionRecordsVersion;renderConnectionRecords([]);if(!owner)return;
- try{const entries=await api.connectionRecords();if(version===connectionRecordsVersion && owner===accountState.user?.id && environmentId===dockerEnvironmentState.activeId)renderConnectionRecords(entries);}catch{if(version===connectionRecordsVersion){renderConnectionRecords([],'连接记录读取失败，请重新打开此页面。');}}
-}
 function renderProxyStorageScope(){
  const label=!accountState.user?'仅本设备':dockerEnvironmentState.activeId?'账号 · 当前环境':'账号 · 所有设备同步';
  $('proxyStorageScope').replaceChildren(createIcon(accountState.user?'cloud':'monitor'),document.createTextNode(label));
@@ -628,7 +617,6 @@ function renderProxyRegion(status){
   $('proxyFlag').setAttribute('aria-label',location.country);
   $('proxyRegion').textContent=location.text;
 }
-let lastNetworkLog = '';
 function setNetwork(status) {
   network = status;
   updateProxyActions();
@@ -657,8 +645,6 @@ function setNetwork(status) {
   $('navigate').disabled = browserTabsState.mode==='proxy' && status.state !== 'ready';
   $('verify').disabled = !currentProxyConfig?.host || proxyActionBusy || status.state==='checking' || !environmentAllowed;
   $('ccState').textContent = !chatNeedsProxy() && !busy?(chatSessions.find(item=>item.id===activeChatId)?.networkMode==='auto'?'自动 · '+(network.state==='ready'?'代理优先':'当前直连'):'当前对话使用直连'):busy ? `${RUNTIME_CATALOG[selectedEngine]?.name || selectedEngine} 正在处理…` : status.state === 'ready' ? (selectedEngine==='codex'?'Codex · 请求通过应用代理':'模型请求通过应用代理') : '等待连接代理';
-  const logKey = JSON.stringify([status.state, status.reason, status.ip, status.checkedAt]);
-  if (logKey !== lastNetworkLog) { activity(status.reason || '网络状态更新'); lastNetworkLog = logKey; }
   if(status.state==='ready' && page==='browser')void action(()=>api.browser('open'));
   bounds();
 }
@@ -1128,7 +1114,6 @@ function applyChatMerge(data){if(data.owner!==chatOwnerID)return;
 
 }
 function handleWorkspaceEvent(type,data){
-  if(type==='connectionRecords' && data.owner===accountState.user?.id && data.environmentId===dockerEnvironmentState.activeId){connectionRecordsVersion++;renderConnectionRecords(data.entries);}
   if(type==='containerPrepareProgress' && setupDockerPreparing){setupDockerProgress=data;renderSetupDocker();}
   if (type === 'account') {renderAccount(data);void action(refreshEnvironments);}
   if(type==='runtimeLoginCallback' && data.owner===accountState.user?.id && data.environmentId===dockerEnvironmentState.activeId){switchPage('console');toast(data.ok?'Codex 已登录成功':'登录未完成，请查看控制台','runtime');void action(()=>refreshEnvironmentConfiguration(false,'codex'));}
@@ -1140,7 +1125,6 @@ function handleWorkspaceEvent(type,data){
   if(type==='chatSyncError' && data.owner===chatOwnerID){$('chatStorageStatus').textContent=data.message;}
   if (type === 'environment') setEnvironment(data);
   if (type === 'network'){setNetwork(data);updateConfigurationActions();}
-  if (type === 'requestFailure') activity(`${data.reason} · ${data.target} · ${data.code}`);
   browserToolbar.handleEvent(type,data);
   if(type==='browserLibrary'){browserPreferences=data.settings;addressHistory=data.history||[];}
   if(type==='browserLibraryReset'){addressHistory=[];void browserLibrary.refresh();}
@@ -1416,8 +1400,8 @@ $('runtimeInstallConfirm').onclick=()=>void action(async()=>{
  finally{setRuntimeInstallLoading(false);environmentConfigBusy=false;$('runtimeInstallConfirm').loading=false;$('runtimeInstallCancel').disabled=false;$('runtimeDisplayName').disabled=false;$('runtimeDescription').disabled=false;$('runtimeInstallBack').disabled=false;$('runtimeInstallClose').disabled=false;$('deepseekApiKey').disabled=false;updateConfigurationActions();}
  if(owner===accountState.user?.id && id===dockerEnvironmentState.activeId){$('runtimeInstallDialog').open=false;await refreshEnvironmentConfiguration();}
 });
-const settingCopy={containers:['环境与容器','管理本设备的日志保留、自动清理与健康检查。'],console:['控制台','管理终端显示、输入与连接行为。'],git:['Git 管理','管理 Git SSH 公钥与代码仓库认证。'],browser:['浏览器','管理浏览器网络、站点数据和 Cookie 同步。'],profile:['个人资料','管理当前账号的基础信息。'],notifications:['通知','管理当前账号在本设备上的通知。'],shortcuts:['快捷键','配置发送方式和常用操作快捷键，仅保存在本设备。'],preferences:['偏好设置','管理语言、外观、阅读、时间显示和退出行为。'],proxy:['代理与出口','管理应用代理的连接与固定出口。'],environment:['本地系统','检测系统语言与时区，管理本机使用条件。'],activity:['连接记录','查看出口核验、连接与恢复状态。']};
-for(const tab of document.querySelectorAll('[data-setting]'))tab.onclick=()=>{const key=tab.dataset.setting;if(key==='console')void consoleSettings.refresh();if(key==='git')void gitSettings.ensureLoaded();if(key==='browser'){void loadBrowserCookiePreferences();void browserLibrary.refresh();}if(key==='activity')void loadConnectionRecords();$('verify').classList.toggle('hidden',key!=='proxy');document.querySelectorAll('[data-setting]').forEach(item=>item.classList.toggle('active',item===tab));document.querySelectorAll('[data-panel]').forEach(panel=>panel.classList.toggle('hidden',panel.dataset.panel!==key));$('settingsTitle').textContent=settingCopy[key][0];$('notificationScopeBadge').classList.toggle('hidden',!['notifications','shortcuts','console','containers'].includes(key));$('notificationScopeBadge').lastChild.textContent=['shortcuts','console','containers'].includes(key)?'仅本设备':'当前账号 · 本设备';$('settingsTitleIcon').src='assets/icons/'+({containers:'boxes',console:'terminal',git:'git-branch',browser:'globe',profile:'user',preferences:'sliders-horizontal',notifications:'bell',shortcuts:'keyboard',proxy:'shield-check',activity:'activity',environment:'monitor'})[key]+'.svg';$('settingsDescription').textContent=settingCopy[key][1];};
+const settingCopy={containers:['环境与容器','管理本设备的日志保留、自动清理与健康检查。'],console:['控制台','管理终端显示、输入与连接行为。'],git:['Git 管理','管理 Git SSH 公钥与代码仓库认证。'],browser:['浏览器','管理浏览器网络、站点数据和 Cookie 同步。'],profile:['个人资料','管理当前账号的基础信息。'],notifications:['通知','管理当前账号在本设备上的通知。'],shortcuts:['快捷键','配置发送方式和常用操作快捷键，仅保存在本设备。'],preferences:['偏好设置','管理语言、外观、阅读、时间显示和退出行为。'],proxy:['代理与出口','管理应用代理的连接与固定出口。'],environment:['本地系统','检测系统语言与时区，管理本机使用条件。']};
+for(const tab of document.querySelectorAll('[data-setting]'))tab.onclick=()=>{const key=tab.dataset.setting;if(key==='console')void consoleSettings.refresh();if(key==='git')void gitSettings.ensureLoaded();if(key==='browser'){void loadBrowserCookiePreferences();void browserLibrary.refresh();}$('verify').classList.toggle('hidden',key!=='proxy');document.querySelectorAll('[data-setting]').forEach(item=>item.classList.toggle('active',item===tab));document.querySelectorAll('[data-panel]').forEach(panel=>panel.classList.toggle('hidden',panel.dataset.panel!==key));$('settingsTitle').textContent=settingCopy[key][0];$('notificationScopeBadge').classList.toggle('hidden',!['notifications','shortcuts','console','containers'].includes(key));$('notificationScopeBadge').lastChild.textContent=['shortcuts','console','containers'].includes(key)?'仅本设备':'当前账号 · 本设备';$('settingsTitleIcon').src='assets/icons/'+({containers:'boxes',console:'terminal',git:'git-branch',browser:'globe',profile:'user',preferences:'sliders-horizontal',notifications:'bell',shortcuts:'keyboard',proxy:'shield-check',environment:'monitor'})[key]+'.svg';$('settingsDescription').textContent=settingCopy[key][1];};
 let themePreference='light';try{themePreference=localStorage.getItem('ui-theme') || 'light';}catch{}
 if(!['light','dark','system'].includes(themePreference))themePreference='light';
 const systemTheme=matchMedia('(prefers-color-scheme: dark)');
@@ -1517,7 +1501,7 @@ function renderAccount(state){
  if(showLogin){$('environmentGate').open=false;for(const overlay of document.querySelectorAll('app-dialog[open],wa-dropdown[open]'))overlay.open=false;}else if(wasAuth && displayedEnvironmentStatus)setEnvironment(displayedEnvironmentStatus);
  if(showLogin && !wasAuth && !credentialBusy)credentialMode='choice';renderCredentialMode();
  $('setupAccountLogin').classList.toggle('hidden',Boolean(state.user));$('setupAccountLogout').classList.toggle('hidden',!state.user);
- const changed=accountState.user?.id!==state.user?.id;if(changed){$('renameEnvironmentDialog').open=false;clearBrowserCookies();lastChatSyncNotice='';$('chatStorageStatus').textContent='';}accountState=state;if(changed)notificationSettings.setOwner(state.user?.id);renderProxyStorageScope();if(changed)void loadConnectionRecords();if(changed){runtimeRegistry={runtimes:[]};renderChatAvailability();}if(changed && chatOwnerID!==state.user?.id){chatRestoreVersion++;chatOwnerID=null;clearReasoningTimers();chatSessions=[];activeChatId=null;$('chat').replaceChildren();renderSessionList();}
+ const changed=accountState.user?.id!==state.user?.id;if(changed){$('renameEnvironmentDialog').open=false;clearBrowserCookies();lastChatSyncNotice='';$('chatStorageStatus').textContent='';}accountState=state;if(changed)notificationSettings.setOwner(state.user?.id);renderProxyStorageScope();if(changed){runtimeRegistry={runtimes:[]};renderChatAvailability();}if(changed && chatOwnerID!==state.user?.id){chatRestoreVersion++;chatOwnerID=null;clearReasoningTimers();chatSessions=[];activeChatId=null;$('chat').replaceChildren();renderSessionList();}
  if(changed){setupInProgress=false;setupSessionStarted=false;setupImageConfirmed=false;$('environmentCreatedDialog').open=false;setupPreviewKey='';$('setupRuntimePreviewList').replaceChildren();setupDockerChecked=false;setupDockerError='';$('setupEnvironmentName').value='';validateSetupEnvironment();clearTimeout(proxySaveTimer);proxySaveVersion++;}
  const user=state.user;renderProfile(state);$('accountName').textContent=user?.name || (state.status==='signing-in'?'正在登录…':'未登录');setAccountAvatar($('accountAvatar'),state.avatar,state.avatarFallback || generatedAvatar('kuneco-guest'));$('accountSubtitle').textContent=user?.email || user?.username || '登录后同步代理配置';setAccountAvatar($('accountMenuAvatar'),state.avatar,state.avatarFallback || generatedAvatar('kuneco-guest'));$('accountMenuName').textContent=user?.name || '未登录';
  $('accountLogin').classList.toggle('hidden',Boolean(user) || state.status==='signing-in');$('accountLogout').classList.toggle('hidden',!user);$('accountCancel').classList.toggle('hidden',state.status!=='signing-in');$('accountDetails').classList.toggle('hidden',!user);
@@ -1667,7 +1651,7 @@ async function performEnvironmentOperation(action,value={}){
  if(action==='select' && chatOwnerID)await api.saveChats(chatViewData(),chatOwnerID,dockerEnvironmentState.activeId);
  const previousEnvironment=dockerEnvironmentState.activeId;if(action==='select' || action==='delete')clearBrowserCookies();
  const state=await api.dockerEnvironments(action,value);if(owner!==accountState.user?.id)throw new Error('操作期间账号已变化，请重新打开环境');dockerEnvironmentState=state;await refreshEnvironments(state);
- if(action==='select' || (action==='delete' && previousEnvironment===value.id)){navigationHistory=[];navigationIndex=-1;defaultModel=null;runtimeVersions={};void loadConnectionRecords();await reloadAccountChats();await refreshRuntimeRegistry();if(action==='select'){const selected=state.environments.find(item=>item.id===state.activeId);toast(`已切换到“${selected?.name || state.localName || '本机环境'}”环境，${state.proxyConnection?.reason || ('当前环境为 '+(selected?'Docker 容器':'本机'))}`,'network');}}
+ if(action==='select' || (action==='delete' && previousEnvironment===value.id)){navigationHistory=[];navigationIndex=-1;defaultModel=null;runtimeVersions={};await reloadAccountChats();await refreshRuntimeRegistry();if(action==='select'){const selected=state.environments.find(item=>item.id===state.activeId);toast(`已切换到“${selected?.name || state.localName || '本机环境'}”环境，${state.proxyConnection?.reason || ('当前环境为 '+(selected?'Docker 容器':'本机'))}`,'network');}}
  return state;
 }
 function setEnvironmentTypeIcon(target,local){
