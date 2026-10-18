@@ -772,9 +772,9 @@ ipcMain.handle('workspace:proxyFilePick',guarded(async()=>{
 }));
 ipcMain.handle('workspace:avatarPick',guarded(async()=>{const {dialog}=await import('electron');const result=await dialog.showOpenDialog(window,{properties:['openFile'],filters:[{name:'头像',extensions:['png','jpg','jpeg']}]});if(result.canceled)return null;const file=result.filePaths[0];if((await stat(file)).size>1024*1024)throw new Error('头像不能超过 1 MB');const data=await readFile(file);if(data.length>1024*1024)throw new Error('头像不能超过 1 MB');return 'data:image/'+(path.extname(file).toLowerCase()==='.png'?'png':'jpeg')+';base64,'+data.toString('base64');}));
 let codexCapabilitiesCache;
-async function currentCodexModels(){
+async function currentCodexModels({refresh=false}={}){
  const owner=dockerOwner(),environmentId=activeContainerId,key=JSON.stringify([owner,environmentId]);
- if(codexCapabilitiesCache?.key===key && Date.now()-codexCapabilitiesCache.at<30000)return codexCapabilitiesCache.models;
+ if(!refresh && codexCapabilitiesCache?.key===key && Date.now()-codexCapabilitiesCache.at<30000)return codexCapabilitiesCache.models;
  const spawnProcess=environmentId?await dockerEnvs.spawner(owner,environmentId):undefined;
  const models=await listCodexModels(environmentId?'codex':await findExecutable('codex'),gateway,spawnProcess);
  if(owner!==dockerOwner() || environmentId!==activeContainerId)throw new Error('模型查询期间环境已变化');
@@ -811,7 +811,7 @@ async function runtimeView(registry,{refresh=true,engine=null}={}){
   }
   const executable=id?null:item.id==='cc'?await findClaude():await findExecutable(RUNTIME_CATALOG[item.id]?.command || '');
   const auth=supportsChat(item.id)?id?await containerAuth(item.id):await detectAIAuth({engine:item.id,executable,gateway}):{state:'unknown'};
-  return {...item,auth,...(item.id==='codex'?{models:await currentCodexModels().catch(()=>[])}:{}),busy:[...runs.values()].some(task=>task.engine===item.id)};
+  return {...item,auth,...(item.id==='codex'?{models:await currentCodexModels({refresh:engine==='codex'}).catch(()=>[])}:{}),busy:[...runs.values()].some(task=>task.engine===item.id)};
  }));
  if(owner!==dockerOwner() || id!==activeContainerId)throw new Error('运行时环境已变化');
  const result={...registry,runtimes};runtimeViewCache.set(key,result);registeredRuntimes=result;
