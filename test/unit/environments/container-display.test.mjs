@@ -16,3 +16,10 @@ test('health states remain truthful and expose only safe failure metadata',async
  const value=await readContainerDisplay({command:async()=>JSON.stringify({state:{Health:{Status:'unhealthy',Log:[{Output:'SECRET TOKEN',ExitCode:7,End:'2026-10-18T04:00:00Z'}]}}})},'worker');
  assert.equal(value.healthExitCode,7);assert.equal(value.healthCheckedAt,'2026-10-18T04:00:00.000Z');assert.ok(!JSON.stringify(value).includes('SECRET'));
 });
+
+test('inspection failure retains diagnostics and a subsequent successful read recovers',async()=>{
+ let fail=true;const errors=[];const manager={command:async()=>{if(fail)throw Error('inspection timed out');return JSON.stringify({state:{Running:true}});},onInspectionError:(name,error)=>errors.push([name,error.message])};
+ assert.equal((await readContainerDisplay(manager,'worker')).available,false);
+ assert.deepEqual(errors,[['worker','inspection timed out']]);fail=false;
+ assert.equal((await readContainerDisplay(manager,'worker')).available,true);
+});

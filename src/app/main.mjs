@@ -645,12 +645,13 @@ ipcMain.handle('workspace:dockerEnvironments',guarded(async(action='state',value
   if(value.id===null){const data=await dockerEnvs.load(owner);if(data.localEnabled===false)throw new Error('环境不存在');registry=activeContainerId===null?registeredRuntimes:await account.runtimes(hostname()).catch(()=>null);item={name:data.localName || '本机环境'};}
   else{item=(await dockerEnvs.get(owner,value.id)).item;registry=item.registry;
    const name=item.external?.id || resourcePrefix(owner,value.id)+'-worker';
-   const endpoint=item.external?.endpoint || dockerEnvs.endpoint;const [worker,gateway]=await Promise.all([readContainerDisplay(dockerEnvs,name,endpoint),item.external?Promise.resolve(null):readContainerDisplay(dockerEnvs,resourcePrefix(owner,value.id)+'-gateway',endpoint)]);reliability={worker,gateway,network:item.external?null:await readNetworkDisplay(dockerEnvs,resourcePrefix(owner,value.id),endpoint)};
+   const inspection=Object.create(dockerEnvs);inspection.onInspectionError=(resource,error)=>recordEnvironmentEvent(owner,value.id,'environment-inspection','WARN','Environment inspection failed: '+String(error?.message || error),'inspection:'+resource);
+   const endpoint=item.external?.endpoint || dockerEnvs.endpoint;const [worker,gateway]=await Promise.all([readContainerDisplay(inspection,name,endpoint),item.external?Promise.resolve(null):readContainerDisplay(inspection,resourcePrefix(owner,value.id)+'-gateway',endpoint)]);reliability={worker,gateway,network:item.external?null:await readNetworkDisplay(inspection,resourcePrefix(owner,value.id),endpoint)};
    try{container=JSON.parse(await dockerEnvs.command(['inspect','--format','{"id":{{json .Id}},"name":{{json .Name}},"image":{{json .Config.Image}}}',name],{endpoint:item.external?.endpoint || dockerEnvs.endpoint,timeout:5000}));}catch{container={name:item.external?.name || name,image:item.imageName || null};}
   }
   if(value.id!==null){
    baseImage=item.baseImage || null;
-   try{baseSystem=JSON.parse(await dockerEnvs.exec(owner,value.id,['node','-e',String.raw`const fs=require('fs');const os=fs.readFileSync('/etc/os-release','utf8');const name=/^PRETTY_NAME=["']?([^\n"']+)/m.exec(os)?.[1];console.log(JSON.stringify({node:process.versions.node,os:name || null}));`],{timeout:5000}));}catch{}
+   try{baseSystem=JSON.parse(await dockerEnvs.exec(owner,value.id,['node','-e',String.raw`const fs=require('fs');const os=fs.readFileSync('/etc/os-release','utf8');const name=/^PRETTY_NAME=["']?([^\n"']+)/m.exec(os)?.[1];console.log(JSON.stringify({node:process.versions.node,os:name || null}));`],{timeout:5000}));}catch(error){recordEnvironmentEvent(owner,value.id,'environment-inspection','WARN','System inspection failed: '+String(error?.message || error),'inspection:system');}
   }
   if(value.id===activeContainerId && registry)registry=await runtimeView(registry,{refresh:false});
   if(owner!==dockerOwner())throw new Error('查看期间账号已变化，请重新打开环境');
