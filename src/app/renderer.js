@@ -1742,10 +1742,9 @@ async function renderEnvironmentCard(row,id){
   const type=document.createElement('span');setEnvironmentTypeIcon(type,local);nameLine.append(name);nameLine.append(type);
   if(!local)nameLine.append(status);
   const metadata=document.createElement('div');metadata.className='environment-summary-meta environment-image-versions';
-  const baseVersion=detail.baseSystem?['Node.js '+detail.baseSystem.node,detail.baseSystem.os].filter(Boolean).join(' · '):detail.baseImage || '版本信息未记录';
-  if(!local)for(const [title,text] of [['基础镜像版本',baseVersion],['容器镜像版本',detail.containerImage || '未知']]){const pair=document.createElement('div'),label=document.createElement('span'),value=document.createElement('strong');label.textContent=title;value.textContent=text;pair.append(label,value);metadata.append(pair);}
+  if(!local)for(const [title,text] of [['容器镜像版本',detail.containerImage || '未知']]){const pair=document.createElement('div'),label=document.createElement('span'),value=document.createElement('strong');label.textContent=title;value.textContent=text;pair.append(label,value);metadata.append(pair);}
   if(!local){const identifiers=document.createElement('div');identifiers.className='environment-container-identifiers';for(const [label,text] of [['容器名称',detail.containerName],['容器 ID',detail.containerId]]){if(!text)continue;const pair=document.createElement('div'),term=document.createElement('span'),value=document.createElement('strong');term.textContent=label;value.textContent=text;pair.append(term,value);identifiers.append(pair);}metadata.append(identifiers);}
-  if(!local)for(const [index,label,date] of [[0,'创建时间',detail.createdAt],[1,'最近检测',detail.checkedAt]]){const row=document.createElement('div');row.className='environment-version-date';const term=document.createElement('span'),value=document.createElement('span');term.textContent=label;value.textContent=date?displayEnvironmentDate(date,index===1):'尚未检测';if(date){value.dataset.environmentDate=date;value.dataset.environmentRecent=String(index===1);value.title=displayDate(date);}row.append(term,value);metadata.children[index].append(row);}
+  if(!local){const row=document.createElement('div');row.className='environment-version-date';const term=document.createElement('span'),value=document.createElement('span');term.textContent='创建时间';value.textContent=detail.createdAt?displayEnvironmentDate(detail.createdAt):'未记录';if(detail.createdAt){value.dataset.environmentDate=detail.createdAt;value.dataset.environmentRecent='false';value.title=displayDate(detail.createdAt);}row.append(term,value);metadata.firstElementChild.append(row);}
   identity.append(nameLine);if(local){const subtitle=document.createElement('p');subtitle.className='environment-container-name';subtitle.textContent='使用本机运行时与工作文件';identity.append(subtitle);}else identity.append(metadata);
   header.replaceChildren(createEnvironmentIconPicker(id,environmentIcon(local?dockerEnvironmentState.localIcon:dockerEnvironmentState.environments.find(item=>item.id===id)?.icon,local?'monitor':'boxes')),identity);
   const facts=document.createElement('dl');facts.className='environment-inline-facts';
@@ -1753,14 +1752,12 @@ async function renderEnvironmentCard(row,id){
    ...(!local?[['基础镜像来源',detail.baseImage]]:[]),
    ['工作文件',id===null?'使用本机文件':detail.external?'使用原容器文件':'独立容器数据卷'],
    ['运行时登录',id===null?'使用本机登录':detail.external?'使用原容器登录':'仅保存在当前环境'],
-   ['代理配置',id===null?'使用本机代理配置':detail.proxyConfigured?'已配置':'未配置'],
    ...(local?[
-    ['创建时间',detail.createdAt?displayDate(detail.createdAt):null,detail.createdAt],
-    ['最近检测',detail.checkedAt?displayDate(detail.checkedAt):'尚未检测',detail.checkedAt]
+    ['创建时间',detail.createdAt?displayDate(detail.createdAt):null,detail.createdAt]
    ]:[])
   ]){if(value===null)continue;const term=document.createElement('dt'),description=document.createElement('dd');term.textContent=label;description.textContent=value;if(date){description.dataset.environmentDate=date;description.dataset.environmentRecent=String(label==='最近检测');description.textContent=displayEnvironmentDate(date,label==='最近检测');description.title=displayDate(date);}const pair=document.createElement('div');if(label==='基础镜像来源')pair.className='environment-fact-wide';pair.append(term,description);facts.append(pair);}
   const runtimes=document.createElement('div');runtimes.className='environment-inline-runtimes';
-  const title=document.createElement('h3');title.className='preference-heading';title.textContent='运行时';const count=document.createElement('span');count.className='environment-runtime-count muted';count.textContent=detail.runtimes.length+' 个运行时';title.append(count);const hint=document.createElement('p');hint.className='environment-runtimes-hint settings-section-description muted';hint.textContent='此环境中已检测到的运行时、CLI 版本及支持的模型。';runtimes.append(title,hint);
+  const title=document.createElement('h3');title.className='preference-heading';title.textContent='运行时';const hint=document.createElement('p');hint.className='environment-runtimes-hint settings-section-description muted';hint.textContent='此环境中已检测到的运行时、CLI 版本及支持的模型。';runtimes.append(title,hint);
   if(detail.runtimes.length){
    const table=document.createElement('app-table');
    renderRuntimeTable(table,detail.runtimes,{columns:[{key:'name',label:'运行时',width:'145px'},{key:'version',label:'CLI 版本',width:'175px'},{key:'models',label:'模型'}],actions:false,onOpen:runtime=>{if(owner!==accountState.user?.id || id!==dockerEnvironmentState.activeId)return;switchPage('runtime');openRuntimeDetails(runtimeRegistry.runtimes.find(entry=>entry.id===runtime.id) || runtime);}});runtimes.append(table);
