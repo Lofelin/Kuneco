@@ -2,6 +2,14 @@ import WaDialog from '@awesome.me/webawesome/dist/components/dialog/dialog.js';
 import {css} from 'lit';
 /** Shared dialog shell. Pages supply label, body and footer; the shell owns geometry. */
 export class AppDialog extends WaDialog{
+ // Keep the application close API on the same cancellable lifecycle as header/Escape.
+ async hide(){
+  await this.updateComplete;
+  if(this._hideRequest)return this._hideRequest;
+  if(!this.open && !this.dialog.open)return;
+  this._hideRequest=this.requestClose(this.dialog);
+  try{await this._hideRequest;}finally{this._hideRequest=null;}
+ }
  static styles=[...WaDialog.styles,css`
   :host{--backdrop-filter:var(--app-modal-backdrop-filter,blur(4px));--wa-color-overlay-modal:var(--app-modal-backdrop-color,rgb(160 165 175 / 18%))}
   .dialog::backdrop{background:var(--app-modal-backdrop-color,rgb(160 165 175 / 18%))!important;backdrop-filter:var(--app-modal-backdrop-filter,blur(4px))!important}
