@@ -40,10 +40,10 @@ export function directTaskArguments({prefix,name,image,projectMounts=[],task,com
 export class DockerEnvironments {
  constructor({directory,sourceRoot,encrypt,decrypt,defaultLocalEnabled=false}){Object.assign(this,{directory,sourceRoot,encrypt,decrypt,defaultLocalEnabled});this.context='colima-dingtu';this.endpoint='unix://'+path.join(homedir(),'.colima','dingtu','docker.sock');this.busy=false;}
  async binary(name){for(const location of [path.join(process.resourcesPath||this.sourceRoot,'container-engine','bin',name),path.join(this.sourceRoot,'vendor','container-engine','bin',name),'/opt/homebrew/bin/'+name,'/usr/local/bin/'+name]){try{await access(location);return location;}catch{}}throw new Error('容器引擎组件未安装，请初始化容器引擎');}
- async command(args,{input,inputFile,timeout=30000,endpoint=this.endpoint,maxBuffer=4*1024*1024}={}){
+ async command(args,{input,inputFile,timeout=30000,endpoint=this.endpoint,maxBuffer=4*1024*1024,combinedOutput=false}={}){
   const binary=await this.binary('docker');
   return new Promise((resolve,reject)=>{
-   const child=execFile(binary,['--host',endpoint,...args],{cwd:this.sourceRoot,timeout,maxBuffer,env:{...process.env,DOCKER_HOST:'',DOCKER_CONTEXT:this.context,DOCKER_BUILDKIT:'0',PATH:path.join(this.sourceRoot,'vendor','container-engine','bin')+':'+(process.env.PATH || '/usr/bin:/bin')}},(error,stdout,stderr)=>{if(error)return reject(new Error('Docker 操作失败：'+String(stderr || error.message).replace(/([a-z][a-z0-9+.-]*:\/\/)[^\s/@]+:[^\s@]+@/gi,'$1***@').slice(-600)));resolve(stdout.trim() || stderr.trim());});
+   const child=execFile(binary,['--host',endpoint,...args],{cwd:this.sourceRoot,timeout,maxBuffer,env:{...process.env,DOCKER_HOST:'',DOCKER_CONTEXT:this.context,DOCKER_BUILDKIT:'0',PATH:path.join(this.sourceRoot,'vendor','container-engine','bin')+':'+(process.env.PATH || '/usr/bin:/bin')}},(error,stdout,stderr)=>{if(error)return reject(new Error('Docker 操作失败：'+String(stderr || error.message).replace(/([a-z][a-z0-9+.-]*:\/\/)[^\s/@]+:[^\s@]+@/gi,'$1***@').slice(-600)));resolve(combinedOutput?[stdout,stderr].filter(Boolean).join("\n").trim():stdout.trim() || stderr.trim());});
    child.stdin.on('error',()=>{});if(inputFile){const source=createReadStream(inputFile);source.on('error',error=>{child.kill();reject(error);});child.on('close',()=>source.destroy());source.pipe(child.stdin);}else child.stdin.end(input);
   });
  }

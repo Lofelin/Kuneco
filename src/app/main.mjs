@@ -1,3 +1,6 @@
+import {EnvironmentEvents,observeEnvironmentOperations,observeRuntimeLaunch} from '../features/environments/environment-events.mjs';
+import {observeEnvironmentHealth} from '../features/environments/environment-health-events.mjs';
+import {subscribeEnvironmentLogs} from '../features/environments/environment-log-stream.mjs';
 import {validConsoleDirectory} from '../shared/console-preferences.mjs';
 import {createPreferenceStore} from '../features/preferences/preference-store.mjs';
 import {createQuitConfirmation} from '../features/preferences/quit-confirmation.mjs';
@@ -68,6 +71,12 @@ import { parseIproyalExport } from '../features/proxy/iproyal-import.mjs';
 
 const here = fileURLToPath(new URL('../',import.meta.url));
 let connectionRecords,chatNetworkChanging=false;
+let environmentLogStream=null,environmentEvents=null,environmentHealth=null;
+function recordEnvironmentEvent(owner,id,source,level,message,stateKey){void environmentEvents?.record(owner,id,{source,level,message},stateKey).catch(()=>{});}
+function stopEnvironmentHealth(){environmentHealth?.stop();environmentHealth=null;}
+function startEnvironmentHealth(){stopEnvironmentHealth();if(environmentEvents&&dockerOwner())environmentHealth=observeEnvironmentHealth({docker:dockerEnvs,owner:dockerOwner(),id:activeContainerId,prefix:activeContainerId?resourcePrefix(dockerOwner(),activeContainerId):null,journal:environmentEvents,getPreferences:()=>preferenceStore?.get()||{}});}
+
+function stopEnvironmentLogs(){const current=environmentLogStream;environmentLogStream=null;if(current){current.subscription?.stop();emit('environmentLogs',{token:current.token,closed:true});}}
 let dockerEnvs,activeContainerId=null,containerLogin=null,containerOperation=false,localEnvironmentEnabled=true;
 const dockerOwner=()=>account?.user?.id || null;
 let consoleSession=null,consoleOpening=false;
@@ -95,10 +104,10 @@ async function saveCookiePreferences(){await writeFile(path.join(app.getPath('us
 setInterval(()=>{if(account?.user && !accountChanging && !containerOperation && !browserDataBusy){const ctx=cookieContext();void ctx.sync.sync().catch(ctx.sync.onError);}},15000).unref();
 function requireActiveEnvironment(){if(!activeContainerId && !localEnvironmentEnabled)throw new Error('请先创建环境并检测运行时');}
 let account=null,accountChanging=false,registeredRuntimes=null,runtimeOwner=null,runtimeDetection=null;
-async function loadUserRuntimes(){const owner=account?.user?.id || null;registeredRuntimes=null;runtimeOwner=owner;const data=await dockerEnvs?.load(owner);activeContainerId=data?.activeId || null;localEnvironmentEnabled=data?.localEnabled!==false;const registry=activeContainerId?(await dockerEnvs.get(owner,activeContainerId)).item.registry:localEnvironmentEnabled?await account.runtimes(hostname()).catch(()=>null):null;if(owner===(account?.user?.id || null)){registeredRuntimes=registry;if(registry?.runtimes?.some(item=>!item.auth))await runtimeView(registry).catch(()=>{});}}
+async function loadUserRuntimes(){stopEnvironmentLogs();stopEnvironmentHealth();const owner=account?.user?.id || null;registeredRuntimes=null;runtimeOwner=owner;const data=await dockerEnvs?.load(owner);activeContainerId=data?.activeId || null;localEnvironmentEnabled=data?.localEnabled!==false;const registry=activeContainerId?(await dockerEnvs.get(owner,activeContainerId)).item.registry:localEnvironmentEnabled?await account.runtimes(hostname()).catch(()=>null):null;if(owner===(account?.user?.id || null)){registeredRuntimes=registry;if(registry?.runtimes?.some(item=>!item.auth))await runtimeView(registry).catch(()=>{});startEnvironmentHealth();recordEnvironmentEvent(owner,activeContainerId,'Environment lifecycle','INFO','Current environment loaded');}}
 
 const accountProxyView=()=>({...savedConfig,password:undefined,hasPassword:Boolean(savedConfig.password)});
-async function applyAccount(){closeConsole();accountChanging=true;try{containerLogin?.kill();containerLogin=null;await stopGateway();emit('network',{state:'blocked',reason:'账号配置已切换，请连接并核验出口'});await loadUserRuntimes();if(window)resetEnvironmentBrowser();await loadAccountChats(false);savedConfig={protocol:'http',host:'',port:8080,username:'',password:''};if(account.user){const saved=activeContainerId?(await dockerEnvs.get(dockerOwner(),activeContainerId)).item.proxy:await account.proxy();if(saved)savedConfig=validateProxy(saved);}return {...account.state(),proxy:accountProxyView()};}finally{accountChanging=false;if(account?.user){const ctx=cookieContext();await ctx.sync.sync().catch(ctx.sync.onError);}emit('account',{...account.state(),proxy:accountProxyView()});}}
+async function applyAccount(){stopEnvironmentLogs();stopEnvironmentHealth();closeConsole();accountChanging=true;try{containerLogin?.kill();containerLogin=null;await stopGateway();emit('network',{state:'blocked',reason:'账号配置已切换，请连接并核验出口'});await loadUserRuntimes();if(window)resetEnvironmentBrowser();await loadAccountChats(false);savedConfig={protocol:'http',host:'',port:8080,username:'',password:''};if(account.user){const saved=activeContainerId?(await dockerEnvs.get(dockerOwner(),activeContainerId)).item.proxy:await account.proxy();if(saved)savedConfig=validateProxy(saved);}return {...account.state(),proxy:accountProxyView()};}finally{accountChanging=false;if(account?.user){const ctx=cookieContext();await ctx.sync.sync().catch(ctx.sync.onError);}emit('account',{...account.state(),proxy:accountProxyView()});}}
 
 const fixtureMode = process.argv.includes('--test-fixture');
 const authRequired=!fixtureMode || Boolean(process.env.WORKSPACE_TEST_AUTH_ONLY);
@@ -170,6 +179,12 @@ async function browserProxyConfiguration(){
 let savedConfig = { protocol: 'http', host: '', port: 8080, username: '' };
 const emit = (type, data, context={}) => {
  const owner=account?.user?.id;
+ if(owner&&!accountChanging&&type==='network'){
+  const warning=['stale','unavailable'].includes(data.verificationState);
+  recordEnvironmentEvent(owner,activeContainerId,'Proxy connection and verification',warning?'WARN':'INFO',
+   ['Proxy state changed','connection='+data.state,data.verificationState?'verification='+data.verificationState:''].filter(Boolean).join(' · '),'proxy-state');
+ }
+ if(owner&&!accountChanging&&type==='requestFailure')recordEnvironmentEvent(owner,activeContainerId,'Proxy connection and verification','WARN','Proxy forwarding request failed'+(typeof data.code==='string'&&/^[A-Z0-9_]+$/.test(data.code)?' · '+data.code:''),'proxy-request-failure');
  if(connectionRecords && owner && !accountChanging && ['network','requestFailure'].includes(type)){
   const message=type==='network'?[data.reason || '网络状态更新',data.ip].filter(Boolean).join(' · '):[data.reason,data.target,data.code].filter(Boolean).join(' · ');
   const environmentId=activeContainerId;void connectionRecords.append(owner,message,environmentId).then(entries=>{if(owner===account?.user?.id && environmentId===activeContainerId)emit('connectionRecords',{owner,environmentId,entries:entries.filter(item=>Object.hasOwn(item,'environmentId') && item.environmentId===environmentId)});}).catch(()=>{});
@@ -491,6 +506,8 @@ async function connect(config, remember, {environmentSwitch=false}={}) {
   const validated = validateProxy(config);
   if (!isIP(validated.host)) throw new Error('DNS保护要求上游主机填写IP地址；目标域名由上游代理解析，不能使用本机DNS启动代理');
   connecting = true;
+  const logOwner=dockerOwner(),logEnvironment=activeContainerId;
+  recordEnvironmentEvent(logOwner,logEnvironment,'Proxy connection and verification','INFO','Connecting proxy and verifying egress');
   try {
     await stopGateway({preserveDirectChat:true});
     emit('network', { state: 'checking', reason: '正在通过指定代理核验出口' });
@@ -515,7 +532,7 @@ async function connect(config, remember, {environmentSwitch=false}={}) {
     next.serviceProbes=!fixtureMode;
     next.startMonitoring(probeUrl);
     return status;
-  } finally { connecting = false; }
+  } catch(error){recordEnvironmentEvent(logOwner,logEnvironment,'Proxy connection and verification','ERROR','Proxy connection or verification failed: '+error.message);throw error;} finally { connecting = false; }
 }
 async function createWindow() {
   window = new BrowserWindow({ show: false, width: authRequired && !account?.user?860:1400, height:authRequired && !account?.user?720:950, minWidth: authRequired && !account?.user?640:1050, minHeight:authRequired && !account?.user?560:760, title: 'Kuneco', icon: path.join(here, 'assets/brand/kuneco.png'), titleBarStyle: 'hidden', trafficLightPosition: { x: 12, y: 14 }, backgroundColor: '#f6f7f9', webPreferences: { preload: path.join(here, 'app/preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true } });
@@ -529,7 +546,8 @@ async function createWindow() {
   createBrowserTab();
   window.webContents.on('did-start-loading',()=>quitConfirmation.cancel());
   window.webContents.on('render-process-gone',()=>quitConfirmation.cancel());
-  window.on('closed',()=>quitConfirmation.cancel());
+  window.on('closed',()=>{stopEnvironmentLogs();quitConfirmation.cancel();});
+  window.webContents.on('did-start-loading',()=>stopEnvironmentLogs());
   window.on('close', event=>{if(!shutdown.complete){event.preventDefault();app.quit();}});
   window.on('closed', () => { browserVisible = false; window = null; for (const tab of browserTabs.values()) { if (tab.wc && !tab.wc.isDestroyed()) tab.wc.close(); } browserTabs.clear(); });
   await window.loadFile(path.join(here, 'index.html'));
@@ -580,6 +598,8 @@ async function containerAuth(engine){
 function localGitDirectory(owner){return path.join(app.getPath('userData'),'git-environments',createHash('sha256').update(owner).digest('hex'));}
 function localGitEnvironment(base,owner,proxy=''){return {...base,GIT_CONFIG_GLOBAL:path.join(localGitDirectory(owner),'config'),KUNECO_GIT_PROXY_URL:proxy};}
 ipcMain.handle('workspace:dockerEnvironments',guarded(async(action='state',value={})=>{
+ if(action==='logsStop'){if(environmentLogStream?.token===value.token)stopEnvironmentLogs();return {}; }
+ if(action==='logsCleanup'){if(!dockerOwner())throw new Error('请先登录');return environmentEvents.cleanup({manual:true});}
  if(action==='state')return dockerEnvs.state(dockerOwner());
  if(browserDataBusy)throw new Error('正在清理浏览器数据，请稍后切换环境');
  if(action==='gitManage'){
@@ -606,6 +626,17 @@ ipcMain.handle('workspace:dockerEnvironments',guarded(async(action='state',value
   if(browserDataBusy || accountChanging || containerOperation)throw new Error('正在处理浏览器数据或切换账号、环境');
   const owner=dockerOwner();if(!owner || value.owner!==owner || value.id!==activeContainerId)throw new Error('账号或环境已变化，请重新打开弹窗');
   containerOperation=true;try{if(action==='icon')await dockerEnvs.changeEnvironmentIcon(owner,value.id,value.icon);else await dockerEnvs.renameEnvironment(owner,value.id,value.name);if(owner!==dockerOwner())throw new Error('账号已变化');return await dockerEnvs.state(owner);}finally{containerOperation=false;}
+ }
+ if(action==='logsStart'){
+  const owner=dockerOwner(),id=activeContainerId;
+  if(!owner || value.owner!==owner || value.id!==id || accountChanging || containerOperation)throw new Error('账号或环境已变化，请重新打开日志');
+  if(typeof value.token!=='string' || value.token.length>100)throw new Error('无效的日志订阅');
+  stopEnvironmentLogs();
+  const current={token:value.token};environmentLogStream=current;
+  current.subscription=subscribeEnvironmentLogs({docker:dockerEnvs,journal:environmentEvents,owner,id,prefix:id?resourcePrefix(owner,id):null,
+   valid:()=>environmentLogStream===current && owner===dockerOwner() && id===activeContainerId && !accountChanging,
+   send:data=>{if(id===null&&data.metadata)Object.assign(data.metadata,{status:'应用运行中',running:true,uptime:Math.floor(process.uptime()),runtimeCount:registeredRuntimes?.runtimes?.length??null});emit('environmentLogs',{...data,token:current.token});}});
+  return {token:current.token};
  }
  if(action==='existing')return dockerEnvs.existing(dockerOwner());
  if(action==='previewExisting')return dockerEnvs.previewExisting(dockerOwner(),value.key);
@@ -664,7 +695,7 @@ ipcMain.handle('workspace:dockerEnvironments',guarded(async(action='state',value
  }
  if(action==='installRuntime'){if(!activeContainerId)throw new Error('请先切换到容器环境，再安装运行时');if((await dockerEnvs.get(dockerOwner(),activeContainerId)).item.external)throw new Error('请在原容器中安装运行时，完成后重新检测');const registry=await dockerEnvs.installRuntime(dockerOwner(),activeContainerId,value.engine,{apiKey:value.apiKey,name:value.name,description:value.description});registeredRuntimes=registry;runtimeOwner=dockerOwner();return runtimeView(registry,{engine:value.engine});}
  if(action==='delete'){
-  if(activeContainerId===value.id)closeConsole();
+  if(activeContainerId===value.id){stopEnvironmentLogs();closeConsole();}
   const owner=dockerOwner(),id=value.id;const data=await dockerEnvs.load(owner);const item=id===null?(data.localEnabled!==false?{name:data.localName || '本机环境'}:null):(await dockerEnvs.get(owner,id)).item;
   if(!item)throw new Error('环境不存在');
   if(value.name!==item.name)throw new Error('请输入完整且一致的环境名称');
@@ -688,7 +719,8 @@ ipcMain.handle('workspace:dockerEnvironments',guarded(async(action='state',value
  if(action==='start'){if(activeContainerId!==value.id)throw new Error('请先切换到该环境');await dockerEnvs.stopOtherEnvironments(dockerOwner(),value.id);if(activeContainerId===value.id){await stopGateway();emit('network',{state:'blocked',reason:'容器已启动，请连接并核验代理'});}await dockerEnvs.start(dockerOwner(),value.id);return dockerEnvs.state(dockerOwner());}
  if(action==='stop'){if(activeContainerId===value.id){closeConsole();await stopGateway();emit('network',{state:'blocked',reason:'当前容器已停止'});}return dockerEnvs.stop(dockerOwner(),value.id);}
  if(action==='select'){
-  closeConsole();containerLogin?.kill();containerLogin=null;storeCurrentSession();await sessionSave.catch(()=>{});await stopGateway();await dockerEnvs.activate(dockerOwner(),value.id || null);await loadUserRuntimes();
+  recordEnvironmentEvent(dockerOwner(),activeContainerId,'Environment lifecycle','INFO','Leaving current environment');
+  stopEnvironmentLogs();  closeConsole();containerLogin?.kill();containerLogin=null;storeCurrentSession();await sessionSave.catch(()=>{});await stopGateway();await dockerEnvs.activate(dockerOwner(),value.id || null);await loadUserRuntimes();
   savedConfig=activeContainerId?(await dockerEnvs.get(dockerOwner(),activeContainerId)).item.proxy || {protocol:'http',host:'',port:8080,username:''}:await account.proxy().catch(()=>null) || {protocol:'http',host:'',port:8080,username:''};
   activeAISessionId=null;project='';sessionId=undefined;codexSessionId=undefined;codexModel=null;
   resetEnvironmentBrowser();emit('network',{state:'checking',reason:'正在连接当前环境保存的代理'});emit('account',{...account.state(),proxy:accountProxyView()});
@@ -702,7 +734,7 @@ ipcMain.handle('workspace:dockerEnvironments',guarded(async(action='state',value
  }finally{containerOperation=false;if(account?.user){const ctx=cookieContext();await ctx.sync.sync().catch(ctx.sync.onError);}}
 }));
 let preferenceStore,preferenceLoadError='';
-ipcMain.handle('workspace:preferences',guarded(async patch=>{if(preferenceLoadError)throw Error(preferenceLoadError);if(!preferenceStore)throw Error('偏好设置尚未就绪');if(patch===undefined)return preferenceStore.get();const value=await preferenceStore.save(patch);emit('preferences',value);chatPopouts.preferencesChanged(value);return value;}));
+ipcMain.handle('workspace:preferences',guarded(async patch=>{if(preferenceLoadError)throw Error(preferenceLoadError);if(!preferenceStore)throw Error('偏好设置尚未就绪');if(patch===undefined)return preferenceStore.get();const value=await preferenceStore.save(patch);if(Object.keys(patch).some(key=>key.startsWith('environmentLog')))await environmentEvents?.cleanup();emit('preferences',value);chatPopouts.preferencesChanged(value);return value;}));
 ipcMain.handle('workspace:quitConfirmation',guarded(value=>quitConfirmation.answer(value)));
 ipcMain.handle('workspace:state', guarded(async () => ({
   containerId:activeContainerId,account:account?.state(),runtimeRegistry:runtimeOwner===(account?.user?.id || null)?registeredRuntimes:null,chatViews:chatViews.filter(v=>(aiSessions.get(v.id)?.environmentId || null)===activeContainerId),chatImportLegacy,chatOwner,
@@ -1056,7 +1088,7 @@ async function runLearningAutomation(item,question,controller){
  const timeout=setTimeout(()=>controller.abort(),180000);
  try{
   const launch=environmentId?await (requiresProxy?dockerEnvs.spawner(ownerId,environmentId):dockerEnvs.directChatSpawner(ownerId,environmentId)):(requiresProxy?createRestrictedCCSpawner({port:proxy.port,canStart:valid}):createDirectChatSpawner(valid));
-  const spawnProcess=options=>{if(!valid())throw new Error('账号、环境或连接状态已变化');return launch(environmentId?options:{...options,env:localGitEnvironment(options.env || process.env,ownerId,requiresProxy?proxy.url:'')});};
+  const spawnProcess=observeRuntimeLaunch(options=>{if(!valid())throw new Error('账号、环境或连接状态已变化');return launch(environmentId?options:{...options,env:localGitEnvironment(options.env || process.env,ownerId,requiresProxy?proxy.url:'')});},{journal:environmentEvents,owner:ownerId,id:environmentId,engine:item.engine,signal:controller.signal});
   const cwd=environmentId?await dockerEnvs.workingDirectory(ownerId,environmentId):path.join(app.getPath('userData'),'learning-workspaces',item.id);
   if(!environmentId)await mkdir(cwd,{recursive:true,mode:0o700});if(!valid())throw new Error('账号、环境或代理已变化');
   let text='',nextSession=item.sessionId;
@@ -1260,7 +1292,7 @@ ipcMain.handle('workspace:cc', guarded(async (prompt,rewind,chatId=activeAISessi
   const canContinue=()=>valid() && environmentStatus.allowed && !controller.signal.aborted && (!requiresProxy || gateway===owner && owner.status.state==='ready');
   const directSpawn=requiresProxy?null:createDirectChatSpawner(canContinue);
   const baseLaunch=containerSpawn || directSpawn || createRestrictedCCSpawner({port:owner.port,canStart:canContinue});
-  const launch=options=>{if(!canContinue())throw new Error('对话网络不可用');return baseLaunch(activeContainerId?options:{...options,env:localGitEnvironment(options.env || process.env,requestOwner,requiresProxy?owner.url:'')});};
+  const launch=observeRuntimeLaunch(options=>{if(!canContinue())throw new Error('对话网络不可用');return baseLaunch(activeContainerId?options:{...options,env:localGitEnvironment(options.env || process.env,requestOwner,requiresProxy?owner.url:'')});},{journal:environmentEvents,owner:requestOwner,id:environmentId,engine,signal:controller.signal});
   const currentChat=preparedChat;if(currentChat){currentChat.updatedAt=new Date().toISOString();persistAISessions();}
   const usageOwner=chatOwner;
   let latestUsage=null,latestUsageDetails=null;
@@ -1322,7 +1354,7 @@ ipcMain.handle('workspace:cc', guarded(async (prompt,rewind,chatId=activeAISessi
     }
   })();
   return {chatId,requestId};
-  } catch(error){runs.finish(controller);void persistAISessions();throw error;}
+  } catch(error){if(!controller.signal.aborted)recordEnvironmentEvent(requestOwner,environmentId,'Runtime','ERROR',engine+' preparation or startup failed; check runtime installation, authentication and environment connection.');runs.finish(controller);void persistAISessions();throw error;}
 }));
 // Only read the installed CLI version; never automatically log in or send model requests.
 ipcMain.handle('workspace:claudeInfo', guarded(async () => {
@@ -1345,7 +1377,10 @@ app.whenReady().then(async () => {
   account=new AccountClient({environment:()=>activeContainerId,returnURL:desktopReturn.url,serverURL:process.env.WORKSPACE_ACCOUNT_SERVER_URL || 'http://localhost:8787',sessionFile:path.join(app.getPath('userData'),'account-session.bin'),storage:safeStorage,directIP:fixtureMode?async()=>'203.0.113.99':undefined,openExternal:url=>fixtureMode?Promise.resolve():shell.openExternal(url)});
   account.on('change',state=>{emit('account',state);if(gateway)gateway.regionRetryAt=0;refreshProxyRegion();});
   connectionRecords=new ConnectionRecords({directory:path.join(app.getPath('userData'),'connection-records'),encrypt:value=>{if(!safeStorage.isEncryptionAvailable())throw new Error('系统加密不可用');return safeStorage.encryptString(value);},decrypt:value=>safeStorage.decryptString(value)});
+  environmentEvents=new EnvironmentEvents({getPreferences:()=>preferenceStore?.get()||{},directory:path.join(app.getPath('userData'),'environment-events'),encrypt:value=>{if(!safeStorage.isEncryptionAvailable())throw new Error('系统加密不可用');return safeStorage.encryptString(value);},decrypt:value=>safeStorage.decryptString(value)});
+  environmentEvents.startCleanup();
   dockerEnvs=new DockerEnvironments({defaultLocalEnabled:fixtureMode && !authRequired,directory:path.join(app.getPath('userData'),'docker-environments'),sourceRoot:path.join(here,'..'),encrypt:value=>{if(!safeStorage.isEncryptionAvailable())throw new Error('系统加密不可用');return safeStorage.encryptString(value);},decrypt:value=>safeStorage.decryptString(value)});
+  observeEnvironmentOperations(dockerEnvs,environmentEvents,()=>({id:activeContainerId}));
   browserFeatures=createBrowserFeatures({app,safeStorage,dialog,shell,browserSync:async(s,scope,body)=>{const owner=account?.user?.id,token=account?.token;if(owner!==s.owner)throw Error('账号已变化');const result=await account.request('/v1/me/browser-settings?scope='+encodeURIComponent(scope),{method:body?'PUT':'GET',...(body?{body}:{}),token});if(account?.user?.id!==owner||account?.token!==token)throw Error('账号已变化');return result;},containerDownloads:createContainerDownloads({docker:dockerEnvs,directory:path.join(app.getPath('temp'),'kuneco-download-preview')}),getStorage:()=>session.fromPartition(browserPartition()),getWindow:()=>window,getScope:()=>({owner:dockerOwner(),environmentId:activeContainerId}),getTabs:()=>[...browserTabs.values()],getActive:()=>browserTabs.get(activeTabId),openURL:(url,fresh,extension)=>{const tab=fresh?createBrowserTab():browserTabs.get(activeTabId)||createBrowserTab();tab.agentPolicy=null;if(extension){tab.started=true;tab.url=url;void tab.wc.loadURL(url);publishTabs();}else navigateBrowserTab(tab,url);},emit,valid:()=>!accountChanging&&!containerOperation,importCookies:async(cookies,s)=>{if(browserDataBusy)throw Error('正在处理浏览器数据');browserDataBusy=true;const ctx=cookieContext();try{await ctx.sync.enqueue(async()=>{for(const cookie of cookies){if(s.owner!==dockerOwner()||s.environmentId!==activeContainerId)throw Error('账号或环境已变化');await ctx.sites.storage.cookies.set(cookie);}await ctx.sites.storage.cookies.flushStore();});}finally{browserDataBusy=false;}await ctx.sync.sync().catch(ctx.sync.onError);},clearSites:async kind=>{if(browserDataBusy)throw Error('正在处理浏览器数据');browserDataBusy=browserClearBusy=true;try{const ctx=cookieContext();for(const tab of [...browserTabs.values()])removeBrowserTab(tab,true);await ctx.sites.clear({kind},ctx.sync);}finally{browserDataBusy=browserClearBusy=false;publishTabs();}}});
   setInterval(()=>{if(account?.user&&!accountChanging&&!containerOperation)void browserFeatures.refresh().catch(()=>{});},30000).unref();
   await account.restore();await loadUserRuntimes();
@@ -1384,7 +1419,8 @@ app.whenReady().then(async () => {
   }
 });
 const shutdown=createShutdownBarrier([
- ()=>{learningAutomations?.stop();closeConsole();desktopReturn?.close();containerLogin?.kill();account?.cancel();account?.closeConnections();clearInterval(environmentTimer);clearInterval(healthTimer);gateway?.block('应用退出');stopBrowserTabs();},
+ ()=>{stopEnvironmentLogs();stopEnvironmentHealth();learningAutomations?.stop();closeConsole();desktopReturn?.close();containerLogin?.kill();account?.cancel();account?.closeConnections();clearInterval(environmentTimer);clearInterval(healthTimer);gateway?.block('应用退出');stopBrowserTabs();},
+ ()=>{environmentEvents?.stopCleanup();return environmentEvents?.flush();},
  ()=>dockerEnvs?.shutdownTasks(),
  ()=>runs.abortWhere(),
  async()=>{await dockerEnvs?.shutdownTasks();if(gateway){gateway.block('应用退出');await gateway.stop({strict:true});}},
