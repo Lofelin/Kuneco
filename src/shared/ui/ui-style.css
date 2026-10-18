@@ -2416,9 +2416,12 @@ wa-tab-group.app-section-tabs wa-tab::part(tab){padding:8px 0;margin:0;font-size
 wa-tab-group.app-section-tabs wa-tab[active]::part(tab){color:var(--ink)}
 wa-tab-group.app-section-tabs wa-tab-panel{--padding:28px}
 /* Environment identity stays above the tabs; long detail blocks live in their own panels. */
+#page-environments{--environment-content-inset:14px}
 #page-environments>.environments-body{padding:0}
+wa-tab-group.environment-detail-tabs::part(nav){padding-inline:var(--environment-content-inset)}
+wa-tab-group.environment-detail-tabs wa-tab-panel{--padding:28px var(--environment-content-inset)}
 .environments-body .environment-expanded{max-width:none;margin:0}
-.environment-expanded>.environment-card-header{padding:28px;gap:18px}
+.environment-expanded>.environment-card-header{padding:28px var(--environment-content-inset);gap:18px}
 .environment-tabbed-details{display:block;border:0;padding:0;margin:0}
 .environment-overview-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(260px,320px);gap:32px;align-items:start}
 .environment-overview-main,.environment-overview-aside{min-width:0}
@@ -2434,4 +2437,4 @@ wa-tab-group.app-section-tabs wa-tab-panel{--padding:28px}
 .environment-overview-aside .environment-inline-facts>div{display:grid;grid-template-columns:84px minmax(0,1fr);gap:12px;font-size:13px;line-height:20px}
 .environment-detail-tabs .preference-heading{margin-top:0}
 @media(max-width:1000px){.environment-overview-grid{grid-template-columns:minmax(0,1fr);gap:24px}.environment-overview-aside{width:100%;box-sizing:border-box}}
-@media(max-width:760px){.environment-expanded>.environment-card-header{padding:20px}wa-tab-group.environment-detail-tabs::part(nav){padding-inline:20px}wa-tab-group.environment-detail-tabs wa-tab-panel{--padding:20px}}
+@media(max-width:760px){.environment-expanded>.environment-card-header{padding-block:20px}wa-tab-group.environment-detail-tabs wa-tab-panel{--padding:20px var(--environment-content-inset)}}
