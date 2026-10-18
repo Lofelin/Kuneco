@@ -147,7 +147,7 @@ let chatRestoring=true,chatRestoreVersion=0;
 let contentTabState={tabs:[],activeId:null},navigationHistory=[],navigationIndex=-1,historyRestoring=false,chatOwnerID=null,chatEnvironmentID=null,chatReloading=false,chatReloadPending=false;
 let sidebarCollapsed=false;try{sidebarCollapsed=localStorage.getItem('sidebar-collapsed')==='true';}catch{}document.body.classList.toggle('sidebar-collapsed',sidebarCollapsed);
 let currentProxyConfig=null,editingProxy=false,importPrepared=false;
-let proxyFileDirectory='',proxyFileParent='',proxyFileSelection=null,proxyFileVersion=0;
+let proxyFileSelection=null,proxyFileVersion=0;
 const chatRuns=new Map();
 let page = 'cc', network = { state: 'blocked' }, hasPassword = false, busy = false, browserTabsState = { tabs: [], activeId: null }, reply, approvals = [];
 const browserModeSwitches=mountBrowserModeSwitches({document,getMode:()=>browserTabsState.mode || 'proxy',save:mode=>api.browserSettings(mode),onSaved:renderBrowserTabs});
@@ -763,7 +763,7 @@ function selectProxyMethod(method){
  proxyMethod=method;importPrepared=false;closeImport();proxyFileSelection=null;++proxyFileVersion;
  for(const key of ['host','port','username','password'])$(key).value='';hasPassword=false;
  document.querySelectorAll('[data-proxy-method]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.proxyMethod===method)));
- $('proxyManualPanel').classList.toggle('hidden',method!=='manual');$('proxyFilePanel').classList.toggle('hidden',method!=='file');$('proxyImportPanel').classList.toggle('hidden',method==='manual');$('pastePanel').classList.toggle('hidden',method!=='paste');$('importSelection').classList.add('hidden');$('proxyImportResult').classList.add('hidden');$('importError').textContent='';$('importStatus').classList.add('hidden');$('proxyValidation').classList.add('hidden');updateProxyActions();if(method==='file')void loadProxyFiles(proxyFileDirectory || undefined);
+ $('proxyManualPanel').classList.toggle('hidden',method!=='manual');$('proxyFilePanel').classList.toggle('hidden',method!=='file');$('proxyImportPanel').classList.toggle('hidden',method==='manual');$('pastePanel').classList.toggle('hidden',method!=='paste');$('importSelection').classList.add('hidden');$('proxyImportResult').classList.add('hidden');$('importError').textContent='';$('importStatus').classList.add('hidden');$('proxyValidation').classList.add('hidden');updateProxyActions();$('proxyFileChoose').value='';$('proxyFileError').textContent='';
 }
 for(const button of document.querySelectorAll('[data-proxy-method]'))button.onclick=()=>selectProxyMethod(button.dataset.proxyMethod);
 $('openProxyDialog').onclick=()=>{editingProxy=Boolean(currentProxyConfig?.host);selectProxyMethod('manual');
@@ -1438,22 +1438,21 @@ async function restoreChats(state){
  $('chatStorageStatus').textContent=chatOwnerID?'对话保存到当前账号':'未登录 · 对话仅保存在本机';
 }
 
-async function loadProxyFiles(directory){
- const version=++proxyFileVersion;proxyFileSelection=null;importPrepared=false;importPreview=null;updateProxyActions();$('proxyFileError').textContent='';$('proxyFileEntries').textContent='正在读取目录…';
+async function selectProxyFile(files){
+ const version=++proxyFileVersion;$('proxyFileChoose').disabled=true;$('proxyFileError').textContent='';
  try{
-  const data=await api.browseFiles({directory,kind:'file'});if(version!==proxyFileVersion || proxyMethod!=='file')return;
-  proxyFileDirectory=data.directory;proxyFileParent=data.parent;$('proxyFilePath').value=data.directory;$('proxyFileUp').disabled=data.parent===data.directory;$('proxyFileEntries').replaceChildren();
-  for(const entry of data.entries){
-   const row=createUI('app-button');row.className='file-picker-entry';row.setAttribute('role','listitem');row.append(createIcon(entry.directory?'folder':'file-text'),document.createTextNode(entry.name));
-   row.onclick=()=>{if(entry.directory){void loadProxyFiles(entry.path);return;}proxyFileSelection=entry.path;importPrepared=false;importPreview=null;for(const key of ['host','port','username','password'])$(key).value='';$('proxyImportResult').classList.add('hidden');$('importSelection').classList.add('hidden');$('proxyFileEntries').querySelectorAll('app-button').forEach(button=>{button.classList.toggle('active',button===row);button.setAttribute('aria-pressed',String(button===row));});updateProxyActions();};
-   $('proxyFileEntries').append(row);
-  }
-  if(!data.entries.length)$('proxyFileEntries').textContent='此目录没有可选择的 TXT 或 CSV 文件。';
- }catch(error){if(version===proxyFileVersion){$('proxyFileEntries').replaceChildren();$('proxyFileError').textContent='目录读取失败：'+error.message;}}
-}
-$('proxyFileUp').onclick=()=>void loadProxyFiles(proxyFileParent);
-$('proxyFileGo').onclick=()=>void loadProxyFiles($('proxyFilePath').value);
-$('proxyFilePath').onkeydown=event=>{if(event.key==='Enter'){event.preventDefault();void loadProxyFiles($('proxyFilePath').value);}};
+  if(files && files.length!==1)throw new Error('请一次选择一个 TXT 或 CSV 文件');
+  const file=await (files?api.proxyFileDrop(files[0]):api.proxyFilePick());
+  if(!file || version!==proxyFileVersion || proxyMethod!=='file')return;
+  proxyFileSelection=file.path;$('proxyFileChoose').value=file.name;importPrepared=false;importPreview=null;
+  for(const key of ['host','port','username','password'])$(key).value='';
+  $('proxyImportResult').classList.add('hidden');$('importSelection').classList.add('hidden');updateProxyActions();
+ }catch(error){if(version===proxyFileVersion)$('proxyFileError').textContent=error.message;}
+ finally{$('proxyFileChoose').disabled=false;}
+};
+
+$('proxyFileChoose').onclick=()=>void selectProxyFile();
+$('proxyFileChoose').addEventListener('files-selected',event=>void selectProxyFile(event.detail.files));
 
 let pickerResolve=null,pickerKind='file',pickerDirectory='',pickerParent='',pickerSelection=null,pickerScope='host',pickerContext=null;
 function finishFilePicker(value=null){const resolve=pickerResolve;pickerResolve=null;$('filePicker').open=false;if(resolve)resolve(value);}

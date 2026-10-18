@@ -31,3 +31,5 @@ export function setUITheme(dark){ document.body.classList.toggle('wa-dark',dark)
 export function createUI(tag){const element=document.createElement(tag);if(tag==='app-button')element.size='s';return element;}
 
 export function createIcon(name){const icon=document.createElement('wa-icon');icon.src=`assets/icons/${name==='claude-code'?'claude-brand':name}.svg`;if(name==='claude-code'||name==='codex')icon.classList.add('brand-icon',`brand-${name}`);icon.setAttribute('aria-hidden','true');return icon;}
+
+import './app-file-picker.mjs';

@@ -714,6 +714,19 @@ ipcMain.handle('workspace:saveChats',guarded(async(views,owner,environmentId=nul
 }));
 ipcMain.handle('workspace:archiveSession',guarded(async(id,archived)=>{if(accountChanging || containerOperation || chatNetworkChanging)throw new Error('正在处理环境或连接方式切换，请稍候');if(runs.has(id))throw new Error('请先停止此对话的回复');const item=aiSessions.get(id);if(!item || (item.environmentId || null)!==activeContainerId)throw new Error('会话不存在');item.archived=Boolean(archived);await persistAISessions();return {...item};}));
 ipcMain.handle('workspace:accountProfileSave',guarded(async value=>account.updateProfile(value)));
+async function validateProxyFile(file){
+ if(typeof file!=='string' || !file || !['.txt','.csv'].includes(path.extname(file).toLowerCase()))throw new Error('请选择 TXT 或 CSV 文件');
+ const info=await stat(file);if(!info.isFile())throw new Error('请选择文件，不能选择文件夹');
+ if(info.size>1024*1024)throw new Error('文件不能超过 1 MB');
+ return {path:file,name:path.basename(file)};
+}
+ipcMain.handle('workspace:proxyFileValidate',guarded(async(file)=>validateProxyFile(file)));
+ipcMain.handle('workspace:proxyFilePick',guarded(async()=>{
+ const {dialog}=await import('electron');
+ const result=await dialog.showOpenDialog(window,{title:'选择代理文件',properties:['openFile'],filters:[{name:'代理文件',extensions:['txt','csv']}]});
+ if(result.canceled || !result.filePaths.length)return null;
+ return validateProxyFile(result.filePaths[0]);
+}));
 ipcMain.handle('workspace:avatarPick',guarded(async()=>{const {dialog}=await import('electron');const result=await dialog.showOpenDialog(window,{properties:['openFile'],filters:[{name:'头像',extensions:['png','jpg','jpeg']}]});if(result.canceled)return null;const file=result.filePaths[0];if((await stat(file)).size>1024*1024)throw new Error('头像不能超过 1 MB');const data=await readFile(file);if(data.length>1024*1024)throw new Error('头像不能超过 1 MB');return 'data:image/'+(path.extname(file).toLowerCase()==='.png'?'png':'jpeg')+';base64,'+data.toString('base64');}));
 let codexCapabilitiesCache;
 async function currentCodexModels(){

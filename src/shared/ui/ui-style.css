@@ -1412,15 +1412,15 @@ body{--data-list-header-bg:color-mix(in srgb,var(--surface) 75%,var(--soft))}
 @media(max-width:850px){.proxy-config-toolbar{flex-wrap:wrap}}
 
 .proxy-config-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-#proxyDialog{--width:680px}
+#proxyDialog{--width:620px}
 #proxyDialog::part(body){padding:var(--dialog-inset)}
 #proxyDialog .import-bar{display:flex;gap:8px;align-items:center;margin:20px 0 16px}
 #proxyDialog .form-footer{justify-content:flex-end}
 #proxyDialog .config-card{padding:0;border:0;background:none;margin:0}
 #proxyConfigInfo{margin:0}
 
-.proxy-methods{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:20px 0 24px}
-.proxy-methods app-button::part(base){width:100%;font-size:12px;min-height:38px;background:var(--surface);border:1px solid var(--line);border-radius:8px}
+.proxy-methods{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:12px 0 16px}
+.proxy-methods app-button::part(base){width:100%;font-size:12px;min-height:32px;background:var(--surface);border:1px solid var(--line);border-radius:8px}
 .proxy-methods app-button[aria-pressed=true]::part(base){background:var(--soft);border-color:var(--ink);color:var(--ink)}
 .proxy-methods wa-icon{width:14px;height:14px}
 .proxy-method-panel{margin-bottom:20px}
@@ -2332,17 +2332,34 @@ wa-radio-group.app-segmented wa-radio:is(:hover,:state(checked)){background:var(
 #themeSelect wa-radio::part(label){display:flex;align-items:center;gap:6px}
 #themeSelect wa-icon{font-size:14px;flex:none}
 
+/* Avoid stacking panel spacing with the dialog body inset. */
+#proxyDialog .proxy-method-panel{margin-bottom:0}
+#proxyFileError:empty{display:none}
+#proxyDialog .config-card:has(#proxyManualPanel.hidden){display:none}
+#proxyManualPanel .field-row:last-child{margin-bottom:0}
 
 .profile-stats{padding:14px 0}
 .profile-stats>div{grid-template-rows:auto auto;gap:4px}
+#proxyManualPanel .field-row>div{min-width:0}
+#proxyManualPanel :is(wa-input,wa-number-input,wa-select){display:block;margin:0;width:100%}
+#proxyManualPanel :is(wa-input,wa-number-input,wa-select)::part(form-control-label){margin:0 0 8px!important;line-height:20px!important}
 /* All ellipsis actions use the same transparent treatment as chat More. */
 app-button:has(wa-icon[src$="/ellipsis.svg"]),
 app-button:has(wa-icon[src$="/ellipsis.svg"])::part(base){background:transparent!important;border-color:transparent!important;box-shadow:none!important}
+#proxyManualPanel .field-row>div{flex:1}
 
 .runtime-selected-base,#runtimeDefaultCommand{border-radius:14px}
 app-button[data-icon-action],app-button[data-icon-action]::part(base){background:transparent!important;border-color:transparent!important;box-shadow:none!important}
 app-button[data-icon-action]{color:var(--muted)!important}
 app-button[data-icon-action]:not([disabled]):not([loading]):is(:hover,:active){color:var(--ink)!important}
+/* Proxy credentials share the connection row's column boundaries. */
+#proxyManualPanel>.field-row{display:grid;grid-template-columns:1.25fr 1.8fr 100px;gap:12px}
+#proxyManualPanel>.field-row:last-child>div:last-child{grid-column:2}
+@media(max-width:1150px){#proxyManualPanel>.field-row{grid-template-columns:1fr 1.4fr 85px}}
 
 #accountMenu::part(menu){border-radius:14px}
 
+/* Compact proxy entry while keeping shared dialog header and footer geometry. */
+#proxyDialog>p.muted{margin:0;line-height:20px}
+#proxyManualPanel>.field-row{margin:0 0 12px}
+#proxyFileChoose{--file-picker-min-height:96px;--file-picker-padding:16px}
