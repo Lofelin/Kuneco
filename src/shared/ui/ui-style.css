@@ -2069,6 +2069,9 @@ wa-switch{--wa-form-control-activated-color:var(--ink)}
 
 #chat.reply-in-progress .message-edit-action{display:none!important}
 
+.git-settings-actions{display:flex;justify-content:flex-end;flex-wrap:wrap;gap:8px;flex:0 0 auto;max-width:100%}
+#gitStatus{margin:0;font-size:12px;line-height:20px}
+#gitStatus:empty{display:none}
 
 /* Runtime event details share the conversation palette in both themes. */
 .runtime-activities{grid-template-columns:minmax(0,1fr);min-width:0}
@@ -2081,7 +2084,24 @@ wa-switch{--wa-form-control-activated-color:var(--ink)}
 .runtime-activity[data-status="failed"] .runtime-activity-status{color:var(--delete-foreground)}
 @media(max-width:700px){.runtime-activity>summary{flex-wrap:wrap}.runtime-activity>summary>.runtime-activity-title{flex-basis:55%;white-space:normal;overflow-wrap:anywhere}.runtime-activity>summary>.runtime-activity-status{margin-left:0}}
 
+#gitPublicKey{margin:0;padding:12px;background:var(--soft);border-radius:6px;white-space:pre-wrap;overflow-wrap:anywhere;user-select:text;font:12px/20px var(--font-mono,monospace)}
+.git-key-title{display:flex;align-items:center;gap:8px}
 
+:is(.git-identity-row,.git-credential-row)>.notification-setting-copy{min-width:70px}
+:is(.git-identity-row,.git-credential-row)>wa-select{width:240px;max-width:45%;min-width:0}
+:is(.git-identity-field,.git-credential-field){display:grid;grid-template-columns:minmax(70px,1fr) minmax(0,min(240px,45%));align-items:center;column-gap:16px;width:100%;min-width:0}
+:is(.git-identity-field,.git-credential-field)::part(form-control-label){margin:0;font-size:var(--settings-row-title-size);font-weight:500;line-height:var(--settings-row-title-line-height)}
+:is(.git-identity-field,.git-credential-field)::part(base){min-width:0;grid-column:2;grid-row:1 / span 2}
+:is(.git-identity-field,.git-credential-field)::part(hint){grid-column:1;grid-row:2;margin:2px 0 0;font-size:12px;line-height:18px;color:var(--muted)}
+#gitIdentityStatus{margin:8px 0 0;font-size:12px;color:var(--muted)}
+#gitIdentityStatus:empty{display:none}
+.git-form-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:8px}
+#gitSettings .notification-setting-copy>wa-select,#gitSettings .notification-setting-copy>wa-input{display:block;margin-top:8px}
+#gitSettings .notification-setting-copy>wa-checkbox{display:block;margin-top:8px;font-size:12px}
+#gitFingerprint,#gitTestResult{overflow-wrap:anywhere}
+#gitSettings>.settings-section-description{color:var(--muted)}
+#gitSettings>#gitStatus{margin-top:12px}
+@container(max-width:480px){.git-form-fields{grid-template-columns:minmax(0,1fr)}#gitSettings .notification-setting-row:not(.git-key-row):not(.git-identity-row):not(.git-credential-row):not(.git-connection-row):not(.git-trust-row){flex-wrap:wrap}#gitSettings .notification-setting-row:not(.git-key-row):not(.git-identity-row):not(.git-credential-row):not(.git-connection-row):not(.git-trust-row)>.notification-setting-copy{flex-basis:100%}#gitSettings .notification-setting-row:not(.git-key-row):not(.git-identity-row):not(.git-credential-row):not(.git-connection-row):not(.git-trust-row)>app-button,#gitSettings .notification-setting-row:not(.git-key-row):not(.git-identity-row):not(.git-credential-row):not(.git-connection-row):not(.git-trust-row)>.git-settings-actions{margin-left:auto}}
 /* Chat viewport controls use the shared button geometry. */
 #page-cc{position:relative}
 .chat-jump-latest{position:absolute;left:50%;right:auto;transform:translateX(-50%);bottom:156px;z-index:3;width:36px;height:36px}
@@ -2136,6 +2156,10 @@ body.chat-mode .content-tabs-viewport{padding-right:48px}
 @media(max-width:1150px){.window-insights{--insights-size:min(440px,calc(100vw - 64px));position:fixed;right:0;top:0;bottom:0;width:var(--insights-size);transform:translateX(100%);transition:transform var(--sidebar-motion-duration) var(--sidebar-motion-easing);z-index:8;background:var(--surface)}.window-insights.insights-open{transform:translateX(0);box-shadow:-8px 0 24px rgb(0 0 0 / 8%)}.window-insights .chat-splitter{display:none}}
 .window-insights.resizing{transition:none}@media(prefers-reduced-motion:reduce){.window-insights{transition:none}}
 
+.git-ssh-description{display:flex;align-items:center;justify-content:space-between;gap:16px}
+.git-ssh-description>span{min-width:0}
+.git-ssh-description>app-button{flex:none}
+#gitKeyDialogStatus:empty{display:none}
 .chat-insights .insights-heading{position:sticky;top:0;z-index:2;min-height:var(--app-tabs-height,46px);margin:0 -16px 12px;padding:6px 52px 6px 16px;background:var(--shell);border-bottom:1px solid var(--line);-webkit-app-region:drag}.insights-heading app-button{-webkit-app-region:no-drag}
 
 /* Environment content: grouped facts, bounded readable width and consistent section spacing. */
@@ -2150,6 +2174,33 @@ body.chat-mode .content-tabs-viewport{padding-right:48px}
 .environment-container-identifiers strong{overflow-wrap:anywhere}
 @media(max-width:900px){.environment-network-facts{grid-template-columns:1fr}.environment-network-facts>div:nth-child(n+2){border-top:1px solid var(--line)}}
 
+.git-key-picker{display:flex;align-items:center;gap:8px}
+.git-key-picker>wa-select{flex:1;min-width:0}
+.git-key-picker>app-button{flex:none}
+
+.git-connection-field{display:grid;grid-template-columns:minmax(70px,1fr) minmax(0,min(240px,45%));align-items:center;column-gap:16px;flex:1;min-width:0}
+.git-connection-field::part(form-control-label){margin:0;font-size:var(--settings-row-title-size);line-height:var(--settings-row-title-line-height);font-weight:500}
+.git-connection-field::part(base){grid-column:2;grid-row:1 / span 2;min-width:0}
+.git-connection-field::part(hint){grid-column:1;grid-row:2;margin:2px 0 0;font-size:12px;line-height:18px;color:var(--muted)}
+.git-connection-row>app-button,.git-trust-row>wa-switch{flex:none}
+#gitTestResult:empty{display:none}
+
+.git-credential-platform-controls{display:flex;align-items:center;justify-content:flex-end;gap:8px;min-width:0;max-width:65%}
+.git-credential-platform-controls>wa-select{width:240px;min-width:0;flex:1}
+.git-credential-platform-controls>app-button{flex:none}
+
+.git-connection-description:has(#gitTestResult:not(:empty)) #gitNetworkRoute{display:none}
+
+#gitTestResult:not(:empty){display:inline-flex;align-items:center;gap:6px;max-width:100%}
+:is(#gitTestResult,.git-inline-status)[data-state=success]{color:var(--success)}
+:is(#gitTestResult,.git-inline-status)[data-state=error]{color:var(--danger,#dc2626)}
+:is(#gitTestResult,.git-inline-status) wa-spinner{flex:none;font-size:12px;--indicator-color:currentColor}
+
+.git-inline-status{display:inline-flex;align-items:center;gap:6px;max-width:100%}
+
+#gitRefresh[data-state="error"] #gitRefreshLabel,
+#gitCopy[data-state="error"] wa-icon,
+#gitGenerate[data-state="error"] #gitGenerateLabel{color:var(--danger,#dc2626)}
 
 /* Window artifact dock: one edge, aligned toolbar and centered scoped empty state. */
 .chat-insights>.insights-empty{flex:1;min-height:220px}
@@ -2169,6 +2220,9 @@ body.chat-mode .content-tabs-viewport{padding-right:48px}
 .chat-document-chip,.chat-document-card{display:flex;align-items:center;gap:8px;min-width:0;padding:8px;border:1px solid var(--line);border-radius:8px;font-size:12px}.chat-document-card{flex-wrap:wrap}.chat-document-card strong{overflow-wrap:anywhere}.chat-document-card small{color:var(--muted)}.message-documents{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}#sessionEffort{max-width:130px}
 
 .chat-insights .app-empty-state>p{margin:0}
+
+#gitCopy[data-state="success"] wa-icon{color:var(--success)}
+#gitKeySelectStatus:empty{display:none}
 
 /* Field descriptions precede their controls in pages and dialogs. */
 .form-field-group>.preference-heading{margin:0;font-size:var(--settings-row-title-size,13px);line-height:20px;font-weight:500}

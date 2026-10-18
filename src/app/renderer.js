@@ -12,6 +12,7 @@ import {containerDisplayRows,networkDisplayRows} from '../features/environments/
 import {mountContextPicker} from '../features/chat/context-picker.mjs';
 import {mountChatScroll} from '../features/chat/scroll-follow.mjs';
 import {mergeRuntimeActivity} from '../features/runtimes/activity-state.mjs';
+import {mountGitSettings} from '../features/git/git-settings.mjs';
 import {mountMessageActions,openMessageEditor} from '../features/chat/message-actions.mjs';
 import {mountNotificationSettings} from '../features/notifications/notification-settings.mjs';
 import {generatedAvatar,runtimeAccountAvatar,setAccountAvatar} from '../vendor/generated-avatar.js';
@@ -40,6 +41,7 @@ let chatRenderContainer=null;
 const $ = id => id==='chat' && chatRenderContainer?chatRenderContainer:document.getElementById(id);
 const api = window.workspace;
 const chatScroll=mountChatScroll(document.getElementById('chat'),document.getElementById('chatJumpLatest'));
+const gitSettings=mountGitSettings({host:$('gitSettings'),api,getScope:()=>[accountState.user?.id,dockerEnvironmentState.activeId,chatSessions.find(item=>item.id===activeChatId)?.project || '']});
 const notificationSettings=mountNotificationSettings({host:$('notificationSettings'),api});
 notificationSettings.setOwner(null);
 const consoleView=mountConsole(api,{openBrowser:url=>void action(async()=>{await api.browser('navigate',url);switchPage('browser');})});
@@ -1066,7 +1068,7 @@ function handleWorkspaceEvent(type,data){
   if(type==='runtimeLoginCallback' && data.owner===accountState.user?.id && data.environmentId===dockerEnvironmentState.activeId){switchPage('console');toast(data.ok?'Codex 已登录成功':'登录未完成，请查看控制台','runtime');void action(()=>refreshEnvironmentConfiguration(false,'codex'));}
   if(type==='containerLoginOutput')$('containerLoginOutput').value=($('containerLoginOutput').value+data).slice(-32000);
   if(type==='containerLoginEnd'){toast(data,'runtime');void action(()=>refreshEnvironmentConfiguration(true));}
-  if(type==='chatAccountChanged'){approvalCards.clear();contextPicker.close();chatScroll.clear();clearReasoningTimers();chatRuns.clear();busy=false;reply=null;pendingChatMerges=[];$('deepseekApiKey').value='';$('runtimeInstallDialog').open=false;void reloadAccountChats();}
+  if(type==='chatAccountChanged'){approvalCards.clear();contextPicker.close();chatScroll.clear();gitSettings.invalidate(false);clearReasoningTimers();chatRuns.clear();busy=false;reply=null;pendingChatMerges=[];$('deepseekApiKey').value='';$('runtimeInstallDialog').open=false;void reloadAccountChats();}
   if(type==='chatMerged' && data.owner===chatOwnerID){if(chatRuns.size)pendingChatMerges.push(data);else applyChatMerge(data);}
   if(type==='chatSyncRecovered' && data.owner===chatOwnerID){lastChatSyncNotice='';$('chatStorageStatus').textContent='对话已保存到当前账号';}
   if(type==='chatSyncError' && data.owner===chatOwnerID){$('chatStorageStatus').textContent=data.message;}
@@ -1342,8 +1344,8 @@ $('runtimeInstallConfirm').onclick=()=>void action(async()=>{
  finally{setRuntimeInstallLoading(false);environmentConfigBusy=false;$('runtimeInstallConfirm').loading=false;$('runtimeInstallCancel').disabled=false;$('runtimeDisplayName').disabled=false;$('runtimeDescription').disabled=false;$('runtimeInstallBack').disabled=false;$('runtimeInstallClose').disabled=false;$('deepseekApiKey').disabled=false;updateConfigurationActions();}
  if(owner===accountState.user?.id && id===dockerEnvironmentState.activeId){$('runtimeInstallDialog').open=false;await refreshEnvironmentConfiguration();}
 });
-const settingCopy={browser:['浏览器','管理此设备内置浏览器的连接方式。'],profile:['个人资料','管理当前账号的基础信息。'],notifications:['通知','管理当前账号在本设备上的通知。'],preferences:['偏好设置','管理账号语言和此设备的界面外观。'],proxy:['代理与出口','管理应用代理的连接与固定出口。'],environment:['本地系统','检测系统语言与时区，管理本机使用条件。'],activity:['连接记录','查看出口核验、连接与恢复状态。']};
-for(const tab of document.querySelectorAll('[data-setting]'))tab.onclick=()=>{const key=tab.dataset.setting;if(key==='browser')void loadBrowserCookiePreferences();if(key==='activity')void loadConnectionRecords();$('verify').classList.toggle('hidden',key!=='proxy');document.querySelectorAll('[data-setting]').forEach(item=>item.classList.toggle('active',item===tab));document.querySelectorAll('[data-panel]').forEach(panel=>panel.classList.toggle('hidden',panel.dataset.panel!==key));$('settingsTitle').textContent=settingCopy[key][0];$('notificationScopeBadge').classList.toggle('hidden',key!=='notifications');$('settingsTitleIcon').src='assets/icons/'+({browser:'globe',profile:'user',preferences:'sliders-horizontal',notifications:'bell',proxy:'shield-check',activity:'activity',environment:'monitor'})[key]+'.svg';$('settingsDescription').textContent=settingCopy[key][1];};
+const settingCopy={git:['Git 管理','管理 Git SSH 公钥与代码仓库认证。'],browser:['浏览器','管理此设备内置浏览器的连接方式。'],profile:['个人资料','管理当前账号的基础信息。'],notifications:['通知','管理当前账号在本设备上的通知。'],preferences:['偏好设置','管理账号语言和此设备的界面外观。'],proxy:['代理与出口','管理应用代理的连接与固定出口。'],environment:['本地系统','检测系统语言与时区，管理本机使用条件。'],activity:['连接记录','查看出口核验、连接与恢复状态。']};
+for(const tab of document.querySelectorAll('[data-setting]'))tab.onclick=()=>{const key=tab.dataset.setting;if(key==='git')void gitSettings.ensureLoaded();if(key==='browser')void loadBrowserCookiePreferences();if(key==='activity')void loadConnectionRecords();$('verify').classList.toggle('hidden',key!=='proxy');document.querySelectorAll('[data-setting]').forEach(item=>item.classList.toggle('active',item===tab));document.querySelectorAll('[data-panel]').forEach(panel=>panel.classList.toggle('hidden',panel.dataset.panel!==key));$('settingsTitle').textContent=settingCopy[key][0];$('notificationScopeBadge').classList.toggle('hidden',key!=='notifications');$('settingsTitleIcon').src='assets/icons/'+({git:'git-branch',browser:'globe',profile:'user',preferences:'sliders-horizontal',notifications:'bell',proxy:'shield-check',activity:'activity',environment:'monitor'})[key]+'.svg';$('settingsDescription').textContent=settingCopy[key][1];};
 let themePreference='light';try{themePreference=localStorage.getItem('ui-theme') || 'light';}catch{}
 if(!['light','dark','system'].includes(themePreference))themePreference='light';
 const systemTheme=matchMedia('(prefers-color-scheme: dark)');
@@ -1437,6 +1439,7 @@ $('credentialCancel').onclick=()=>void api.accountCancel();
 async function logoutAccount(){ saveChatView();$('accountMenu').open=false;const state=await api.accountLogout();renderAccount(state);await refreshEnvironments();if(!state.serverRevoked)toast('本机已退出，账号服务暂不可用，服务端会话未撤销。');}
 
 function renderAccount(state){
+ if(accountState.user?.id!==state.user?.id)gitSettings.invalidate(false);
  if(state.authRequired!==undefined)loginScreenEnabled=state.authRequired;
  const wasAuth=document.body.classList.contains('auth-mode');document.body.classList.remove('auth-pending');const showLogin=loginScreenEnabled && !state.user;if(showLogin && state.status!=='signing-in' && !credentialBusy){$('loginPassword').value='';$('loginPasswordConfirm').value='';validateCredentials();}document.body.classList.toggle('auth-mode',showLogin);$('accountScreen').classList.toggle('hidden',!showLogin);
  if(showLogin){$('environmentGate').open=false;for(const overlay of document.querySelectorAll('app-dialog[open],wa-dropdown[open]'))overlay.open=false;}else if(wasAuth && displayedEnvironmentStatus)setEnvironment(displayedEnvironmentStatus);
@@ -1610,7 +1613,7 @@ async function ensureEnvironmentPage(){
 async function refreshEnvironments(existing){
  const version=++environmentLoadVersion,body=document.querySelector('#page-environments>.environments-body');body.classList.add('is-loading');body.setAttribute('aria-busy','true');
  try{
- const owner=accountState.user?.id;const state=existing || await api.dockerEnvironments('state');if(owner!==accountState.user?.id || version!==environmentLoadVersion)return;dockerEnvironmentState=state;renderProxyStorageScope();if(!document.querySelector('[data-panel=browser]').classList.contains('hidden'))void loadBrowserCookiePreferences();
+ const owner=accountState.user?.id;const state=existing || await api.dockerEnvironments('state');if(owner!==accountState.user?.id || version!==environmentLoadVersion)return;const gitEnvironmentChanged=dockerEnvironmentState.activeId!==state.activeId || dockerEnvironmentState.localEnabled!==state.localEnabled;dockerEnvironmentState=state;if(gitEnvironmentChanged)gitSettings.invalidate();renderProxyStorageScope();if(!document.querySelector('[data-panel=browser]').classList.contains('hidden'))void loadBrowserCookiePreferences();
  const hasLocal=state.localEnabled!==false,localName=state.localName || '本机环境';
  const noEnvironments=!hasLocal && !state.environments.length;
  if(!accountState.user){setupInProgress=false;setupSessionStarted=false;}

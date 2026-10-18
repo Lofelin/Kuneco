@@ -71,7 +71,7 @@ test('new container creation starts a unique environment and rolls back only fai
  const directory=await mkdtemp(path.join(tmpdir(),'dingtu-create-'));
  const manager=new DockerEnvironments({directory,sourceRoot:process.cwd(),encrypt:Buffer.from,decrypt:b=>b.toString()});
  manager.engineStatus=async()=>({ready:true,image:true});manager.verifyImageTools=async()=>{};const started=[],cleaned=[];
- manager.start=async(owner,id)=>{started.push(resourcePrefix(owner,id));};
+ manager.start=async(owner,id)=>{started.push(resourcePrefix(owner,id));};manager.exec=async()=>JSON.stringify({version:'git version 2',publicKey:'ssh-ed25519 fixture'});
  try{
   const first=await manager.createAndStart('owner','新容器一'),second=await manager.createAndStart('owner','新容器二');
   assert.notEqual(first,second);assert.notEqual(started[0],started[1]);assert.equal((await manager.load('owner')).environments.length,2);
@@ -131,8 +131,8 @@ test('deleting active environment follows menu order and wraps to the first rema
 test('new environments reject images without required tools before saving any environment',async()=>{
  const manager=new DockerEnvironments({sourceRoot:process.cwd()});let created=false;
  manager.load=async()=>({});manager.engineStatus=async()=>({ready:true,image:true});
- manager.create=async()=>{created=true;};manager.command=async args=>{assert.equal(args[args.indexOf('--network')+1],'none');assert.ok(args.includes('--read-only'));assert.ok(args.includes('dingtu-runtime:3-clean'));assert.equal(args.at(-1),'node --version && npm --version && curl --version');throw new Error('curl missing');};
- await assert.rejects(manager.createAndStart('owner','new'),/Node.js、npm 或 curl/);assert.equal(created,false);
+ manager.create=async()=>{created=true;};manager.command=async args=>{assert.equal(args[args.indexOf('--network')+1],'none');assert.ok(args.includes('--read-only'));assert.ok(args.includes('dingtu-runtime:3-clean'));assert.equal(args.at(-1),'node --version && npm --version && curl --version && git --version && command -v ssh-keygen');throw new Error('curl missing');};
+ await assert.rejects(manager.createAndStart('owner','new'),/Node.js、npm、curl、Git 或 SSH 客户端/);assert.equal(created,false);
  manager.command=async()=> 'node npm curl available';await manager.verifyImageTools('dingtu-runtime:3-clean');
 });
 
@@ -145,4 +145,17 @@ test('control-plane outage preserves forwarding status while confirmed core-cont
  stopped=true;await gateway.sync();assert.equal(gateway.status.state,'blocked');
  unavailable=false;stopped=false;await gateway.sync();assert.equal(gateway.status.state,'ready');assert.equal(gateway.status.controlState,undefined);
  await gateway.stop();const count=calls.length;await gateway.sync();assert.equal(calls.length,count);
+});
+
+test('prepared environments generate keys offline and retain recovery records when cleanup fails',async()=>{
+ const directory=await mkdtemp(path.join(tmpdir(),'kuneco-git-prepare-'));
+ const manager=new DockerEnvironments({directory,sourceRoot:process.cwd(),encrypt:Buffer.from,decrypt:b=>b.toString()});
+ manager.engineStatus=async()=>({ready:true,image:true});manager.verifyImageTools=async()=>{};
+ try{
+  manager.command=async args=>{assert.equal(args[args.indexOf('--network')+1],'none');assert.equal(args.at(-1),'generate');assert.ok(args.some(v=>v.endsWith('-worker-work,dst=/workspace')));assert.ok(args.some(v=>v.includes("mkdirSync('/workspace/Download'")));return '{}';};
+  const id=await manager.createPrepared('owner','ready');assert.ok((await manager.get('owner',id)).item);
+  manager.command=async()=>{throw Error('key failed');};manager.deleteResources=async()=>{throw Error('engine down');};
+  await assert.rejects(manager.createPrepared('owner','recover'),/部分资源已保留/);
+  assert.equal((await manager.load('owner')).environments.length,2);
+ }finally{await rm(directory,{recursive:true,force:true});}
 });

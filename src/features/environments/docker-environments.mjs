@@ -4,6 +4,7 @@ import {cleanupDirectTask,waitForTaskCleanup} from './direct-task-cleanup.mjs';
 import {trackProxyTask} from './proxy-task-cleanup.mjs';
 import {verifyExternalTaskCapabilities,externalTaskArguments,externalTaskCancellation} from './external-task.mjs';
 import {SPEC_LABEL,reliabilityArguments,specHash,workerImage,ensureWorker,containerStatus,inspectContainer,ensurePrivateNetwork,ensureDirectNetwork,validateContainerNetworks,ATTEMPT_LABEL,removeAttemptContainer} from './container-reliability.mjs';
+import {readGitInfo} from '../git/git-management.mjs';
 import {gatewayImage} from './gateway-image.mjs';
 
 import {ENVIRONMENT_ICONS,environmentIcon} from './environment-icons.mjs';
@@ -105,20 +106,33 @@ export class DockerEnvironments {
  async get(owner,id){const data=await this.load(owner);const item=data.environments.find(item=>item.id===id);if(!item)throw new Error('当前账号下不存在该环境');return {data,item,prefix:resourcePrefix(owner,id)};}
  async create(owner,name,icon){return accountMutation(this,owner,async()=>{if(typeof name!=='string'||!name.trim()||name.length>40)throw new Error('环境名称需为1至40个字符');const data=await this.load(owner);if(data.environments.length>=10)throw new Error('最多创建10个环境');const item={id:randomUUID(),name:name.trim(),icon:environmentIcon(icon),createdAt:new Date().toISOString(),imageName:imageConfiguration(data.imageConfig).imageName,baseImage:imageConfiguration(data.imageConfig).baseImage,registry:null,proxy:null};data.environments.push(item);await this.save(owner,data);return item.id;});}
  async verifyImageTools(image){
-  try{await this.command(['run','--rm','--network','none','--read-only','--user','1000:1000','--cap-drop','ALL','--security-opt','no-new-privileges','--entrypoint','sh',image,'-c','node --version && npm --version && curl --version'],{timeout:30000});}
-  catch{throw new Error('基础镜像缺少可用的 Node.js、npm 或 curl，请重新准备基础镜像后再创建环境');}
+  try{await this.command(['run','--rm','--network','none','--read-only','--user','1000:1000','--cap-drop','ALL','--security-opt','no-new-privileges','--entrypoint','sh',image,'-c','node --version && npm --version && curl --version && git --version && command -v ssh-keygen'],{timeout:30000});}
+  catch{throw new Error('基础镜像缺少可用的 Node.js、npm、curl、Git 或 SSH 客户端，请重新准备基础镜像后再创建环境');}
  }
  async createPrepared(owner,name,icon){
   const data=await this.load(owner),engine=await this.engineStatus(data.imageConfig);
   if(!engine.ready || !engine.image)throw new Error('请先准备容器引擎与基础镜像');
   await this.verifyImageTools(imageConfiguration(data.imageConfig).imageName);
-  return this.create(owner,name,icon);
+  const id=await this.create(owner,name,icon);
+  try{
+   const {prefix,item}=await this.get(owner,id);
+   await readGitInfo(args=>{
+    const command=runtimeInstallerArguments({name:prefix+'-git-init',prefix,image:item.imageName,args:[...args.slice(0,2),"require('fs').mkdirSync('/workspace/Download',{recursive:true});\n"+args[2],...args.slice(3)],network:'none'});
+    command.splice(command.indexOf('--entrypoint'),0,'--mount',`type=volume,src=${prefix}-worker-work,dst=/workspace`);
+    return this.command(command);
+   },{generate:true});
+   return id;
+  }catch(error){
+   try{await this.deleteResources(owner,id,name.trim());await this.forget(owner,id,name.trim());}
+   catch{throw new Error('Git 初始化失败：'+error.message+'。部分资源已保留，请在环境列表中重试或删除「'+name.trim()+'」。');}
+   throw new Error('Git 初始化失败，已清理本次创建的资源：'+error.message);
+  }
  }
  async createAndStart(owner,name,icon){
   const data=await this.load(owner),engine=await this.engineStatus(data.imageConfig);if(!engine.ready || !engine.image)throw new Error('请先准备容器引擎与基础镜像');
   await this.verifyImageTools(imageConfiguration(data.imageConfig).imageName);
   const id=await this.create(owner,name,icon);
-  try{await this.start(owner,id);return id;}
+  try{await this.start(owner,id);await readGitInfo(args=>this.exec(owner,id,args),{generate:true});return id;}
   catch(error){
    try{await this.deleteResources(owner,id,name.trim());await this.forget(owner,id,name.trim());}
    catch{throw new Error('容器创建未完成：'+error.message+'。部分资源已保留，请在环境列表中重试启动或删除「'+name.trim()+'」。');}

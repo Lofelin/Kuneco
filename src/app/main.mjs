@@ -10,6 +10,7 @@ import {readTextSnapshot} from '../features/runtimes/file-snapshot.mjs';
 import {createFileChangeHooks} from '../features/runtimes/file-change-hooks.mjs';
 import {readContainerDisplay,readNetworkDisplay} from '../features/environments/container-display.mjs';
 import {listChatContext,reconcileClaudeSkills} from '../features/runtimes/context-catalog.mjs';
+import {executeGitOperation} from '../features/git/git-executor.mjs';
 import {createClaudeActivityAdapter} from '../features/runtimes/claude-activity.mjs';
 import {ChatRuns} from '../features/chat/chat-runs.mjs';
 import {rewindPrefix,replayPrompt,deepSeekPrefix} from '../features/chat/message-rewind.mjs';
@@ -556,8 +557,30 @@ async function containerAuth(engine){
   }
   return{...auth,checkedAt:new Date().toISOString()};}catch{return{state:'signed-out',checkedAt:new Date().toISOString()};}
 }
+function localGitDirectory(owner){return path.join(app.getPath('userData'),'git-environments',createHash('sha256').update(owner).digest('hex'));}
+function localGitEnvironment(base,owner,proxy=''){return {...base,GIT_CONFIG_GLOBAL:path.join(localGitDirectory(owner),'config'),KUNECO_GIT_PROXY_URL:proxy};}
 ipcMain.handle('workspace:dockerEnvironments',guarded(async(action='state',value={})=>{
  if(action==='state')return dockerEnvs.state(dockerOwner());
+ if(action==='gitManage'){
+  const owner=dockerOwner(),id=activeContainerId;
+  if(!owner)throw new Error('请先登录');
+  if(accountChanging || containerOperation || chatNetworkChanging)throw new Error('正在切换账号或环境，请稍后刷新');
+  if(value.action!=='read' && (value.owner!==owner || value.environmentId!==id))throw new Error('环境已变化，请刷新后重试');
+  containerOperation=true;
+  try{
+   const data=await dockerEnvs.load(owner);if(!id && data.localEnabled===false)throw new Error('请先创建环境');
+   const item=id?(await dockerEnvs.get(owner,id)).item:null;
+   const proxy=gateway,testing=value.action==='test';
+   if(testing && !item?.external && (proxy?.status.state!=='ready' || !environmentStatus.allowed))throw new Error('当前环境代理未连接或出口未核验，请先连接');
+   const context=id?{route:item.external?'external':'managed',project:project || undefined}:{local:true,project:project || undefined,root:localGitDirectory(owner),route:'local',proxy:testing?proxy?.url:undefined};
+   context.defaultIdentity={name:account.user?.name || account.user?.username || '',email:account.user?.email || ''};
+   const result=await executeGitOperation({action:value.action || 'read',value:value.data || {},context,
+    ...(id?{execute:(args,options)=>dockerEnvs.exec(owner,id,args,options)}:testing?{launch:createRestrictedCCSpawner({port:proxy.port,canStart:()=>owner===dockerOwner() && id===activeContainerId && gateway===proxy && proxy.status.state==='ready'})}:{})});
+   if(owner!==dockerOwner() || id!==activeContainerId || (testing && !item?.external && (gateway!==proxy || proxy.status.state!=='ready')))throw new Error('检测期间环境或网络已变化，请重试');
+   return {...result,owner,environmentId:id,route:context.route};
+  }finally{containerOperation=false;}
+ }
+
  if(action==='rename' || action==='icon'){
   if(accountChanging || containerOperation)throw new Error('正在切换账号或环境');
   const owner=dockerOwner();if(!owner || value.owner!==owner || value.id!==activeContainerId)throw new Error('账号或环境已变化，请重新打开弹窗');
@@ -940,7 +963,7 @@ async function runLearningAutomation(item,question,controller){
  const timeout=setTimeout(()=>controller.abort(),180000);
  try{
   const launch=environmentId?await (requiresProxy?dockerEnvs.spawner(ownerId,environmentId):dockerEnvs.directChatSpawner(ownerId,environmentId)):(requiresProxy?createRestrictedCCSpawner({port:proxy.port,canStart:valid}):createDirectChatSpawner(valid));
-  const spawnProcess=options=>{if(!valid())throw new Error('账号、环境或连接状态已变化');return launch(options);};
+  const spawnProcess=options=>{if(!valid())throw new Error('账号、环境或连接状态已变化');return launch(environmentId?options:{...options,env:localGitEnvironment(options.env || process.env,ownerId,requiresProxy?proxy.url:'')});};
   const cwd=environmentId?await dockerEnvs.workingDirectory(ownerId,environmentId):path.join(app.getPath('userData'),'learning-workspaces',item.id);
   if(!environmentId)await mkdir(cwd,{recursive:true,mode:0o700});if(!valid())throw new Error('账号、环境或代理已变化');
   let text='',nextSession=item.sessionId;
@@ -1143,7 +1166,8 @@ ipcMain.handle('workspace:cc', guarded(async (prompt,rewind,chatId=activeAISessi
   const owner = requiresProxy?gateway:{status:{state:'ready',mode:'direct'}};
   const canContinue=()=>valid() && environmentStatus.allowed && !controller.signal.aborted && (!requiresProxy || gateway===owner && owner.status.state==='ready');
   const directSpawn=requiresProxy?null:createDirectChatSpawner(canContinue);
-  const launch=containerSpawn?options=>{if(!canContinue())throw new Error('对话网络不可用');return containerSpawn(options);}:directSpawn;
+  const baseLaunch=containerSpawn || directSpawn || createRestrictedCCSpawner({port:owner.port,canStart:canContinue});
+  const launch=options=>{if(!canContinue())throw new Error('对话网络不可用');return baseLaunch(activeContainerId?options:{...options,env:localGitEnvironment(options.env || process.env,requestOwner,requiresProxy?owner.url:'')});};
   const currentChat=preparedChat;if(currentChat){currentChat.updatedAt=new Date().toISOString();persistAISessions();}
   const usageOwner=chatOwner;
   let latestUsage=null,latestUsageDetails=null;
