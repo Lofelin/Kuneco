@@ -2406,3 +2406,30 @@ wa-option.font-preview-option,wa-option.font-preview-option::part(label){font-fa
 .console-directory-controls .content-action::part(label){overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 .console-settings-status:empty{display:none}
+
+/* Shared horizontal section navigation, with an underline for the active panel. */
+wa-tab-group.app-section-tabs{--indicator-color:var(--ink);--track-color:var(--line);--track-width:1px;display:block;min-width:0}
+wa-tab-group.app-section-tabs::part(nav){border-top:1px solid var(--line);padding-inline:28px}
+wa-tab-group.app-section-tabs wa-tab::part(tab){padding:16px 0;margin-inline-end:28px;font-size:14px;font-weight:500;color:var(--muted)}
+wa-tab-group.app-section-tabs wa-tab[active]::part(tab){color:var(--ink)}
+wa-tab-group.app-section-tabs wa-tab-panel{--padding:28px}
+/* Environment identity stays above the tabs; long detail blocks live in their own panels. */
+#page-environments>.environments-body{padding:0}
+.environments-body .environment-expanded{max-width:none;margin:0}
+.environment-expanded>.environment-card-header{padding:28px;gap:18px}
+.environment-tabbed-details{display:block;border:0;padding:0;margin:0}
+.environment-overview-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(260px,320px);gap:32px;align-items:start}
+.environment-overview-main,.environment-overview-aside{min-width:0}
+.environment-overview-grid h3{margin:0 0 16px;font-size:14px;line-height:20px;font-weight:600}
+.environment-overview-main .environment-image-versions{display:flex;flex-direction:column;align-items:stretch;gap:0;margin:0}
+.environment-overview-main .environment-image-versions>div{padding:16px 0;min-width:0;gap:8px}
+.environment-overview-main .environment-image-versions>div:first-child{padding-top:0}
+.environment-overview-main .environment-image-versions>div+div{border-top:1px solid var(--line)}
+.environment-overview-main .environment-image-versions strong{font-size:13px;line-height:20px}
+.environment-overview-main .environment-container-identifiers>div{grid-template-columns:90px minmax(0,1fr)}
+.environment-overview-aside{padding:20px;border:1px solid var(--line);border-radius:var(--interaction-radius);background:var(--surface)}
+.environment-overview-aside .environment-inline-facts{display:flex;flex-direction:column;gap:16px;margin:0}
+.environment-overview-aside .environment-inline-facts>div{display:grid;grid-template-columns:84px minmax(0,1fr);gap:12px;font-size:13px;line-height:20px}
+.environment-detail-tabs .preference-heading{margin-top:0}
+@media(max-width:1000px){.environment-overview-grid{grid-template-columns:minmax(0,1fr);gap:24px}.environment-overview-aside{width:100%;box-sizing:border-box}}
+@media(max-width:760px){.environment-expanded>.environment-card-header{padding:20px}wa-tab-group.environment-detail-tabs::part(nav){padding-inline:20px}wa-tab-group.environment-detail-tabs wa-tab-panel{--padding:20px}}
