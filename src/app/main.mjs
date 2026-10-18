@@ -1,3 +1,4 @@
+import {proxyLogEvent} from '../features/environments/proxy-log-event.mjs';
 import {EnvironmentEvents,observeEnvironmentOperations,observeRuntimeLaunch} from '../features/environments/environment-events.mjs';
 import {observeEnvironmentHealth} from '../features/environments/environment-health-events.mjs';
 import {subscribeEnvironmentLogs} from '../features/environments/environment-log-stream.mjs';
@@ -179,12 +180,10 @@ async function browserProxyConfiguration(){
 let savedConfig = { protocol: 'http', host: '', port: 8080, username: '' };
 const emit = (type, data, context={}) => {
  const owner=account?.user?.id;
- if(owner&&!accountChanging&&type==='network'){
-  const warning=['stale','unavailable'].includes(data.verificationState);
-  recordEnvironmentEvent(owner,activeContainerId,'Proxy connection and verification',warning?'WARN':'INFO',
-   ['Proxy state changed','connection='+data.state,data.verificationState?'verification='+data.verificationState:''].filter(Boolean).join(' · '),'proxy-state');
+ if(owner&&!accountChanging&&['network','requestFailure'].includes(type)){
+  const event=proxyLogEvent(type,data);
+  recordEnvironmentEvent(owner,activeContainerId,event.source,event.level,event.message,type==='network'?'proxy-state':undefined);
  }
- if(owner&&!accountChanging&&type==='requestFailure')recordEnvironmentEvent(owner,activeContainerId,'Proxy connection and verification','WARN','Proxy forwarding request failed'+(typeof data.code==='string'&&/^[A-Z0-9_]+$/.test(data.code)?' · '+data.code:''),'proxy-request-failure');
  if(connectionRecords && owner && !accountChanging && ['network','requestFailure'].includes(type)){
   const message=type==='network'?[data.reason || '网络状态更新',data.ip].filter(Boolean).join(' · '):[data.reason,data.target,data.code].filter(Boolean).join(' · ');
   const environmentId=activeContainerId;void connectionRecords.append(owner,message,environmentId).then(entries=>{if(owner===account?.user?.id && environmentId===activeContainerId)emit('connectionRecords',{owner,environmentId,entries:entries.filter(item=>Object.hasOwn(item,'environmentId') && item.environmentId===environmentId)});}).catch(()=>{});
