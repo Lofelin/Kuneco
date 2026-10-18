@@ -27,7 +27,7 @@ test('npm uninstall is restricted to the detected package and unknown installati
 });
 function managerFixture(){
  const manager=new DockerEnvironments({directory:'/unused',sourceRoot:path.resolve('.')});const item={runtimeMetadata:{deepseek:{name:'DeepSeek'},codex:{name:'Codex'}}};const calls=[];
- manager.get=async()=>({item});manager.exec=async(owner,id,args)=>{assert.equal(owner,'owner');assert.equal(id,'environment');calls.push(args);};manager.update=async(owner,id,patch)=>Object.assign(item,patch);manager.runtimeInfo=async()=>({runtimes:[{id:'codex'}]});return {manager,item,calls};
+ manager.get=async()=>({item});manager.exec=async(owner,id,args)=>{assert.equal(owner,'owner');assert.equal(id,'environment');calls.push(args);};manager.update=async(owner,id,patch)=>Object.assign(item,typeof patch==='function'?patch(item):patch);manager.runtimeInfo=async()=>({runtimes:[{id:'codex'}]});return {manager,item,calls};
 }
 test('API runtime removal deletes only credentials and its metadata after detection confirms removal',async()=>{
  const {manager,item,calls}=managerFixture();await manager.removeRuntime('owner','environment','deepseek');

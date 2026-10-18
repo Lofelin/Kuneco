@@ -16,7 +16,7 @@ test('new CLI detection handles partial availability without attributing another
 test('install verifies the CLI before persisting metadata and keeps the requested Doubao command',async()=>{
  for(const engine of ['kimi','qwen','kiro','doubao']){
   const manager=new DockerEnvironments({sourceRoot:process.cwd()}),item={},commands=[];
-  manager.get=async()=>({item});manager.update=async(owner,id,patch)=>Object.assign(item,patch);
+  manager.get=async()=>({item});manager.update=async(owner,id,patch)=>Object.assign(item,typeof patch==='function'?patch(item):patch);
   manager.runRuntimeInstaller=async(owner,id,args)=>commands.push(args);
   manager.exec=async(owner,id,args)=>{assert.deepEqual(args,[RUNTIME_CATALOG[engine].command,'--version']);throw new Error('binary missing');};
   manager.runtimeInfo=async()=>({runtimes:[{id:engine,...item.runtimeMetadata[engine]}]});

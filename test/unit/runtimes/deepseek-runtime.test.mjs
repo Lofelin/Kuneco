@@ -79,7 +79,7 @@ test('Runtime display metadata is environment scoped and survives detection; fai
  const {DockerEnvironments}=await import('../../../src/features/environments/docker-environments.mjs');
  const manager=new DockerEnvironments({directory:'/unused',sourceRoot:path.resolve('.')});
  const item={name:'fixture-environment',runtimeMetadata:{codex:{name:'原有 Codex'}}};let fail=false;
- manager.get=async()=>({item,prefix:'fixture'});manager.update=async(owner,id,patch)=>{assert.equal(owner,'owner');assert.equal(id,'environment');Object.assign(item,patch);};
+ manager.get=async()=>({item,prefix:'fixture'});manager.update=async(owner,id,patch)=>{assert.equal(owner,'owner');assert.equal(id,'environment');Object.assign(item,typeof patch==='function'?patch(item):patch);};
  manager.runRuntimeInstaller=async()=>{if(fail)throw new Error('安装失败');return '';};manager.command=async()=> 'true';manager.detectCommands=async()=>({runtimes:[{id:'cc',name:'Claude Code',version:'fixture'},{id:'codex',name:'Codex',version:'fixture'}],checkedAt:'fixture'});
  const result=await manager.installRuntime('owner','environment','cc',{name:'我的 Claude',description:'项目助手'});
  assert.equal(result.runtimes[0].name,'我的 Claude');assert.equal(result.runtimes[0].description,'项目助手');assert.equal(result.runtimes[1].name,'原有 Codex');
