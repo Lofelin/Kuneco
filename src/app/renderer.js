@@ -1,3 +1,4 @@
+import {mountEnvironmentLogs} from '../features/environments/environment-logs-ui.mjs';
 import {mountEnvironmentLayout} from '../features/environments/environment-layout.mjs';
 import {mountConsoleSettings} from '../features/terminal/console-settings.mjs';
 import {mountShortcuts} from '../features/preferences/shortcuts.mjs';
@@ -1595,6 +1596,7 @@ updateProxyActions();
 for(const type of ['transitionrun','transitionend'])document.querySelector('.sidebar').addEventListener(type,bounds);
 new ResizeObserver(bounds).observe(document.querySelector('.sidebar'));
 
+mountEnvironmentLogs({api,scope:()=>({owner:accountState.user?.id,id:dockerEnvironmentState.activeId})});
 let renameEnvironmentTarget=null,renameEnvironmentBusy=false;
 function updateRenameEnvironmentSave(){const name=$('renameEnvironmentName').value.trim();$('saveRenameEnvironment').disabled=renameEnvironmentBusy || !name || name.length>40;}
 $('renameEnvironmentName').addEventListener('input',updateRenameEnvironmentSave);

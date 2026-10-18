@@ -2435,3 +2435,30 @@ wa-tab-group.environment-detail-tabs wa-tab-panel{--padding:16px var(--environme
 .environment-header-fact>wa-icon{width:14px;height:14px;font-size:14px;flex:none}
 .environment-summary-runtime{font-size:12px;color:var(--muted)}
 .environment-summary-runtime::part(base){font-size:inherit;font-weight:400;color:inherit}
+
+/* Environment log viewer uses the shared dialog shell and form components. */
+.environment-logs-dialog{--width:min(1040px,calc(100vw - 48px))}
+.environment-logs-dialog::part(body){padding:0;display:flex;flex-direction:column;height:min(640px,calc(100vh - 180px));overflow:hidden}
+.environment-logs-heading{display:flex;align-items:center;gap:8px;min-width:0}.environment-logs-heading [data-title]{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.environment-logs-heading [data-status]{font-size:12px;font-weight:400}
+.environment-logs-toolbar{display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.environment-logs-toolbar wa-input{width:230px;max-width:100%}.environment-log-levels{display:flex;align-items:center;gap:12px;flex:1}.environment-log-levels wa-checkbox{font-size:12px;white-space:nowrap}
+.environment-logs-notice{margin:0;padding:8px 16px;color:var(--muted);font-size:12px}
+.environment-log-output{flex:1;min-height:0;overflow:auto;padding:8px 16px}.environment-log-output>.app-empty-state{height:100%;min-height:160px}.environment-log-output pre{margin:0;font:12px/20px ui-monospace,monospace;white-space:pre;tab-size:2}.environment-log-line{display:block}.environment-log-level{font-size:11px;color:var(--muted);border:1px solid var(--line);padding:0 3px}.environment-log-level[data-level-name=ERROR]{color:var(--danger,#c33)}.environment-log-level[data-level-name=WARN]{color:var(--warning,#a66b00)}
+.environment-logs-footer{display:flex;width:100%;align-items:center;justify-content:space-between;gap:12px;font-size:12px;color:var(--muted)}
+.environment-log-summary{display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap;border:1px solid var(--line);border-radius:var(--interaction-radius);padding:2px 6px;font-size:12px;line-height:18px;font-weight:400;color:var(--muted)}
+.environment-log-summary [data-running-label]{color:var(--ink)}.environment-log-summary [data-running-dot]{width:6px;height:6px;border-radius:50%;background:var(--muted);flex:none;margin-right:2px}.environment-log-summary [data-running-dot][data-running=true]{background:var(--success);animation:environment-running-pulse 1.4s ease-in-out infinite}
+.environment-log-summary [data-uptime]{font-variant-numeric:tabular-nums}
+.environment-log-levels{gap:6px;flex-wrap:wrap}.environment-log-levels app-button{font-size:12px;color:var(--muted)}.environment-log-levels app-button[data-level=INFO]{color:var(--ink)}.environment-log-levels app-button[data-level=WARN]{color:var(--warning,#a66b00)}.environment-log-levels app-button[data-level=ERROR]{color:var(--danger,#c33)}.environment-log-levels app-button[aria-pressed=false]{opacity:.5}.environment-log-levels app-button[aria-pressed=false]::part(base){border-style:dashed}
+@media(max-width:760px){.environment-logs-heading{flex-wrap:wrap}.environment-log-summary{max-width:100%}}
+.environment-log-entry{min-width:0;font:12px/20px ui-monospace,monospace}
+.environment-log-row{display:block;width:100%;font:inherit}
+.environment-log-row::part(base){width:100%;min-height:22px;height:auto;padding:0 var(--button-padding-inline,6px);border:0;background:transparent;box-shadow:none;justify-content:flex-start;text-align:left;font:inherit;color:var(--ink)}
+.environment-log-row::part(label){display:flex;align-items:baseline;gap:8px;width:100%;min-width:0;font:inherit}
+.environment-log-row:hover::part(base){background:var(--hover)}
+.environment-log-entry:has(.environment-log-row[aria-expanded=true]){background:color-mix(in srgb,var(--hover) 35%,var(--surface));border-radius:var(--interaction-radius);margin-bottom:4px}
+.environment-log-entry .environment-log-row[aria-expanded=true]::part(base){background:transparent;border-radius:var(--interaction-radius) var(--interaction-radius) 0 0}
+.environment-log-row .muted,.environment-log-row .environment-log-level{flex-shrink:0}.environment-log-message{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.environment-log-details{padding:6px 12px 10px;margin:0;background:transparent}
+.environment-log-details pre{margin:0 0 8px;font:inherit;white-space:pre-wrap;overflow-wrap:anywhere}.environment-log-details dl{display:grid;grid-template-columns:110px minmax(0,1fr);gap:4px 12px;margin:0}.environment-log-details dt{color:var(--muted)}.environment-log-details dd{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}
+
+.environment-log-levels app-button::part(base){color:inherit;font-weight:400}
