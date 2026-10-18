@@ -3,4 +3,8 @@
 #deepseekImagePreview .image-gallery-stage.image-gallery-dragging{cursor:grabbing}
 #deepseekImagePreview .image-gallery-stage .deepseek-preview-image{position:absolute;left:50%;top:50%;translate:-50% -50%;transform-origin:center;pointer-events:none;max-width:none;max-height:none}
 .image-gallery-count{font-size:12px;line-height:18px;white-space:nowrap;color:var(--muted);min-width:36px;text-align:center}
+.image-gallery-zoom{width:120px;min-width:120px;flex:0 0 120px}
+/* The compact toolbar trigger must not constrain the option text to its own width. */
+.image-gallery-zoom::part(listbox){min-width:128px;width:max-content}
+.image-gallery-zoom wa-option,.image-gallery-zoom wa-option::part(label){white-space:nowrap}
 @media(max-width:760px){#deepseekImagePreview::part(header){padding-left:12px!important;padding-right:12px!important;height:auto;min-height:58px;flex-wrap:wrap}.deepseek-preview-controls{flex-wrap:wrap}.image-gallery-count{min-width:28px}}

@@ -22,7 +22,7 @@ async function previewPdf(doc,item){
  const stage=doc.createElement('div');stage.className='deepseek-preview-stage';const image=doc.createElement('img');image.alt=item.name;stage.append(image);
  const status=doc.createElement('p');status.className='pdf-preview-status';status.textContent='正在读取 PDF…';dialog.append(controls,status,stage);doc.body.append(dialog);
  let task,closed=false,selection=0;
- dialog.addEventListener('wa-hide',()=>{closed=true;selection++;void task?.destroy();});dialog.addEventListener('wa-after-hide',()=>dialog.remove(),{once:true});
+ dialog.addEventListener('wa-hide',event=>{if(event.target!==dialog)return;closed=true;selection++;void task?.destroy();});dialog.addEventListener('wa-after-hide',event=>{if(event.target===dialog)dialog.remove();});
  await dialog.updateComplete;dialog.open=true;
  try{
   task=await openPdf(item.pdfData);if(closed){await task.destroy();return dialog;}const pdf=await task.promise;

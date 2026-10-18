@@ -27,7 +27,7 @@ export function mountDeepSeekComposer({context,toast,onChange=()=>{},getImages=(
  let currentImage;openMenu.querySelector('wa-dropdown-item').onclick=async()=>{try{await window.workspace.imagePreviewOpen(currentImage);openMenu.open=false;}catch(e){toast(e.message);}};
  const download=document.createElement('app-button');download.size='s';download.className='preview-round';download.setAttribute('aria-label','下载图片');download.append(icon('download'));download.onclick=()=>{const a=document.createElement('a');a.href=fullImage.src;a.download=currentImage.name || 'image.png';a.click();};
  const close=document.createElement('app-button');close.size='s';close.className='preview-round';close.setAttribute('aria-label','关闭图片预览');close.append(icon('x'));close.onclick=()=>preview.open=false;
- controls.append(zoom,openMenu,download,close);preview.append(fileMenu,controls,stage);document.body.append(preview);preview.addEventListener('wa-after-hide',()=>fullImage.removeAttribute('src'));
+ controls.append(zoom,openMenu,download,close);preview.append(fileMenu,controls,stage);document.body.append(preview);preview.addEventListener('wa-after-hide',event=>{if(event.target===preview)fullImage.removeAttribute('src');});
  const gallery=mountImageGallery({preview,stage,image:fullImage,controls,zoom,scope:key,onSelect(image){currentImage=image;fileItem.replaceChildren(icon('image','icon'),document.createTextNode(image.name || 'image.png'));fileItem.onclick=()=>fileMenu.open=false;fullImage.src=image.dataURL || image.url;fullImage.alt=image.name || '图片';preview.label=image.name || '图片预览';}});
  function showPreview(image){const images=draft().images.includes(image)?draft().images:getImages();gallery.open(images,image);}
  let urlOwner;
