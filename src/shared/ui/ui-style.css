@@ -1828,7 +1828,7 @@ wa-option{padding-block:6px!important}
 .reasoning-status-text{font-variant-numeric:tabular-nums}
 @media(prefers-reduced-motion:reduce){.deepseek-reasoning::details-content,.deepseek-reasoning .reasoning-chevron{transition:none}}
 
-.runtime-activities{display:grid;gap:6px;margin-top:8px}.runtime-activity>summary{display:flex;align-items:center;gap:6px;list-style:none;cursor:pointer;font-size:12px;color:var(--muted)}.runtime-activity>summary::-webkit-details-marker{display:none}.runtime-activity>summary>wa-icon{flex:none;font-size:14px}.runtime-activity>summary>span:first-of-type{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.runtime-activity-status{flex:none;margin-left:auto;font-size:11px}.runtime-activity pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:240px;overflow:auto;font-size:11px;line-height:1.6;padding:8px;background:var(--soft);border:1px solid var(--line);border-radius:5px}
+.runtime-activities{display:grid;gap:6px;margin-top:8px}.runtime-activity>summary{display:flex;align-items:center;gap:6px;list-style:none;cursor:pointer;font-size:12px;color:var(--muted)}.runtime-activity>summary::-webkit-details-marker{display:none}.runtime-activity>summary>wa-icon{flex:none;font-size:14px}.runtime-activity>summary>span:first-of-type{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.runtime-activity-status{flex:none;margin-left:0;font-size:11px}.runtime-activity pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:240px;overflow:auto;font-size:11px;line-height:1.6;padding:8px;background:var(--soft);border:1px solid var(--line);border-radius:5px}
 .assistant-image-preview{display:block;width:180px;height:140px;margin-top:12px;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--surface)}.assistant-image-preview::part(base){width:100%;height:100%;padding:0;border:0;background:transparent}.assistant-image-preview::part(label){display:contents}.assistant-image-preview img{display:block;width:100%;height:100%;object-fit:contain}
 .reasoning-dots{display:inline-flex;margin-left:2px}
 .reasoning-dots>span{display:inline-block;animation:chat-typing-dot 1.2s infinite ease-in-out}
@@ -2065,13 +2065,13 @@ wa-switch{--wa-form-control-activated-color:var(--ink)}
 /* Runtime event details share the conversation palette in both themes. */
 .runtime-activities{grid-template-columns:minmax(0,1fr);min-width:0}
 .runtime-activity{min-width:0}
-.runtime-activity>summary>.runtime-activity-title{flex:1 1 auto;min-width:0}
-.runtime-activity>summary>.runtime-activity-status{flex:0 0 auto;margin-left:auto;font-size:11px;font-variant-numeric:tabular-nums}
+.runtime-activity>summary>.runtime-activity-title{flex:0 1 auto;min-width:0}
+.runtime-activity>summary>.runtime-activity-status{flex:0 0 auto;margin-left:0;font-size:11px;font-variant-numeric:tabular-nums}
 .runtime-activity-meta,.runtime-activity-caption{padding:6px 10px 0;color:var(--muted);font-size:11px;line-height:18px;overflow-wrap:anywhere}
 .runtime-activity-meta{color:var(--faint)}
 .runtime-activity>summary:focus-visible{outline:2px solid var(--control-focus-border);outline-offset:3px;border-radius:4px}
 .runtime-activity[data-status="failed"] .runtime-activity-status{color:var(--delete-foreground)}
-@media(max-width:700px){.runtime-activity>summary{flex-wrap:wrap}.runtime-activity>summary>.runtime-activity-title{flex-basis:55%;white-space:normal;overflow-wrap:anywhere}.runtime-activity>summary>.runtime-activity-status{margin-left:0}}
+@media(max-width:700px){.runtime-activity>summary{flex-wrap:wrap}.runtime-activity>summary>.runtime-activity-title{flex-basis:auto;white-space:normal;overflow-wrap:anywhere}.runtime-activity>summary>.runtime-activity-status{margin-left:0}}
 
 #gitPublicKey{margin:0;padding:12px;background:var(--soft);border-radius:6px;white-space:pre-wrap;overflow-wrap:anywhere;user-select:text;font:12px/20px var(--font-mono,monospace)}
 .git-key-title{display:flex;align-items:center;gap:8px}
