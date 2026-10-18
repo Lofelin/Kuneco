@@ -1,0 +1,19 @@
+/* Layout only: real component colors, geometry and interaction rules remain global. */
+body.ui-preview{display:flex;flex-direction:column;height:100vh;overflow:hidden}
+.preview-toolbar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px;padding:20px 24px;border-bottom:1px solid var(--line);flex-shrink:0}
+.preview-toolbar h1{font-size:18px;line-height:26px;margin:0}
+.preview-toolbar p{margin:4px 0 0}
+.preview-controls{display:flex;flex-wrap:wrap;gap:16px}
+#previewContent{width:100%;max-width:1120px;margin:0 auto;padding:28px 24px;flex:1;min-height:0;overflow:auto}
+#previewContent[data-width=narrow]{max-width:420px}
+.preview-section+.preview-section{margin-top:28px}
+.preview-section>.preference-heading{margin-top:0}
+.preview-surface{background:var(--surface);border:1px solid var(--line);border-radius:var(--interaction-radius);padding:16px;min-width:0}
+.preview-actions{display:flex;align-items:center;flex-wrap:wrap;gap:12px}
+.preview-fields{display:grid;gap:20px;grid-template-columns:minmax(0,1fr)}
+.preview-empty{height:240px;display:grid;place-items:center}
+#previewScrollFade{height:150px;overflow:auto;padding:0 16px}
+#previewScrollFade p{font-size:13px;line-height:22px;margin:12px 0;color:var(--muted)}
+.preview-status{flex-shrink:0;padding:10px 24px;border-top:1px solid var(--line);font-size:12px;line-height:18px;margin:0;color:var(--muted);overflow-wrap:anywhere}
+.preview-dialog-scroll p{font-size:13px;line-height:22px;color:var(--muted);margin:16px 0 0}
+@media(max-width:480px){.preview-toolbar{padding:16px}.preview-controls{width:100%;gap:12px}#previewContent{padding:28px 16px}.preview-status{padding:10px 16px}}

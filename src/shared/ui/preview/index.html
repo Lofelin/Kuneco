@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <base href="../../../">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' data:; font-src 'self'; object-src 'none'; base-uri 'self'">
+  <title>Kuneco · 全局组件验收</title>
+  <link rel="stylesheet" href="vendor/ui.css">
+  <link rel="stylesheet" href="shared/ui/style.css">
+  <link rel="stylesheet" href="vendor/ui-overrides.css">
+  <link rel="stylesheet" href="shared/ui/preview/preview.css">
+</head>
+<body class="wa-light ui-preview">
+  <header class="preview-toolbar">
+    <div><h1>全局组件验收</h1><p class="muted">本地演示数据；所有操作仅更新此窗口。</p></div>
+    <div class="preview-controls">
+      <wa-radio-group id="previewTheme" class="app-segmented" label="主题" value="light" orientation="horizontal">
+        <wa-radio appearance="button" value="light">浅色</wa-radio><wa-radio appearance="button" value="dark">深色</wa-radio>
+      </wa-radio-group>
+      <wa-radio-group id="previewWidth" class="app-segmented" label="内容宽度" value="wide" orientation="horizontal">
+        <wa-radio appearance="button" value="wide">宽栏</wa-radio><wa-radio appearance="button" value="narrow">窄栏</wa-radio>
+      </wa-radio-group>
+    </div>
+  </header>
+  <main id="previewContent" class="settings-body">
+    <section class="preview-section" id="previewButtons">
+      <h2 class="preference-heading">按钮</h2>
+      <p class="settings-section-description">检查图文 6px 间距、左右留白、透明操作、危险操作与加载状态。</p>
+      <div class="preview-surface preview-actions">
+        <app-button id="previewOrdinary" class="content-action"><wa-icon slot="start" src="assets/icons/copy.svg" aria-hidden="true"></wa-icon>复制示例</app-button>
+        <app-button id="previewPrimary" class="content-action primary"><wa-icon slot="start" src="assets/icons/check.svg" aria-hidden="true"></wa-icon>确认</app-button>
+        <app-button id="previewDanger" class="content-action" variant="danger"><wa-icon slot="start" src="assets/icons/trash-2.svg" aria-hidden="true"></wa-icon>删除示例</app-button>
+        <app-button id="previewRetry" class="content-action retry-action"><wa-icon slot="start" src="assets/icons/rotate-cw.svg" aria-hidden="true"></wa-icon>重试</app-button>
+        <app-button id="previewPlain" class="content-action" appearance="plain"><wa-icon slot="start" src="assets/icons/settings.svg" aria-hidden="true"></wa-icon>透明操作</app-button>
+        <app-button id="previewIcon" aria-label="查看信息" appearance="plain"><wa-icon src="assets/icons/file-text.svg" aria-hidden="true"></wa-icon></app-button>
+        <app-button id="previewLoading" class="content-action retry-action" loading><wa-icon slot="start" src="assets/icons/rotate-cw.svg" aria-hidden="true"></wa-icon>正在刷新</app-button>
+        <app-button id="previewDisabled" class="content-action" disabled><wa-icon slot="start" src="assets/icons/check.svg" aria-hidden="true"></wa-icon>不可用</app-button>
+        <app-button class="content-action" variant="danger" disabled><wa-icon slot="start" src="assets/icons/trash-2.svg" aria-hidden="true"></wa-icon>禁用删除</app-button>
+        <app-button class="content-action" variant="danger" loading><wa-icon slot="start" src="assets/icons/trash-2.svg" aria-hidden="true"></wa-icon>处理中</app-button>
+      </div>
+    </section>
+    <section class="preview-section" id="previewForms">
+      <h2 class="preference-heading">表单与菜单</h2>
+      <p class="settings-section-description">验证必填标记与说明顺序、初始值、修改、校验、选项样式与分段键盘操作。</p>
+      <form id="previewForm" class="preview-surface preview-fields">
+        <wa-input id="previewName" label="示例名称" hint="名称仅用于本地表单验收，不会保存。" required value="本地示例" minlength="2"></wa-input>
+        <wa-select id="previewSelect" label="展示语言" hint="展开后检查菜单真实字号、圆角和选中状态。" required value="zh">
+          <wa-option value="zh"><wa-icon slot="start" src="assets/icons/earth.svg" aria-hidden="true"></wa-icon>简体中文</wa-option>
+          <wa-option value="en"><wa-icon slot="start" src="assets/icons/earth.svg" aria-hidden="true"></wa-icon>English</wa-option>
+          <wa-option value="unavailable" disabled>不可用示例：此项仅用于禁用验收</wa-option>
+        </wa-select>
+        <wa-number-input id="previewCount" label="示例数量" hint="范围为 1 至 10。" min="1" max="10" value="3" required></wa-number-input>
+        <wa-textarea id="previewNotes" label="备注" hint="长文案与窄窗口下，说明应自然换行，始终位于控件之前。" rows="2" value="这是可编辑的本地演示内容。"></wa-textarea>
+        <wa-checkbox id="previewCheck" checked>启用本地示例</wa-checkbox>
+        <wa-radio-group id="previewMode" class="app-segmented" label="视图模式" value="list" orientation="horizontal"><wa-radio appearance="button" value="list">列表</wa-radio><wa-radio appearance="button" value="detail">详情</wa-radio></wa-radio-group>
+        <div class="preview-actions">
+          <app-button id="previewSubmit" class="content-action primary" type="submit"><wa-icon slot="start" src="assets/icons/check.svg" aria-hidden="true"></wa-icon>验证表单</app-button>
+          <wa-dropdown id="previewMenu">
+            <app-button slot="trigger" class="content-action"><wa-icon slot="start" src="assets/icons/ellipsis.svg" aria-hidden="true"></wa-icon>示例菜单</app-button>
+            <wa-dropdown-item value="copy"><wa-icon slot="icon" src="assets/icons/copy.svg" aria-hidden="true"></wa-icon>复制示例</wa-dropdown-item>
+            <wa-dropdown-item value="remove" variant="danger"><wa-icon slot="icon" src="assets/icons/trash-2.svg" aria-hidden="true"></wa-icon>删除示例（仅提示）</wa-dropdown-item>
+          </wa-dropdown>
+        </div>
+      </form>
+    </section>
+    <section class="preview-section">
+      <h2 class="preference-heading">弹窗</h2>
+      <p class="settings-section-description">标准与自定义标题共用全局遮罩、14px 圆角和贯穿内宽的分隔线。</p>
+      <div class="preview-surface preview-actions">
+        <app-button id="previewOpenStandard" class="content-action"><wa-icon slot="start" src="assets/icons/panel-left.svg" aria-hidden="true"></wa-icon>标准弹窗</app-button>
+        <app-button id="previewOpenCustom" class="content-action"><wa-icon slot="start" src="assets/icons/panel-left.svg" aria-hidden="true"></wa-icon>自定义标题弹窗</app-button>
+        <app-button id="previewOpenReadonly" class="content-action"><wa-icon slot="start" src="assets/icons/file-text.svg" aria-hidden="true"></wa-icon>无底部操作弹窗</app-button>
+      </div>
+    </section>
+    <section class="preview-section" id="previewTables">
+      <h2 class="preference-heading">表格</h2>
+      <p class="settings-section-description">点击、Enter 或空格可激活示例行；链接和菜单独立操作。窄窗口保留横向滚动。</p>
+      <app-table id="previewTable"></app-table>
+    </section>
+    <section class="preview-section">
+      <h2 class="preference-heading">空表格</h2>
+      <app-table id="previewEmptyTable"></app-table>
+    </section>
+    <section class="preview-section">
+      <h2 class="preference-heading">滚动边缘渐隐</h2>
+      <p class="settings-section-description">内容溢出时提示仍有隐藏记录，滚动到顶部或底部后对应边缘恢复清晰。</p>
+      <div id="previewScrollFade" class="preview-surface" tabindex="0" aria-label="滚动渐隐示例"></div>
+    </section>
+    <section class="preview-section">
+      <h2 class="preference-heading">页面空状态</h2>
+      <div class="preview-surface preview-empty"><div class="app-empty-state"><wa-icon src="assets/icons/archive.svg" aria-hidden="true"></wa-icon><h2>暂无内容</h2><p>新内容会显示在这里。</p></div></div>
+    </section>
+  </main>
+  <p id="previewStatus" class="preview-status" role="status" aria-live="polite">就绪。此窗口不会连接业务服务。</p>
+  <app-dialog id="previewStandardDialog" label="标准弹窗">
+    <div class="form-field-group"><h2 class="preference-heading">确认示例</h2><p class="settings-section-description">确认仅更新本窗口提示，取消或 Escape 可关闭。</p><wa-input id="previewDialogInput" label="示例内容" value="可编辑内容"></wa-input></div>
+    <app-button class="content-action" slot="footer" data-close="previewStandardDialog"><wa-icon slot="start" src="assets/icons/x.svg" aria-hidden="true"></wa-icon>取消</app-button>
+    <app-button class="content-action primary" slot="footer" data-confirm="previewStandardDialog"><wa-icon slot="start" src="assets/icons/check.svg" aria-hidden="true"></wa-icon>确认</app-button>
+  </app-dialog>
+  <app-dialog id="previewCustomDialog" label="自定义标题弹窗" custom-close>
+    <span slot="label">自定义标题弹窗</span>
+    <app-button slot="header-actions" appearance="plain" aria-label="关闭自定义弹窗" data-close="previewCustomDialog"><wa-icon src="assets/icons/x.svg" aria-hidden="true"></wa-icon></app-button>
+    <form id="previewDialogForm"><wa-input id="previewCustomInput" label="必填名称" hint="说明始终在字段与输入框之间。" required value="示例"></wa-input><div class="preview-dialog-scroll" id="previewDialogLongContent"></div></form>
+    <app-button slot="footer" class="content-action" data-close="previewCustomDialog"><wa-icon slot="start" src="assets/icons/x.svg" aria-hidden="true"></wa-icon>关闭</app-button>
+    <app-button slot="footer" class="content-action primary" type="submit" form="previewDialogForm"><wa-icon slot="start" src="assets/icons/check.svg" aria-hidden="true"></wa-icon>验证并关闭</app-button>
+  </app-dialog>
+  <app-dialog id="previewReadonlyDialog" label="只读信息"><p class="muted">没有底部操作的弹窗不应出现空 footer 或额外分隔线。使用标题关闭按钮或 Escape 关闭。</p></app-dialog>
+  <script type="module" src="shared/ui/preview/preview.mjs"></script>
+</body>
+</html>

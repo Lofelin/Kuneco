@@ -25,7 +25,9 @@
     "test:dialogs": "electron test/e2e/app-dialog-smoke.cjs",
     "proxy:install-gost": "node scripts/setup/install-gost.mjs",
     "test:proxy": "node --test test/unit/proxy/proxy.test.mjs test/unit/browser/browser-routing.test.mjs test/unit/chat/chat-network.test.mjs",
-    "benchmark:chat-diff": "node scripts/benchmarks/benchmark-chat-diff.mjs"
+    "benchmark:chat-diff": "node scripts/benchmarks/benchmark-chat-diff.mjs",
+    "prepreview:ui": "npm run build:ui",
+    "preview:ui": "node scripts/benchmarks/ui-preview.mjs"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.3.232",

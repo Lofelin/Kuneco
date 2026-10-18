@@ -1,0 +1,11 @@
+import {spawn} from 'node:child_process';
+import {fileURLToPath} from 'node:url';
+import electron from 'electron';
+import {desktopExecutable} from '../../src/app/desktop-launcher.mjs';
+const root=fileURLToPath(new URL('../..',import.meta.url));
+if(process.argv.includes('--verify'))throw new Error('自动验收请使用 npm run test:desktop；preview:ui 仅供手工查看组件。');
+const executable=await desktopExecutable({root,electron});
+const child=spawn(executable,['scripts/benchmarks/ui-preview.cjs'],{cwd:root,stdio:'inherit'});
+for(const signal of ['SIGINT','SIGTERM'])process.on(signal,()=>child.kill(signal));
+child.once('error',error=>{console.error(error);process.exitCode=1;});
+child.once('exit',code=>{process.exitCode=code??1;});
