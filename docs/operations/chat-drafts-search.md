@@ -6,6 +6,6 @@
 
 聊天右上角搜索按钮或 Cmd/Ctrl+F 打开对话内搜索。Enter/Shift+Enter 切换下一项/上一项，Esc 关闭。搜索包括折叠的思考和工具内容，命中时展开并定位。关闭搜索恢复临时展开状态，用户主动调整的折叠保持不变。
 
-验证入口：`test/unit/chat/draft-store.test.mjs`、`test/unit/chat/chat-search.test.mjs`、`test/e2e/chat-drafts-smoke.cjs`。Electron 测试使用隔离存储验证账号、环境、对话隔离及重新加载恢复。
+验证入口：`test/unit/chat/draft-store.test.mjs`、`test/unit/chat/chat-search.test.mjs`。完整桌面草稿时序由 `npm run test:desktop` 的 `chat-regression.mjs` 验证，包括 IndexedDB 重载、账号/环境/会话隔离、发件箱并发与切换竞态，详见 `test/e2e/README.md`。
 
 2026-10-17 实机验收：当前环境 Claude 官方登录状态为 `signed-out`，点击发送仅保存待发送记录，聊天消息数为 0。退出并重启 Kuneco 后，同一记录恢复；再次检查仍未登录、消息数为 0、无运行任务。另已验证 DeepSeek 停止后的未知结果记录不会自动重发，文字及图片草稿重启恢复，搜索可展开真实工具内容并在关闭后恢复折叠。

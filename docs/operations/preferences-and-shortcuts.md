@@ -24,4 +24,4 @@
 
 退出提醒默认开启，覆盖关闭主窗口与系统退出入口，列出正在执行的对话和自动化。取消、Escape 与关闭弹窗继续保留任务；确认后使用既有退出清理流程。未运行的计划任务不触发提醒。已有弹窗时保留当前操作并提示先关闭弹窗，避免叠加遮罩或意外取消授权中的任务。
 
-验证：`npm run check`、`npm test`、`node_modules/.bin/electron test/e2e/preferences-smoke.cjs`。最后一个验证使用隔离页面及模拟运行任务，检查真实全局弹窗几何和取消/确认流程，不调用模型或中断用户任务。
+验证：`npm run check`、`npm test`、`npm run test:desktop`。桌面验收使用正式 Kuneco 启动链路及临时账号数据，检查实际偏好页、主题与通知持久化和安全弹窗关闭；退出保护在实际对话和自动化同时运行时验证取消、Escape、已有弹窗保护和最终确认退出，详见 `test/e2e/legacy-coverage.md`。

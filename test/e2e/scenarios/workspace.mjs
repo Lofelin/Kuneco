@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {mkdir,writeFile,readFile} from 'node:fs/promises';
 import path from 'node:path';
 
-export async function verifyWorkspace(ctx,verifyBrowser){
+export async function verifyWorkspace(ctx,verifyBrowser,verifyUI,verifyComponents){
  const {evaluate:e,until,client,temp,proxyPort,getBrowserRequests,getExitRequests,setExitIP,accountProfiles,captureUI}=ctx;
  const click=selector=>e(`document.querySelector(${JSON.stringify(selector)}).click()`);
  const setting=async key=>{await e("document.getElementById('accountMenu').open=true");await e("new Promise(resolve=>requestAnimationFrame(resolve))");await click('#accountSettings');await until(()=>e("!document.getElementById('page-overview').classList.contains('hidden')"));await e("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");await click(`[data-setting=${key}]`);await until(()=>e(`document.querySelector('.settings-panel[data-panel=${key}]').getBoundingClientRect().height>0`));};
@@ -35,9 +35,12 @@ export async function verifyWorkspace(ctx,verifyBrowser){
  assert.equal(await e("document.querySelectorAll('.content-tab').length"),tabs+1);assert.equal((await state()).aiSessions.length,1,'blank tab is not a backend session');
  await click('.content-tab.active .content-tab-close');
  await until(()=>e(`document.querySelectorAll('.content-tab').length===${tabs}`));
- for(const key of ['profile','preferences','notifications','proxy','activity','browser','environment']){
+ await click('[data-page=cc]');await click('.session-row');
+ await until(()=>e("!document.getElementById('page-cc').classList.contains('hidden') && !!document.querySelector('.session-row.active')"));
+ await verifyUI?.();
+ for(const key of await e("[...document.querySelectorAll('[data-setting]')].map(node=>node.dataset.setting)")){
   await setting(key);
-  const gaps=await e(`(()=>{const p=document.querySelector('.settings-panel[data-panel=${key}]');return [...p.querySelectorAll('.preference-heading,.profile-section-heading')].map(h=>{if(h.parentElement.classList.contains('proxy-config-toolbar'))h=h.parentElement;const n=h.nextElementSibling;return n?{gap:n.getBoundingClientRect().top-h.getBoundingClientRect().bottom,description:n.classList.contains('settings-section-description'),after:n.classList.contains('settings-section-description')?n.nextElementSibling.getBoundingClientRect().top-n.getBoundingClientRect().bottom:null}:null}).filter(Boolean)})()`);
+  const gaps=await e(`(()=>{const p=document.querySelector('.settings-panel[data-panel=${key}]');return [...p.querySelectorAll('.preference-heading,.profile-section-heading')].map(h=>{if(h.parentElement.classList.contains('proxy-config-toolbar'))h=h.parentElement;const n=h.nextElementSibling;if(!h.getClientRects().length||!n?.getClientRects().length)return null;return n?{gap:n.getBoundingClientRect().top-h.getBoundingClientRect().bottom,description:n.classList.contains('settings-section-description'),after:n.classList.contains('settings-section-description')?n.nextElementSibling.getBoundingClientRect().top-n.getBoundingClientRect().bottom:null}:null}).filter(Boolean)})()`);
   for(const g of gaps){assert.ok(Math.abs(g.gap-(g.description?4:8))<1,key+JSON.stringify(g));if(g.description)assert.equal(g.after,8);}
  }
  await setting('proxy');
@@ -95,7 +98,7 @@ export async function verifyWorkspace(ctx,verifyBrowser){
  const changed=await e(`workspace.connect(${JSON.stringify(config)},false)`);assert.equal(changed.state,'blocked','changed egress must be rejected');setExitIP('203.0.113.23');
  // Two fixture accounts exercise isolation without real credentials, Docker or providers.
  const login=async username=>{await e(`workspace.accountLogin(${JSON.stringify({username,password:'fixture-password',confirmPassword:'fixture-password'})})`);await until(()=>e("document.getElementById('accountName').textContent.startsWith('测试用户')"));};
- await login('layout-one');assert.equal((await state()).aiSessions.length,0,'guest sessions do not leak into account');
+ await login('layout-one');await verifyComponents?.();assert.equal((await state()).aiSessions.length,0,'guest sessions do not leak into account');
  await setting('notifications');await e("document.querySelector('[data-notification=network]').shadowRoot.querySelector('input').click()");
  assert.equal(await e("document.querySelector('[data-notification=network]').checked"),false);
  await setting('preferences');await e("document.getElementById('languageSelect').value='en-US';document.getElementById('languageSelect').dispatchEvent(new Event('change'))");

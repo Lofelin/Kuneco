@@ -9,7 +9,7 @@
     "start": "node src/app/start.mjs",
     "test": "node --test test/unit/*/*.test.mjs",
     "check": "npm run build:ui && node scripts/build/build-browser-preload.mjs && node --check src/app/main.mjs && node --check src/features/proxy/proxy.mjs && node --check src/app/renderer.js && node --check src/app/preload.cjs && node --check src/features/proxy/iproyal-import.mjs && node --check src/features/browser/browser-font-policy.cjs && node --check src/app/start.mjs && node --check src/features/browser/browser-policy.mjs && node --check src/features/runtimes/ai-auth.mjs && node --check src/features/runtimes/codex-runner.mjs && node --check src/features/runtimes/cc-network-guard.mjs && node --check src/features/environments/environment-gate.mjs && node --check src/features/browser/browser-worker-policy.cjs && node --check src/features/account/account-client.mjs && node --check src/features/environments/docker-environments.mjs && node --check docker/runtime/gateway.mjs && node --check docker/runtime/exec.mjs",
-    "test:desktop": "node test/e2e/desktop-smoke.mjs",
+    "test:desktop": "npm run build:ui && node scripts/build/build-browser-preload.mjs && node test/e2e/desktop-smoke.mjs",
     "validate": "npm run check && npm test && npm run test:desktop && npm run test:cc && npm run test:codex",
     "test:codex": "node test/live/codex-handshake.mjs",
     "test:cc": "node test/live/cc-handshake.mjs",
@@ -22,12 +22,15 @@
     "test:docker": "node test/integration/test-docker-environments.mjs && node test/integration/test-existing-container.mjs && node test/integration/test-docker-proxy.mjs",
     "bundle:engine": "node scripts/build/bundle-container-engine.mjs",
     "test:console": "node test/integration/test-container-console.mjs",
-    "test:dialogs": "electron test/e2e/app-dialog-smoke.cjs",
+    "test:dialogs": "npm run test:desktop",
     "proxy:install-gost": "node scripts/setup/install-gost.mjs",
     "test:proxy": "node --test test/unit/proxy/proxy.test.mjs test/unit/browser/browser-routing.test.mjs test/unit/chat/chat-network.test.mjs",
-    "benchmark:chat-diff": "node scripts/benchmarks/benchmark-chat-diff.mjs",
     "prepreview:ui": "npm run build:ui",
-    "preview:ui": "node scripts/benchmarks/ui-preview.mjs"
+    "preview:ui": "node scripts/benchmarks/ui-preview.mjs",
+    "test:ui-preview": "npm run test:desktop",
+    "test:chat-ui": "npm run test:desktop",
+    "benchmark:chat-diff": "node scripts/benchmarks/benchmark-chat-diff.mjs",
+    "test:turn-card": "npm run test:desktop"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.3.232",

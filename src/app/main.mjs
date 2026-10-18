@@ -113,6 +113,10 @@ const accountProxyView=()=>({...savedConfig,password:undefined,hasPassword:Boole
 async function applyAccount(){stopEnvironmentLogs();stopEnvironmentHealth();closeConsole();accountChanging=true;try{containerLogin?.kill();containerLogin=null;await stopGateway();emit('network',{state:'blocked',reason:'账号配置已切换，请连接并核验出口'});await loadUserRuntimes();if(window)resetEnvironmentBrowser();await loadAccountChats(false);savedConfig={protocol:'http',host:'',port:8080,username:'',password:''};if(account.user){const saved=activeContainerId?(await dockerEnvs.get(dockerOwner(),activeContainerId)).item.proxy:await account.proxy();if(saved)savedConfig=validateProxy(saved);}return {...account.state(),proxy:accountProxyView()};}finally{accountChanging=false;if(account?.user){const ctx=cookieContext();await ctx.sync.sync().catch(ctx.sync.onError);}emit('account',{...account.state(),proxy:accountProxyView()});}}
 
 const fixtureMode = process.argv.includes('--test-fixture');
+if(fixtureMode && process.env.WORKSPACE_TEST_DATA_DIR){
+ const {installNativeDialogFixture}=await import('../../test/e2e/fixtures/native-dialog.mjs');installNativeDialogFixture(dialog,process.env.WORKSPACE_TEST_DATA_DIR);
+ const {installNativeAppFixture}=await import('../../test/e2e/fixtures/native-app.mjs');installNativeAppFixture(app,()=>window,process.env.WORKSPACE_TEST_DATA_DIR);
+}
 const authRequired=!fixtureMode || Boolean(process.env.WORKSPACE_TEST_AUTH_ONLY);
 let desktopReturn;
 let accountWindowSignedIn,workspaceWindowBounds=null,workspaceWindowMaximized=false;

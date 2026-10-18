@@ -15,8 +15,10 @@ npm run check
 node --test test/unit/browser/*.test.mjs test/integration/test-browser-cookies.mjs test/unit/shared/app-button-contract.test.mjs test/unit/shared/app-table*.test.mjs test/unit/shared/app-dialog.test.mjs
 node_modules/.bin/electron test/integration/test-browser-routing.cjs
 node_modules/.bin/electron test/integration/test-browser-site-data.cjs
-node_modules/.bin/electron test/e2e/browser-settings-smoke.cjs
+npm run test:desktop
 ```
+
+其中 integration 脚本仅检查 Chromium 底层行为，不作为真实业务页面验收；UI 自动验收统一通过 `npm run test:desktop` 的正式启动链路。`browser-regression.mjs` 覆盖同步等待/失败/重试、站点清理错误回滚、完整资料库操作和本机/容器目录选择，迁移对照见 `test/e2e/legacy-coverage.md`。
 
 真实删除仅在临时 userData、内存 partition 和本地 HTTP 测试服务中验证。用户环境页面验收不执行数据清理，也不为验收切换真实 Cookie 云端保存模式。
 
@@ -35,7 +37,7 @@ node_modules/.bin/electron test/e2e/browser-settings-smoke.cjs
 ```sh
 node --test test/unit/browser/*.test.mjs test/unit/runtimes/codex-browser-tools.test.mjs test/unit/runtimes/deepseek-browser-bridge.test.mjs
 node_modules/.bin/electron test/integration/test-browser-features.cjs
-node_modules/.bin/electron test/e2e/browser-library-ui-smoke.cjs
+npm run test:desktop
 ```
 
 ## 保存与同步范围
