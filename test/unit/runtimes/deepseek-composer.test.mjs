@@ -32,3 +32,18 @@ test('Codex composer supports pasted images and scopes drafts without DeepSeek c
  key='owner:other-env:codex-chat';ui.render();assert.equal(ui.payload('').images.length,0);
  key='owner:env:codex-chat';ui.render();assert.equal(ui.payload('').images.length,1);ui.clear();assert.equal(ui.payload('').images.length,0);dom.window.close();
 });
+
+test('paste imports document files and leaves ordinary text alone',async()=>{
+ const {File}=await import('node:buffer');
+ const dom=new JSDOM('<form id="chatForm"><textarea id="prompt"></textarea><div id="composeMenu"></div></form>',{url:'https://kuneco.test',pretendToBeVisual:true});globalThis.document=dom.window.document;
+ let key='owner:env:chat';const errors=[];const ui=mountDeepSeekComposer({context:()=>({key,enabled:true,busy:false}),toast:message=>errors.push(message)});ui.render();
+ const paste=files=>{const event=new dom.window.Event('paste',{cancelable:true});Object.defineProperty(event,'clipboardData',{value:{files}});document.getElementById('prompt').dispatchEvent(event);return event;};
+ assert.equal(paste([]).defaultPrevented,false);
+ assert.equal(paste([new File(['hello'],'note.txt',{type:'text/plain'})]).defaultPrevented,true);
+ for(let i=0;i<30&&ui.reading;i++)await new Promise(r=>setTimeout(r,10));
+ assert.equal(ui.payload('').documents[0].text,'hello');
+ paste([new File(['not a PDF'],'bad.pdf',{type:'application/pdf'})]);
+ for(let i=0;i<30&&ui.reading;i++)await new Promise(r=>setTimeout(r,10));
+ assert.match(errors.at(-1),/PDF/);assert.equal(ui.payload('').documents.length,1);
+ key='owner:other:chat';ui.render();assert.equal(ui.payload('').documents.length,0);dom.window.close();
+});

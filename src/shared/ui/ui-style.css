@@ -1843,14 +1843,14 @@ wa-option{padding-block:6px!important}
 .deepseek-image-chip img{display:block;width:100%;height:100%;object-fit:cover;border-radius:9px}
 .deepseek-image-chip>span{display:none}
 .deepseek-image-chip>wa-icon{font-size:28px!important;width:28px!important;height:28px!important}
-.deepseek-image-chip>app-button{position:absolute;right:-6px;top:-6px}
-.deepseek-image-chip>app-button::part(base){width:22px;height:22px;min-height:22px;padding:0;border-radius:50%;background:var(--surface);border:1px solid var(--line);box-shadow:0 1px 3px #00000014}
-.deepseek-image-chip>app-button wa-icon{width:12px!important;height:12px!important;font-size:12px!important}
+.attachment-removable>app-button.attachment-remove{position:absolute;right:-6px;top:-6px}
+.attachment-removable>app-button.attachment-remove::part(base){width:22px;height:22px;min-height:22px;padding:0;border-radius:50%;background:var(--surface);border:1px solid var(--line);box-shadow:0 1px 3px #00000014}
+.attachment-removable>app-button.attachment-remove wa-icon{width:12px!important;height:12px!important;font-size:12px!important}
 /* Image actions appear on hover/focus and do not cover the thumbnail at rest. */
 .deepseek-image-chip{cursor:zoom-in}
-.deepseek-image-chip>app-button{opacity:0;pointer-events:none;--icon-hit-size:20px;transition:opacity .12s ease}
-.deepseek-image-chip:is(:hover,:focus-within)>app-button{opacity:1;pointer-events:auto}
-.deepseek-image-chip>app-button::part(base),.deepseek-image-chip>app-button:is(:hover,:focus-within)::part(base){width:20px!important;height:20px!important;min-height:20px!important;padding:0!important;border-radius:50%!important;background:#202124!important;color:#fff!important;border:2px solid var(--surface)!important;box-shadow:none!important}
+.attachment-removable>app-button.attachment-remove{opacity:0;pointer-events:none;--icon-hit-size:20px;transition:opacity .12s ease}
+.attachment-removable:is(:hover,:focus-within)>app-button.attachment-remove{opacity:1;pointer-events:auto}
+.attachment-removable>app-button.attachment-remove::part(base),.attachment-removable>app-button.attachment-remove:is(:hover,:focus-within)::part(base){width:20px!important;height:20px!important;min-height:20px!important;padding:0!important;border-radius:50%!important;background:#202124!important;color:#fff!important;border:2px solid var(--surface)!important;box-shadow:none!important}
 #deepseekImagePreview{--width:min(900px,88vw)}
 #deepseekImagePreview::part(body){display:flex;align-items:center;justify-content:center;padding:12px;overflow:auto}
 .deepseek-preview-image{display:block;max-width:100%;max-height:72vh;object-fit:contain;border-radius:6px}
@@ -1886,7 +1886,7 @@ wa-option{padding-block:6px!important}
 .session-heading>#sessionNetworkMode{margin-inline-start:auto}
 
 /* Thumbnail close action: the host must not paint an extra square behind its round base. */
-.deepseek-image-chip>app-button.icon-button{width:20px;height:20px;min-width:20px;border:0!important;border-radius:50%;background:transparent!important;box-shadow:none!important}
+.attachment-removable>app-button.attachment-remove.icon-button{width:20px;height:20px;min-width:20px;border:0!important;border-radius:50%;background:transparent!important;box-shadow:none!important}
 
 /* Runtime command details share a Shell card with separate command/output text. */
 .runtime-activity>summary>wa-icon{width:16px;height:16px;font-size:16px;align-self:center}
@@ -2240,7 +2240,7 @@ body.chat-mode .content-tabs-viewport{padding-right:48px}
 .browser-findbar>span{color:var(--muted);font-size:12px;white-space:nowrap}
 .browser-toolbar{flex-wrap:wrap}
 
-.chat-document-chip,.chat-document-card{display:flex;align-items:center;gap:8px;min-width:0;padding:8px;border:1px solid var(--line);border-radius:8px;font-size:12px}.chat-document-card{flex-wrap:wrap}.chat-document-card strong{overflow-wrap:anywhere}.chat-document-card small{color:var(--muted)}.message-documents{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}#sessionEffort{max-width:130px}
+.chat-document-chip{display:flex;align-items:center;gap:8px;min-width:0;padding:8px;border:1px solid var(--line);border-radius:8px;font-size:12px}.chat-document-card strong{overflow-wrap:anywhere}.chat-document-card small{color:var(--muted)}.message-documents{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}#sessionEffort{max-width:130px}
 
 .chat-insights .app-empty-state>p{margin:0}
 
@@ -2462,3 +2462,30 @@ wa-tab-group.environment-detail-tabs wa-tab-panel{--padding:16px var(--environme
 .environment-log-details pre{margin:0 0 8px;font:inherit;white-space:pre-wrap;overflow-wrap:anywhere}.environment-log-details dl{display:grid;grid-template-columns:110px minmax(0,1fr);gap:4px 12px;margin:0}.environment-log-details dt{color:var(--muted)}.environment-log-details dd{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}
 
 .environment-log-levels app-button::part(base){color:inherit;font-weight:400}
+
+/* Attachment previews share the global dialog shell and backdrop. */
+.chat-document-card{display:inline-block;min-width:0;max-width:100%;font-size:12px;text-align:left;white-space:normal}
+.chat-document-preview{--width:min(800px,calc(100vw - 48px))}
+.chat-document-preview .settings-section-description{margin:0 0 var(--settings-section-content-gap);font-size:12px;line-height:20px;color:var(--muted)}
+.chat-document-preview pre{margin:0;font:13px/22px ui-monospace,monospace;white-space:pre-wrap;overflow-wrap:anywhere}
+
+/* Attachment tile layout adapted from open-claude-ui AttachmentCard; native PDF cover. */
+.chat-document-card.chat-pdf-tile{display:flex;flex-direction:column;width:180px;max-width:100%;padding:0;border:0;background:transparent;white-space:normal}
+.chat-pdf-tile::part(base){display:flex;flex-direction:column;overflow:hidden;border:1px solid var(--line);border-radius:var(--interaction-radius);background:var(--surface);padding:0!important}
+.chat-pdf-tile:hover::part(base){background:var(--hover)}
+.chat-pdf-cover{width:100%;height:110px;display:flex;align-items:center;justify-content:center;overflow:hidden;color:var(--muted);background:var(--canvas)}
+.chat-pdf-cover img{width:100%;height:100%;object-fit:cover;object-position:top}
+.chat-pdf-caption{display:flex;align-items:center;gap:6px;padding:8px;min-width:0;width:100%;box-sizing:border-box}
+.chat-pdf-caption strong{font-size:12px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chat-pdf-badge{font-size:10px;color:var(--delete-foreground);flex-shrink:0}
+.chat-pdf-preview{--width:100vw}
+.chat-pdf-preview::part(dialog){width:100vw;max-width:100vw;height:100dvh;max-height:100dvh;margin:0;border:0;border-radius:0;background:transparent;box-shadow:none}
+.chat-pdf-preview::part(header),.chat-pdf-preview::part(body){background:transparent}
+.chat-pdf-preview::part(body){display:flex;flex-direction:column;overflow:hidden;padding:16px 28px 24px}
+.chat-pdf-preview .deepseek-preview-stage{flex:1;min-height:0}
+.chat-pdf-preview wa-select{width:120px}
+.pdf-preview-status{position:absolute;align-self:center;color:var(--muted)}
+.chat-document-chip:has(.chat-pdf-tile){padding:0;border:0;background:transparent;align-items:flex-start}
+.chat-pdf-tile-body{display:flex;flex-direction:column;width:100%;min-width:0}
+
+.chat-document-chip.attachment-removable{position:relative;padding:0;border:0;background:transparent;overflow:visible}

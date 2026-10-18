@@ -1,3 +1,4 @@
+import {stageCodexDocuments,originalDocumentPrompt} from '../features/runtimes/codex-documents.mjs';
 import {proxyLogEvent} from '../features/environments/proxy-log-event.mjs';
 import {EnvironmentEvents,observeEnvironmentOperations,observeRuntimeLaunch} from '../features/environments/environment-events.mjs';
 import {observeEnvironmentHealth} from '../features/environments/environment-health-events.mjs';
@@ -1283,7 +1284,7 @@ ipcMain.handle('workspace:cc', guarded(async (prompt,rewind,chatId=activeAISessi
    preparedChat.contextPrefix=prefix;preparedChat.deepseekSessionId=randomUUID();
    if(activeAISessionId===chatId){sessionId=undefined;codexSessionId=undefined;}preparedChat.sessionId=undefined;preparedChat.codexSessionId=undefined;
    const view=chatViews.find(v=>v.id===chatId);
-   if(view)view.messages=[...rewind.messages.slice(0,rewind.index),{role:'user',text:typeof prompt==='string'?prompt:prompt.text,images:prompt.images || []}];
+   if(view)view.messages=[...rewind.messages.slice(0,rewind.index),{role:'user',text:typeof prompt==='string'?prompt:prompt.text,images:prompt.images || [],documents:prompt.documents || []}];
   }
   controller.networkMode=requiresProxy?'proxy':'direct';
   const nativeSessionId=preparedChat.sessionId,nativeCodexId=preparedChat.codexSessionId;
@@ -1305,7 +1306,9 @@ ipcMain.handle('workspace:cc', guarded(async (prompt,rewind,chatId=activeAISessi
         delete currentChat.contextPrefix;emitChat('ccResult',{error:false});return;
       }
       if(engine==='codex') {
-        await runCodex({browserTool,useLocalModel:!activeContainerId,spawnProcess:launch || undefined,executable:activeContainerId?'codex':codexPath,project:workingDirectory,model:model,reasoningEffort:preparedChat.reasoningEffort,images:[...(!nativeCodexId?currentChat.contextPrefix?.flatMap(m=>m.images || []) || []:[]),...prompt.images],prompt:!nativeCodexId?replayPrompt(currentChat.contextPrefix,prompt.text):prompt.text,sessionId:nativeCodexId,gateway:owner,signal:controller.signal,canStart:canContinue,onEvent:(type,value)=>{if(type==='session'){currentChat.codexSessionId=value;if(activeAISessionId===currentChat.id)codexSessionId=value;}else if(type==='usage'){latestUsage=totalUsageTokens('codex',value);latestUsageDetails=usageDetails('codex',value);}else emitChat({text:'ccText',tool:'ccTool',process:'ccProcess',activity:'ccActivity',error:'ccError'}[type],type==='tool'?{name:value}:value);}});
+        const pdfFiles=await stageCodexDocuments([...(!nativeCodexId?currentChat.contextPrefix?.flatMap(m=>m.documents||[])||[]:[]),...(prompt.documents||[])],{directory:activeContainerId?'/workspace/.kuneco-attachments/'+chatId:path.join(app.getPath('userData'),'chat-attachments',String(requestOwner),chatId),...(activeContainerId?{exec:(args,options)=>dockerEnvs.exec(requestOwner,environmentId,args,options)}:{})});
+        if(!canContinue())throw new Error('对话已变化，未发送附件');
+        await runCodex({browserTool,useLocalModel:!activeContainerId,spawnProcess:launch || undefined,executable:activeContainerId?'codex':codexPath,project:workingDirectory,model:model,reasoningEffort:preparedChat.reasoningEffort,images:[...(!nativeCodexId?currentChat.contextPrefix?.flatMap(m=>m.images || []) || []:[]),...prompt.images],prompt:originalDocumentPrompt(!nativeCodexId?replayPrompt(currentChat.contextPrefix,prompt.text):prompt.text,pdfFiles),sessionId:nativeCodexId,gateway:owner,signal:controller.signal,canStart:canContinue,onEvent:(type,value)=>{if(type==='session'){currentChat.codexSessionId=value;if(activeAISessionId===currentChat.id)codexSessionId=value;}else if(type==='usage'){latestUsage=totalUsageTokens('codex',value);latestUsageDetails=usageDetails('codex',value);}else emitChat({text:'ccText',tool:'ccTool',process:'ccProcess',activity:'ccActivity',error:'ccError'}[type],type==='tool'?{name:value}:value);}});
         delete currentChat.contextPrefix;emitChat('ccResult',{sessionId:currentChat.codexSessionId,error:false});return;
       }
       const snapshotOwner=dockerOwner(),snapshotEnvironment=activeContainerId;

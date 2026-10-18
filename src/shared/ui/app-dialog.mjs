@@ -22,8 +22,8 @@ export class AppDialog extends WaDialog{
   ::slotted([slot=header-actions]){--icon-hit-size:24px;font-size:12px}
   .body{padding:var(--dialog-inset,16px);min-height:0;overflow:auto}
   .footer{border-top:1px solid var(--line)!important;padding:10px var(--dialog-inset,16px)!important;background:var(--canvas,#f7f7f9)!important;align-items:center;flex-shrink:0}
-  :host(#deepseekImagePreview) .header{padding:8px 22px 8px 100px!important;border-bottom:0!important;height:58px}
-  :host(#deepseekImagePreview) .title{font-size:13px;font-weight:500}
+  :host(:is(#deepseekImagePreview,.chat-pdf-preview)) .header{padding:8px 22px 8px 100px!important;border-bottom:0!important;height:58px}
+  :host(:is(#deepseekImagePreview,.chat-pdf-preview)) .title{font-size:13px;font-weight:500;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   :host(#deepseekImagePreview) .close::part(base){width:30px;height:30px;border-radius:50%;background:var(--surface)}
   :host([custom-close]) .close{display:none}
   ::slotted([slot=label]){margin:0;font-size:inherit;font-weight:inherit;line-height:inherit}

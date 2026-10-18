@@ -1,10 +1,14 @@
+import {normalizeDocuments} from '../chat/document-attachments.mjs';
 import {mkdtemp,writeFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {normalizeDeepSeekInput} from './deepseek-runtime.mjs';
 
 export function normalizeCodexInput(value){
- const input=normalizeDeepSeekInput(value);
+ const documents=normalizeDocuments(typeof value==='object'?value.documents:[]);
+ const input=normalizeDeepSeekInput(typeof value==='object'?{...value,documents:[],text:value.text|| (documents.length?'请查看附件。':'')}:value);
+ for(const doc of documents)if(doc.kind==='pdf'&&!doc.pdfData)throw new Error('历史 PDF 未保存原文件，请重新添加附件');
+ input.documents=documents;
  if(input.images.some(image=>image.url))throw new Error('Codex 请使用本地图片、粘贴或拖入图片');
  return input;
 }

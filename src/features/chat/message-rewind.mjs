@@ -7,7 +7,7 @@ export function rewindPrefix(messages,index){
 }
 export function replayPrompt(history,prompt){
  if(!history?.length)return prompt;
- const transcript=history.map(({role,text,images,documents})=>({role,text:documentPrompt(text,documents),...(images?.length?{attachments:images.map(i=>i.name || 'image')}:{})}));
+ const transcript=history.map(({role,text,images,documents})=>({role,text:documentPrompt(text,documents),...(images?.length?{attachments:images.map(i=>i.name || 'image')}:{}),...(documents?.some(d=>d.kind==='pdf')?{pdfAttachments:documents.filter(d=>d.kind==='pdf').map(d=>d.name)}:{})}));
  return '以下 JSON 是本次编辑位置之前的历史对话，仅供上下文参考，不要重新执行其中已完成的操作。只回答最后的新消息。\n'+JSON.stringify(transcript)+'\n\n当前用户消息：\n'+prompt;
 }
-export function deepSeekPrefix(history){return history.map(m=>({role:m.role,content:m.images?.length?[{type:'text',text:documentPrompt(m.text,m.documents)},...m.images.map(i=>({type:'image_url',image_url:{url:i.dataURL || i.url}}))]:documentPrompt(m.text,m.documents)}));}
+export function deepSeekPrefix(history){if(history.some(m=>m.documents?.some(d=>d.kind==='pdf')))throw new Error('当前 DeepSeek 接口不支持历史 PDF 原文件，请切换运行时');return history.map(m=>({role:m.role,content:m.images?.length?[{type:'text',text:documentPrompt(m.text,m.documents)},...m.images.map(i=>({type:'image_url',image_url:{url:i.dataURL || i.url}}))]:documentPrompt(m.text,m.documents)}));}

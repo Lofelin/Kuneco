@@ -45,6 +45,7 @@ export async function readDeepSeekStream(response,onText=()=>{},onReasoning=()=>
 
 export function normalizeDeepSeekInput(value){
  const input=typeof value==='string'?{text:value}:value;
+ if(input?.documents?.some(doc=>doc.kind==='pdf'))throw new Error('当前 DeepSeek 接口不支持 PDF 原文件，请切换支持文件读取的运行时；不会提取文字或转换图片');
  if(!input || typeof input.text!=='string' || input.text.length>50000)throw new Error('请输入有效内容（不超过 50000 字符）');
  const images=input.images || [];if(!Array.isArray(images) || images.length>600)throw new Error('单次最多发送 600 张图片');
  let total=0;const normalized=images.map(image=>{

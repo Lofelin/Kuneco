@@ -17,7 +17,7 @@ test('gallery traverses only its snapshot, resets transforms, and clears on scop
  const a={url:'https://example.com/a.png'},b={url:'https://example.com/b.png'};
  gallery.open([a,b],a);assert.equal(selected,a);assert.equal(controls.querySelector('span').textContent,'1 / 2');
  preview.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true}));assert.equal(selected,b);
- stage.dispatchEvent(new dom.window.WheelEvent('wheel',{deltaY:-100,clientX:100,clientY:100,cancelable:true}));assert.match(image.style.transform,/scale\(/);
+ stage.dispatchEvent(new dom.window.WheelEvent('wheel',{deltaY:-100,clientX:100,clientY:100,cancelable:true}));assert.match(image.style.transform,/scale\(/);assert.equal(zoom.value,'custom');const custom=zoom.querySelector('[value=custom]')||Array.from(zoom.children).find(o=>o.value==='custom');assert.match(custom.label,/^\d+%$/);assert.notEqual(custom.disabled,true);
  controls.querySelector('[aria-label="重置图片缩放与位置"]').click();assert.equal(image.style.transform,'translate(0px,0px) scale(0.5)');
  scope='account/env/chat-b';gallery.sync();assert.equal(preview.open,false);assert.equal(image.hasAttribute('src'),false);
  gallery.open([],b);assert.equal(controls.querySelector('span').textContent,'1 / 1');assert.equal(controls.querySelector('[aria-label="下一张图片"]').disabled,true);
