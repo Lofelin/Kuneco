@@ -1,3 +1,4 @@
+import {mountConversationRailResize} from '../features/chat/conversation-rail-resize.mjs';
 import {mountChatPopoutController} from '../features/chat/chat-popout-controller.mjs';
 import {draftScopeKey} from '../features/chat/draft-store.mjs';
 import {mountBrowserLibraryUI} from '../features/browser/browser-library-ui.mjs';
@@ -43,6 +44,7 @@ import { resolveBrowserAddress } from '../features/browser/browser-address.mjs';
 let chatRenderContainer=null;
 const $ = id => id==='chat' && chatRenderContainer?chatRenderContainer:document.getElementById(id);
 const api = window.workspace;
+mountConversationRailResize({rail:document.querySelector('.conversation-rail')});
 const browserSettingsUI=mountBrowserSettings({document,api,getScope:()=>({owner:accountState.user?.id,environmentId:dockerEnvironmentState.activeId,label:$('environmentName').textContent || '当前环境'}),formatDate:value=>displayDate(value),onOpenSite:domain=>openBrowserCookies(domain)});
 const chatScroll=mountChatScroll(document.getElementById('chat'),document.getElementById('chatJumpLatest'));
 const gitSettings=mountGitSettings({host:$('gitSettings'),api,getScope:()=>[accountState.user?.id,dockerEnvironmentState.activeId,chatSessions.find(item=>item.id===activeChatId)?.project || '']});
@@ -909,6 +911,7 @@ function renderRuntime(){
 }
 function chatViewData(){return chatViewSnapshot(chatSessions,{activeId:activeChatId,container:$('chat')});}
 let pendingChatMerges=[];
+const pendingArchives=new Set();
 
 let lastChatSyncNotice='';
 function chatSyncNotice(message){const text=String(message).replace(/^Error invoking remote method '[^']+': Error: /,'');if(text!==lastChatSyncNotice){lastChatSyncNotice=text;toast(text,'chat');}}
@@ -942,7 +945,7 @@ if(item.chatStatus==='running'){
  if(timestamp && Number.isFinite(Date.parse(timestamp))){const time=document.createElement('time');time.className='chat-item-time';time.dateTime=new Date(timestamp).toISOString();time.textContent=new Intl.DateTimeFormat('en-US',{hour:'2-digit',minute:'2-digit',hour12:true}).format(new Date(timestamp));time.title=displayDate(timestamp);detail.append(time);}
  copy.append(title,detail);button.append(avatar,copy);sessionOrder.bind(button,item);
   button.onclick=()=>void action(async()=>{if(activeChatId===item.id && page==='cc')return;const version=++chatRestoreVersion;saveChatView();const value=await api.selectSession(item.id,{deferAuth:true,viewed:true});if(version===chatRestoreVersion)applySession(value,item);});
-  const archive=createUI('app-button');archive.className='icon-button session-archive';archive.setAttribute('aria-label',item.archived?'取消归档':'归档对话');archive.title=item.archived?'取消归档':'归档对话';archive.append(createIcon(item.archived?'archive-restore':'archive'));archive.onclick=()=>void action(async()=>{if(chatRuns.has(item.id))throw new Error('请先停止此对话的回复');saveChatView();await api.archiveSession(item.id,!item.archived);item.archived=!item.archived;renderSessionList();persistChatViews();});const pin=createUI('app-button');pin.className='icon-button session-pin'+(item.pinned?' pinned':'');pin.setAttribute('aria-label',item.pinned?'取消固定对话':'固定对话');pin.append(createIcon(item.pinned?'pin-off':'pin'));pin.onclick=()=>{item.pinned=!item.pinned;renderSessionList();persistChatViews();};wrapper.append(button,pin,archive);$(item.archived?'archivedList':'sessionList').append(wrapper);
+  const archive=createUI('app-button');archive.className='icon-button session-archive';archive.disabled=pendingArchives.has(item.id);archive.setAttribute('aria-label',item.archived?'取消归档':'归档对话');archive.title=item.archived?'取消归档':'归档对话';archive.append(createIcon(item.archived?'archive-restore':'archive'));archive.onclick=()=>void action(async()=>{if(chatRuns.has(item.id))throw new Error('请先停止此对话的回复');if(pendingArchives.has(item.id))return;const previous=item.archived,owner=chatOwnerID;pendingArchives.add(item.id);item.archived=!previous;renderSessionList();try{await api.archiveSession(item.id,item.archived);}catch(error){if(owner===chatOwnerID){const state=await api.state().catch(()=>null);const actual=state?.aiSessions?.find(session=>session.id===item.id);item.archived=actual?Boolean(actual.archived):previous;renderSessionList();}throw error;}finally{pendingArchives.delete(item.id);if(owner===chatOwnerID)renderSessionList();}});const pin=createUI('app-button');pin.className='icon-button session-pin'+(item.pinned?' pinned':'');pin.setAttribute('aria-label',item.pinned?'取消固定对话':'固定对话');pin.append(createIcon(item.pinned?'pin-off':'pin'));pin.onclick=()=>{item.pinned=!item.pinned;renderSessionList();persistChatViews();};wrapper.append(button,pin,archive);$(item.archived?'archivedList':'sessionList').append(wrapper);
  }
  $('archiveCount').textContent=chatSessions.filter(item=>item.archived).length;renderContentTabs();renderSessionHeader();renderProfileActivity();
 }

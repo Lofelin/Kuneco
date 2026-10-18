@@ -2261,6 +2261,12 @@ body.chat-mode .content-tabs-viewport{padding-right:48px}
 .browser-download-reset[data-state=success]::part(base){color:var(--success)}
 .browser-download-reset[data-state=error]::part(base){color:var(--danger)}
 
+/* Conversation list boundary: retain the neutral divider during resizing. */
+.conversation-rail{position:relative}
+.conversation-rail-splitter{position:absolute;right:-4px;top:0;bottom:0;width:8px;z-index:5;cursor:col-resize;touch-action:none;-webkit-app-region:no-drag}
+.conversation-rail-splitter:focus-visible{outline:2px solid var(--field-focus-ring);outline-offset:-2px}
+body.resizing-conversation-rail,body.resizing-conversation-rail *{cursor:col-resize!important;user-select:none!important}
+body.resizing-conversation-rail iframe,body.resizing-conversation-rail webview{pointer-events:none}
 
 /* Shared outer corners for every overlay surface. */
 :root{--overlay-radius:14px}
@@ -2281,6 +2287,15 @@ wa-option,wa-dropdown-item{border-radius:var(--interaction-radius)!important}
 wa-option,wa-dropdown-item:not([variant=danger]){--wa-color-neutral-fill-normal:var(--hover)}
 wa-option:not(:state(disabled)):is(:hover,:state(hover)),wa-dropdown-item:not(:state(disabled),[disabled],[variant=danger]):is(:hover,:state(submenu-open)){background:var(--hover)!important}
 
+/* Archive follows short lists; only overflowing lists consume the available rail. */
+.chat-lists{display:flex;flex-direction:column;overflow:hidden}
+.chat-lists>#sessionList{flex:0 1 auto;min-height:0;overflow-y:auto}
+.chat-lists>.archive-toggle{flex:none}
+.chat-lists>#archivedList{flex:0 1 auto;min-height:0;max-height:45%;overflow-y:auto}
+/* Expanded archives rejoin the original single scrolling conversation list. */
+.chat-lists:has(>.archive-toggle[aria-expanded=true]){display:block;overflow-y:auto}
+.chat-lists:has(>.archive-toggle[aria-expanded=true])>#sessionList,
+.chat-lists:has(>.archive-toggle[aria-expanded=true])>#archivedList{max-height:none;overflow:visible}
 /* Library-owned segmented single selection: semantics and keyboard handled by radios. */
 wa-radio-group.app-segmented{display:inline-block;max-width:100%}
 wa-radio-group.app-segmented::part(form-control-input){display:flex;gap:4px}
