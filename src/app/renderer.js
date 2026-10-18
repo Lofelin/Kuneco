@@ -1781,7 +1781,7 @@ async function renderEnvironmentCard(row,id){
    const table=document.createElement('app-table');renderAppTable(table,{label:'容器状态与保障',columns:[{key:'label',label:'项目',width:'120px'},{key:'worker',label:detail.external?'关联容器':'工作容器'},...(!detail.external?[{key:'gateway',label:'代理网关'}]:[])],rows:containerDisplayRows(detail.reliability?.worker,detail.reliability?.gateway,{external:detail.external}),minWidth:detail.external?400:600});section.append(heading,description,table);details.append(section);
   }
   details.append(runtimes);
-  mountEnvironmentLayout({header,details,metadata,local,scope:JSON.stringify([owner,id])});
+  mountEnvironmentLayout({header,details,metadata,local,scope:JSON.stringify([owner,id]),detail});
  }catch(error){if(owner===accountState.user?.id && row.isConnected)details.textContent='环境信息读取失败：'+error.message;}
 }
 

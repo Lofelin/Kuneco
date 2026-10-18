@@ -2440,3 +2440,10 @@ wa-tab-group.environment-detail-tabs wa-tab-panel{--padding:28px var(--environme
 .environment-detail-tabs .preference-heading{margin-top:0}
 @media(max-width:1000px){.environment-overview-grid{grid-template-columns:minmax(0,1fr);gap:24px}.environment-overview-aside{width:100%;box-sizing:border-box}}
 @media(max-width:760px){.environment-expanded>.environment-card-header{padding-block:20px}wa-tab-group.environment-detail-tabs wa-tab-panel{--padding:20px var(--environment-content-inset)}}
+
+/* Compact environment metadata uses the shared action component for navigation. */
+.environment-header-summary{display:flex;flex-wrap:wrap;align-items:center;gap:6px 16px;margin-top:8px;color:var(--muted);font-size:12px;line-height:18px}
+.environment-header-fact{display:inline-flex;align-items:center;gap:6px;min-width:0;overflow-wrap:anywhere}
+.environment-header-fact>wa-icon{width:14px;height:14px;font-size:14px;flex:none}
+.environment-summary-runtime{font-size:12px;color:var(--muted)}
+.environment-summary-runtime::part(base){font-size:inherit;font-weight:400;color:inherit}

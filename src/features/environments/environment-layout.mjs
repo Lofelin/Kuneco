@@ -1,6 +1,7 @@
+import {formatDisplayDate} from '../../shared/date-format.mjs';
 // Preserve the environment's existing content and controls while organizing detail panels.
 const activePanels=new Map();
-export function mountEnvironmentLayout({header,details,metadata,local,scope}){
+export function mountEnvironmentLayout({header,details,metadata,local,scope,detail}){
  const doc=details.ownerDocument;
  const el=(tag,text,className)=>{const node=doc.createElement(tag);if(text)node.textContent=text;if(className)node.className=className;return node;};
  const facts=details.querySelector('.environment-inline-facts'),network=details.querySelector('.environment-network'),reliability=details.querySelector('.environment-reliability:not(.environment-network)'),runtimes=details.querySelector('.environment-inline-runtimes');
@@ -14,5 +15,20 @@ export function mountEnvironmentLayout({header,details,metadata,local,scope}){
  for(const [name,label,content] of panels){const tab=el('wa-tab',label),panel=el('wa-tab-panel');tab.panel=name;tab.slot='nav';panel.name=name;tab.active=panel.active=name===tabs.active;panel.append(content);tabs.append(tab,panel);}
  tabs.addEventListener('wa-tab-show',event=>{activePanels.set(scope,event.detail.name);});
  details.classList.add('environment-tabbed-details');details.replaceChildren(tabs);
+ if(detail){
+  const summary=el('div',null,'environment-header-summary');
+  const icon=name=>{const node=el('wa-icon');node.setAttribute('src',`assets/icons/${name}.svg`);node.setAttribute('aria-hidden','true');return node;};
+  const add=(name,text)=>{const item=el('span',null,'environment-header-fact');item.append(icon(name),el('span',text));summary.append(item);return item;};
+  if(detail.baseSystem){
+   const system=String(detail.baseSystem.os || '').replace('GNU/Linux ','').replace(/\s*\([^)]*\)/g,'').trim();
+   add('monitor',[system,detail.baseSystem.node?`Node.js ${detail.baseSystem.node}`:''].filter(Boolean).join(' · ') || '系统版本未知');
+  }else add('monitor',local?'本机系统':'系统版本未知');
+  const runtime=el('app-button',`${detail.runtimes?.length || 0} 个运行时`,'environment-summary-runtime');runtime.setAttribute('appearance','plain');runtime.setAttribute('size','s');
+  const runtimeIcon=icon('server');runtimeIcon.slot='start';runtime.prepend(runtimeIcon);runtime.addEventListener('click',()=>{tabs.active='runtimes';[...tabs.querySelectorAll('wa-tab')].find(tab=>tab.panel==='runtimes').focus();});summary.append(runtime);
+  add('shield-check',local?'使用本机代理配置':detail.proxyConfigured?'代理已配置':'代理未配置');
+  const checked=add('clock',detail.checkedAt?`${formatDisplayDate(detail.checkedAt,'zh-CN','datetime',{timeDisplay:'relative'})}检测`:'尚未检测');
+  if(detail.checkedAt)checked.title=formatDisplayDate(detail.checkedAt,'zh-CN','datetime',{timeDisplay:'absolute'});
+  header.querySelector('.environment-identity').append(summary);
+ }
  return tabs;
 }
