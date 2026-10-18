@@ -501,6 +501,7 @@ app-button wa-icon,wa-dropdown-item wa-icon,wa-icon{font-size:16px!important;wid
 .profile-stats>div:last-child{border-right:0}
 .profile-stats strong{font-size:18px;font-weight:500;color:var(--ink);line-height:24px}
 .profile-stats span{font-size:12px;line-height:18px;color:var(--muted)}
+.profile-stats .profile-stat-unit{margin-inline-start:3px;font-size:12px;font-weight:400;line-height:18px;color:var(--muted)}
 .profile-stats small{font-size:10px;color:var(--faint)}
 .profile-section{margin-top:32px}
 .profile-section-heading{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:18px}

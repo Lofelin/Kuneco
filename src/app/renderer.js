@@ -48,7 +48,7 @@ import {mountGalaxy} from '../shared/ui/galaxy-background.mjs';
 import {formatDisplayDate,formatCompactTime} from '../shared/date-format.mjs';
 import {restoredChat} from '../features/chat/chat-selection.mjs';
 import {formatProxyLocation} from '../features/proxy/geo-location.mjs';
-import {profileActivity,activityTooltip} from '../features/account/profile-activity.mjs';
+import {profileActivity,activityTooltip,formatProfileTokenCount} from '../features/account/profile-activity.mjs';
 import {setUITheme,createUI,createIcon} from '../vendor/ui.js';
 import {openContentTab,closeContentTab,CONTENT_TAB_LIMIT} from '../shared/ui/content-tabs.mjs';
 import { resolveBrowserAddress } from '../features/browser/browser-address.mjs';
@@ -1253,16 +1253,11 @@ function createRuntimeModelsCell(entry){
 function renderSupportedModels(target,models,empty='暂无模型数据'){
  target.replaceChildren();for(const item of models){const tag=document.createElement('span');tag.className='runtime-model-tag';tag.textContent=item.name || item.model;tag.title=item.model || item.name;target.append(tag);}if(!models.length){const hint=document.createElement('span');hint.className='muted';hint.textContent=empty;target.append(hint);}
 }
-function renderRuntimeTable(target,entries,{columns=[{key:'name',label:'运行时',width:'145px'},{key:'version',label:'版本',width:'175px'},{key:'models',label:'模型'},{key:'method',label:'接入方式',width:'96px'},{key:'auth',label:'认证状态',width:'108px'},{key:'account',label:'登录账号',width:'110px'},{key:'added',label:'添加时间',width:'170px'}],actions=true,onOpen=openRuntimeDetails}={}){
+function renderRuntimeTable(target,entries,{columns=[{key:'name',label:'运行时',width:'145px'},{key:'version',label:'版本',width:'175px'},{key:'models',label:'模型'},{key:'method',label:'接入方式',width:'96px'},{key:'auth',label:'认证状态',width:'108px'},{key:'added',label:'添加时间',width:'170px'}],actions=true,onOpen=openRuntimeDetails}={}){
  const rendered=entries.map(entry=>{
   const title=document.createElement('strong'),version=document.createElement('span');title.append(createIcon(runtimeIcon(entry.id)),document.createTextNode(entry.name));version.textContent=runtimeVersion(entry);const models=createRuntimeModelsCell(entry);
-  const access=runtimeAccess(entry),method=document.createElement('span');method.textContent=access.label;const auth=document.createElement('span'),authBadge=document.createElement('span');authBadge.className='runtime-status-tag';authBadge.dataset.state=entry.auth?.state || 'unknown';authBadge.dataset.kind=access.kind;authBadge.append(createIcon(access.icon),document.createTextNode(access.status));auth.append(authBadge);const added=document.createElement('span');const addedDate=entry.addedAt?new Date(entry.addedAt):null;added.textContent=addedDate && !Number.isNaN(addedDate.getTime())?addedDate.toLocaleString('zh-CN',{hour12:false}):'—';added.title=added.textContent;const loginAccount=document.createElement('span');loginAccount.className='runtime-login-account';loginAccount.textContent=entry.auth?.state==='signed-in'?(entry.auth.accountName?.trim() || '—'):'—';loginAccount.title=loginAccount.textContent;
-  if(entry.auth?.state==='signed-in' && entry.auth.accountName?.trim()){
-   const accountLabel=document.createElement('span');accountLabel.className='runtime-account-name';accountLabel.textContent=loginAccount.textContent;
-   const avatar=createUI('wa-avatar');avatar.className='runtime-account-avatar';setAccountAvatar(avatar,entry.auth.avatarUrl,runtimeAccountAvatar(entry));avatar.label=(entry.auth.accountName || '当前登录账号')+'的头像';
-   loginAccount.replaceChildren(avatar,accountLabel);
-  }
-  return {entry,name:title,version,models,method,auth,account:loginAccount,added};
+  const access=runtimeAccess(entry),method=document.createElement('span');method.textContent=access.label;const auth=document.createElement('span'),authBadge=document.createElement('span');authBadge.className='runtime-status-tag';authBadge.dataset.state=entry.auth?.state || 'unknown';authBadge.dataset.kind=access.kind;authBadge.append(createIcon(access.icon),document.createTextNode(access.status));auth.append(authBadge);const added=document.createElement('span');const addedDate=entry.addedAt?new Date(entry.addedAt):null;added.textContent=addedDate && !Number.isNaN(addedDate.getTime())?addedDate.toLocaleString('zh-CN',{hour12:false}):'—';added.title=added.textContent;
+  return {entry,name:title,version,models,method,auth,added};
  });
  renderAppTable(target,{label:'运行时',columns:columns.map(column=>({...column,render:item=>item[column.key]})),rows:rendered,minWidth:columns.length===3?560:1060,onActivate:item=>onOpen(item.entry),rowLabel:item=>'查看 '+item.entry.name+' 详情',actions:actions?item=>{const entry=item.entry;
  const menu=createUI('wa-dropdown');menu.className='runtime-row-menu';menu.placement='bottom-end';
@@ -1526,7 +1521,15 @@ let profileSaving=false,profileStatusTimer;
 function renderProfileActivity(){
  const sessions=chatOwnerID && chatOwnerID===accountState.user?.id?chatSessions:[];
  const activity=profileActivity(sessions);
- for(const [valueId,value] of [['profileTotalTokens',activity.totalTokens],['profilePeakTokens',activity.peakTokens]]){$(valueId).textContent=value===null?'—':new Intl.NumberFormat(uiLocale()).format(value);}
+ for(const [valueId,value] of [['profileTotalTokens',activity.totalTokens],['profilePeakTokens',activity.peakTokens]]){
+  const node=$(valueId),formatted=formatProfileTokenCount(value,uiLocale()),parts=formatted.match(/^(.*?)(百万|千万|万|亿|[KMBT])$/);
+  node.textContent=parts?parts[1]:formatted;
+  if(parts){const unit=document.createElement('span');unit.className='profile-stat-unit';unit.textContent=parts[2];node.append(unit);}
+  node.removeAttribute('title');node.tabIndex=value===null?-1:0;
+  let countTooltip=$(valueId+'Tooltip');
+  if(!countTooltip){countTooltip=document.createElement('wa-tooltip');countTooltip.id=valueId+'Tooltip';countTooltip.for=valueId;countTooltip.placement='top';countTooltip.trigger='hover focus';countTooltip.showDelay=100;countTooltip.hideDelay=0;document.body.append(countTooltip);}
+  countTooltip.textContent=value===null?'':new Intl.NumberFormat(uiLocale()).format(value)+' Token';countTooltip.disabled=value===null;
+ }
  $('profileChatCount').textContent=activity.total;$('profileArchivedCount').textContent=activity.archived;$('profileActiveDays').textContent=activity.activeDays;
  let tooltip=$('profileActivityTooltip');
  if(!tooltip){tooltip=document.createElement('wa-tooltip');tooltip.id='profileActivityTooltip';tooltip.placement='top';tooltip.trigger='manual';document.body.append(tooltip);}

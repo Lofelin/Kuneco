@@ -1,6 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {profileActivity,activityTooltip} from '../../../src/features/account/profile-activity.mjs';
+import {profileActivity,activityTooltip,formatProfileTokenCount} from '../../../src/features/account/profile-activity.mjs';
+test('profile Token totals use locale-specific compact units and retain zero/missing distinction',()=>{
+ for(const [value,zh,en] of [[null,'—','—'],[0,'0','0'],[999,'999','999'],[1000,'1,000','1K'],[10000,'1万','10K'],[851206,'85.12万','851.21K'],[2485100,'2.49百万','2.49M'],[10000000,'1千万','10M'],[100000000,'1亿','100M'],[1000000000,'10亿','1B'],[1e12,'10,000亿','1T'],[999999,'1百万','1M']]){
+  assert.equal(formatProfileTokenCount(value,'zh-CN'),zh,String(value));
+  assert.equal(formatProfileTokenCount(value,'en-US'),en,String(value));
+ }
+});
 test('Token usage belongs to request day across sessions, independent of chat creation',()=>{
  const at=new Date(2026,9,14,12).toISOString();
  const result=profileActivity([{createdAt:new Date(2026,9,12).toISOString(),tokenUsage:[{at,totalTokens:120},{at,totalTokens:80},{at:'invalid',totalTokens:50}]},{createdAt:at,archived:true,tokenUsage:[{at,totalTokens:30},{at,totalTokens:-1}]}],new Date(2026,9,14));
