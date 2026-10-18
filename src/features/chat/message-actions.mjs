@@ -2,11 +2,12 @@ import {mountCompositionGuard} from './composition-guard.mjs';
 // Keep controls separate from message text so persistence and copying never include them.
 export function mountMessageActions(block,{text,createdAt,onEdit,onCopy,canEdit=()=>true}){
  const doc=block.ownerDocument,bar=doc.createElement('div');bar.className='message-actions';
- if(createdAt && Number.isFinite(Date.parse(createdAt))){const time=doc.createElement('time');time.dateTime=createdAt;time.textContent=new Date(createdAt).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true}).toLowerCase();time.title=new Date(createdAt).toLocaleString();bar.append(time);}
+ if(createdAt && Number.isFinite(Date.parse(createdAt))){const time=doc.createElement('time');time.dateTime=createdAt;time.textContent=new Date(createdAt).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true}).toUpperCase();time.title=new Date(createdAt).toLocaleString();bar.append(time);}
  for(const [label,icon,callback] of [['复制消息','copy',()=>onCopy(typeof text==='function'?text():text)],...(onEdit?[['编辑消息','pencil',()=>{if(canEdit())onEdit();}]]:[])]){
   const button=doc.createElement('app-button');button.type='button';button.className='icon-button message-action'+(icon==='pencil'?' message-edit-action':'');button.setAttribute('appearance','plain');button.setAttribute('aria-label',label);button.title=label;
   const image=doc.createElement('wa-icon');image.setAttribute('src','assets/icons/'+icon+'.svg');button.append(image);button.onclick=callback;bar.append(button);
  }
+ if(block.classList.contains('assistant') && bar.querySelector('time'))bar.append(bar.querySelector('time'));
  block.append(bar);return bar;
 }
 
