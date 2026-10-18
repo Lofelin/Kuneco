@@ -2489,3 +2489,13 @@ wa-tab-group.environment-detail-tabs wa-tab-panel{--padding:16px var(--environme
 .chat-pdf-tile-body{display:flex;flex-direction:column;width:100%;min-width:0}
 
 .chat-document-chip.attachment-removable{position:relative;padding:0;border:0;background:transparent;overflow:visible}
+
+
+
+.long-message-body.is-collapsed{max-height:300px;overflow:hidden;mask-image:linear-gradient(to bottom,black calc(100% - 3rem),transparent)}
+.long-message{display:flex;flex-direction:column;align-items:flex-start;gap:4px;white-space:normal}
+.long-message-body{white-space:pre-wrap;width:100%}
+.long-message-toggle{margin:0;white-space:normal}
+.long-message-toggle,.long-message-toggle::part(base){color:inherit!important}
+
+.long-message-body.is-expanded{max-height: min(600px,60vh);overflow:auto;overflow-anchor:none;overscroll-behavior:contain}

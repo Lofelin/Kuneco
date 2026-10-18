@@ -1,3 +1,4 @@
+import {renderPlainMessage} from '../features/chat/plain-message.mjs';
 import {environmentDetailComplete,environmentRefreshDue} from '../features/environments/environment-refresh.mjs';
 import {mountEnvironmentSettings} from '../features/environments/environment-settings.mjs';
 import {mountEnvironmentLogs} from '../features/environments/environment-logs-ui.mjs';
@@ -654,7 +655,7 @@ function bubble(role, text, engine = selectedEngine, pending = false, images = [
   if(role==='assistant' && pending && !createdAt)createdAt=new Date().toISOString();
   const block = document.createElement('div'); block.className = `bubble ${role}`;
   const label = document.createElement('div'); label.className = 'bubble-label'; label.textContent = role === 'user' ? '你' : role === 'error' ? '请求状态' : (RUNTIME_CATALOG[engine]?.name || engine);
-  const content = document.createElement('div');content.className='message-content';if(createdAt)block.messageCreatedAt=createdAt;if(role==='assistant'){updateChatMessage(content,text);if(pending && !text){content.classList.add('reply-loading');content.setAttribute('role','status');content.setAttribute('aria-label','正在等待回复');content.textContent='';}}else{content.dataset.rawText=text;content.textContent=text;}
+  const content = document.createElement('div');content.className='message-content';if(createdAt)block.messageCreatedAt=createdAt;if(role==='assistant'){updateChatMessage(content,text);if(pending && !text){content.classList.add('reply-loading');content.setAttribute('role','status');content.setAttribute('aria-label','正在等待回复');content.textContent='';}}else{renderPlainMessage(content,text);}
   if(role==='user' && images.length){
     block.classList.add('has-images');block.messageImages=images.map(image=>({...image}));
     const gallery=document.createElement('div');gallery.className='message-images';
