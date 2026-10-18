@@ -8,6 +8,8 @@
 @import "../../features/chat/chat-search.css";
 @import "../../features/chat/draft-persistence.css";
 @import "./app-table.css";
+@import "./scroll-fade.css";
+@import "../../features/chat/chat-responsive.css";
 :root{--button-icon-gap:6px;--button-padding-inline:6px}
 :root{--app-modal-backdrop-color:rgb(160 165 175 / 18%);--app-modal-backdrop-filter:blur(4px)}
 /* Web Awesome parts and tokens: a single local component theme for the app shell. */
@@ -2141,7 +2143,6 @@ body.chat-mode:not(.auth-mode):not(.auth-pending):not(.environment-onboarding)>.
 body.chat-mode:not(.auth-mode):not(.auth-pending):not(.environment-onboarding)>.insights-trigger{display:block!important}
 body.chat-mode .content-tabs-viewport{padding-right:48px}
 .session-usage{border-top:1px solid var(--line);margin-top:16px;padding-top:16px}.session-information .session-usage dl{grid-template-columns:112px minmax(0,1fr)}.session-usage progress{width:100%}.session-information{max-height:calc(100vh - 140px);overflow:auto}
-@container(max-width:480px){.compose-footer{flex-wrap:wrap}.compose-send-actions{min-width:0;max-width:100%}#sessionModel{max-width:180px}.context-picker{max-height:220px}}
 @media(max-width:1150px){.window-insights{--insights-size:min(440px,calc(100vw - 64px));position:fixed;right:0;top:0;bottom:0;width:var(--insights-size);transform:translateX(100%);transition:transform var(--sidebar-motion-duration) var(--sidebar-motion-easing);z-index:8;background:var(--surface)}.window-insights.insights-open{transform:translateX(0);box-shadow:-8px 0 24px rgb(0 0 0 / 8%)}.window-insights .chat-splitter{display:none}}
 .window-insights.resizing{transition:none}@media(prefers-reduced-motion:reduce){.window-insights{transition:none}}
 

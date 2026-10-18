@@ -1,0 +1,32 @@
+/* Query the actual chat column: inspectors and conversation rails can narrow a wide window. */
+.chat-column{container-name:chat-column}
+.compose-footer>.compose-send-actions{min-width:0}
+.compose-send-actions>app-button{flex-shrink:0}
+.compose-send-actions>wa-select{min-width:0}
+@container chat-column (max-width:576px){
+  .chat-column .compose-footer{gap:6px}
+  .chat-column .compose-send-actions{max-width:calc(100% - 38px)}
+  .chat-column #sessionModel{max-width:220px}
+  .chat-column #sessionEffort{max-width:112px}
+}
+@container chat-column (max-width:480px){
+  .chat-column .compose-footer{flex-wrap:nowrap}
+  .chat-column .compose-footer>.compose-send-actions{flex:1;justify-content:flex-end;gap:6px}
+  .chat-column #sessionModel{width:auto!important;flex:1;max-width:180px}
+  .chat-column #sessionEffort{flex:0 1 96px;max-width:34%}
+  .chat-column .context-picker{max-height:220px}
+}
+@container chat-column (max-width:384px){
+  .chat-column .compose-footer{display:grid;grid-template-columns:32px minmax(0,1fr);align-items:end}
+  .chat-column .compose-footer>.compose-send-actions{display:grid;grid-template-columns:minmax(0,1fr) 32px;max-width:none;width:100%;gap:6px}
+  .chat-column #sessionModel{grid-column:1;grid-row:2;width:100%!important;max-width:100%}
+  .chat-column #sessionEffort{grid-column:1;grid-row:1;width:100%;max-width:100%}
+  .chat-column .compose-send-actions>.composer-send{grid-column:2;grid-row:2}
+  .chat-column .compose-send-actions:has(#sessionEffort[hidden]) #sessionModel,
+  .chat-column .compose-send-actions:has(#sessionEffort[hidden])>.composer-send{grid-row:1}
+}
+@container chat-column (max-width:320px){
+  .chat-column #chatForm{padding-inline:10px!important}
+  .chat-column #sessionModel::part(combobox),.chat-column #sessionEffort::part(combobox){padding-inline:8px}
+  .chat-column .context-picker{max-height:180px}
+}

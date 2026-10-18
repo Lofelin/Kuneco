@@ -1,0 +1,12 @@
+/* Only content that lies beyond the viewport fades; the first/last item stays clear at its edge. */
+[data-scroll-fade]{--scroll-fade-start:0px;--scroll-fade-end:0px;--scroll-fade-direction:to bottom;
+  mask-image:linear-gradient(var(--scroll-fade-direction),
+    transparent,#0000000d calc(var(--scroll-fade-start)*.15),#00000026 calc(var(--scroll-fade-start)*.3),
+    #0000004d calc(var(--scroll-fade-start)*.45),#00000080 calc(var(--scroll-fade-start)*.6),
+    #000000b3 calc(var(--scroll-fade-start)*.75),#000000d9 calc(var(--scroll-fade-start)*.87),#000 var(--scroll-fade-start),
+    #000 calc(100% - var(--scroll-fade-end)),#000000d9 calc(100% - var(--scroll-fade-end)*.87),
+    #000000b3 calc(100% - var(--scroll-fade-end)*.75),#00000080 calc(100% - var(--scroll-fade-end)*.6),
+    #0000004d calc(100% - var(--scroll-fade-end)*.45),#00000026 calc(100% - var(--scroll-fade-end)*.3),
+    #0000000d calc(100% - var(--scroll-fade-end)*.15),transparent)}
+[data-scroll-fade="horizontal"]{--scroll-fade-direction:to right}
+[data-scroll-fade="horizontal"]:dir(rtl){--scroll-fade-direction:to left}
