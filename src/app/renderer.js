@@ -319,7 +319,7 @@ function renderContentTabs(){
   const label=document.createElement('span');label.className='content-tab-title';label.textContent=tab.title;select.append(createIcon(tab.page==='cc'?'messages-square':tab.page==='overview'?'settings':tab.page==='automation'?'zap':tab.page==='console'?'terminal':tab.page==='runtime'?'monitor':tab.page==='environments'?'boxes':'globe'),label);
   select.onclick=()=>void action(()=>activateContentTab(tab));
   select.onkeydown=event=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;event.preventDefault();const index=contentTabState.tabs.findIndex(item=>item.id===tab.id);const next=event.key==='Home'?0:event.key==='End'?contentTabState.tabs.length-1:(index+(event.key==='ArrowRight'?1:-1)+contentTabState.tabs.length)%contentTabState.tabs.length;void action(()=>activateContentTab(contentTabState.tabs[next]));};
-  const close=createUI('app-button');close.className='content-tab-close';close.append(createIcon('x'));close.setAttribute('aria-label',`${copy.close} ${tab.title}`);close.onclick=()=>void action(()=>closeContentTabView(tab.id));const pin=createUI('app-button');pin.className='content-tab-pin';pin.append(createIcon(tab.pinned?'pin-off':'pin'));pin.setAttribute('aria-label',tab.pinned?copy.unpin:copy.pin);pin.setAttribute('aria-pressed',String(Boolean(tab.pinned)));pin.onclick=()=>toggleContentTabPin(tab.id);if(tab.pinned)item.classList.add('pinned');item.append(select,pin);if(!tab.pinned && contentTabState.tabs.length>1)item.append(close);$('contentTabs').append(item);
+  const close=createUI('app-button');close.className='content-tab-close';close.setAttribute('icon-action-exempt','');close.append(createIcon('x'));close.setAttribute('aria-label',`${copy.close} ${tab.title}`);close.onclick=()=>void action(()=>closeContentTabView(tab.id));const pin=createUI('app-button');pin.className='content-tab-pin';pin.setAttribute('icon-action-exempt','');pin.append(createIcon(tab.pinned?'pin-off':'pin'));pin.setAttribute('aria-label',tab.pinned?copy.unpin:copy.pin);pin.setAttribute('aria-pressed',String(Boolean(tab.pinned)));pin.onclick=()=>toggleContentTabPin(tab.id);if(tab.pinned)item.classList.add('pinned');item.append(select,pin);if(!tab.pinned && contentTabState.tabs.length>1)item.append(close);$('contentTabs').append(item);
  }
  const add=createUI('app-button');add.id='newContentTab';add.className='icon-button content-tab-add';add.setAttribute('aria-label','新建对话标签');add.append(createIcon('plus'));add.onclick=()=>void action(newChatTab);$('contentTabs').append(add);const drag=document.createElement('div');drag.className='window-tab-drag';drag.setAttribute('aria-hidden','true');$('contentTabs').append(drag);
  $('contentTabs').scrollLeft=scroll;
@@ -775,6 +775,7 @@ function renderBrowserTabs(state) {
   browserTabsState = state;
   browserModeSwitches.render(state.mode);
   $('browserNetworkLabel').textContent=({direct:'直接连接',proxy:'使用应用代理',mixed:'自动选择'})[state.mode]||'使用应用代理';
+  $('browserNetworkMenu').querySelector('[slot=start]').src='assets/icons/'+({direct:'globe',proxy:'shield-check',mixed:'network'}[state.mode]||'shield-check')+'.svg';
   for(const item of document.querySelectorAll('[data-browser-network]'))item.checked=item.dataset.browserNetwork===state.mode;
   const direct=state.mode==='direct',mixed=state.mode==='mixed';
   $('browserViewport').querySelector('.browser-empty h2').textContent=mixed?'自动选择访问线路':direct?'使用本机网络浏览':'在同一出口下浏览';
@@ -786,7 +787,7 @@ function renderBrowserTabs(state) {
   for (const tab of state.tabs) {
     const item=document.createElement('wa-tab');item.panel=tab.id;item.className=`browser-tab tab-select ${tab.id===state.activeId?'active':''}`;item.dataset.url=tab.url;item.id='browser-tab-'+tab.id;
     const title=document.createElement('span');title.className='tab-title';title.textContent=`${tab.loading?'◌ ':''}${tab.title}`;
-    const close=createUI('app-button');close.className='tab-close';close.append(createIcon('x'));close.setAttribute('aria-label',`关闭 ${tab.title}`);
+    const close=createUI('app-button');close.className='tab-close';close.setAttribute('icon-action-exempt','');close.append(createIcon('x'));close.setAttribute('aria-label',`关闭 ${tab.title}`);
     close.onclick=event=>{event.stopPropagation();void action(()=>api.browser('close',tab.id));};
     item.append(title,close);$('browserTabs').append(item);const tooltip=document.createElement('wa-tooltip');tooltip.for=item.id;tooltip.textContent=tab.url;$('browserTabs').append(tooltip);
     const panel=document.createElement('wa-tab-panel');panel.name=tab.id;$('browserTabs').append(panel);
@@ -1242,7 +1243,7 @@ function renderRuntimeTable(target,entries,{columns=[{key:'name',label:'运行�
  });
  renderAppTable(target,{label:'运行时',columns:columns.map(column=>({...column,render:item=>item[column.key]})),rows:rendered,minWidth:columns.length===3?560:1060,onActivate:item=>onOpen(item.entry),rowLabel:item=>'查看 '+item.entry.name+' 详情',actions:actions?item=>{const entry=item.entry;
  const menu=createUI('wa-dropdown');menu.className='runtime-row-menu';menu.placement='bottom-end';
-  const trigger=createUI('app-button');trigger.slot='trigger';trigger.size='s';trigger.className='icon-button';trigger.setAttribute('aria-label',entry.name+' 更多操作');trigger.append(createIcon('ellipsis'));
+  const trigger=createUI('app-button');trigger.slot='trigger';trigger.size='s';trigger.className='icon-button';trigger.setAttribute('aria-label',entry.name+' 更多操作');trigger.setAttribute('appearance','plain');trigger.append(createIcon('ellipsis'));
   const remove=createUI('wa-dropdown-item');remove.variant='danger';remove.textContent=entry.id==='deepseek'?'删除':'卸载';remove.append(createIcon('trash-2'));remove.lastChild.slot='icon';
   remove.onclick=()=>{menu.open=false;requestRuntimeRemoval(entry);};menu.append(trigger,remove);menu.addEventListener('click',event=>event.stopPropagation());menu.addEventListener('keydown',event=>event.stopPropagation());return menu;
 
@@ -1270,8 +1271,9 @@ function openRuntimeDetails(entry){
  $('runtimeDetailConfigure').classList.toggle('hidden',local || (access.label==='API Key' && entry.id!=='deepseek'));
  updateRuntimeConfigureState(entry);
  $('runtimeDetailHint').textContent=local?'使用本机 CLI 管理登录信息。':'';
- if(access.label==='API Key')$('runtimeDetailHint').textContent='使用 API Key 接入，无需订阅账号登录。';
+ if(access.label==='API Key')$('runtimeDetailHint').textContent='';
  if(!supportsChat(entry.id))$('runtimeDetailHint').textContent=(local?'在本机终端运行：':'在当前环境控制台运行：')+RUNTIME_CATALOG[entry.id].usage+'。';
+ $('runtimeDetailHint').classList.toggle('hidden',!$('runtimeDetailHint').textContent);
  $('runtimeDetailPage').classList.remove('hidden');document.querySelector('#page-runtime>.runtime-toolbar').classList.add('hidden');document.querySelector('#page-runtime>.runtime-management').classList.add('hidden');
 }
 function updateRuntimeConfigureState(entry){
@@ -1382,7 +1384,7 @@ for(const tab of document.querySelectorAll('[data-setting]'))tab.onclick=()=>{co
 let themePreference='light';try{themePreference=localStorage.getItem('ui-theme') || 'light';}catch{}
 if(!['light','dark','system'].includes(themePreference))themePreference='light';
 const systemTheme=matchMedia('(prefers-color-scheme: dark)');
-function applyTheme(){const dark=themePreference==='dark' || themePreference==='system' && systemTheme.matches;document.body.classList.toggle('dark',dark);document.querySelector('.credential-heading>.kuneco-logo').src=dark?'assets/brand/kuneco-mark-white.png':'assets/brand/kuneco-mark.png';setUITheme(dark);$('themeSelect').value=themePreference;document.querySelectorAll('[data-theme]').forEach(button=>button.classList.toggle('selected',button.dataset.theme===themePreference));}
+function applyTheme(){const dark=themePreference==='dark' || themePreference==='system' && systemTheme.matches;document.body.classList.toggle('dark',dark);document.querySelector('.credential-heading>.kuneco-logo').src=dark?'assets/brand/kuneco-mark-white.png':'assets/brand/kuneco-mark.png';setUITheme(dark);$('themeSelect').value=themePreference;}
 applyTheme();systemTheme.addEventListener('change',()=>{if(themePreference==='system')applyTheme();});
 $('themeSelect').onchange=()=>{themePreference=$('themeSelect').value;applyTheme();try{localStorage.setItem('ui-theme',themePreference);}catch{}};
 void action(async () => {
@@ -1501,7 +1503,7 @@ let profileSaving=false,profileStatusTimer;
 function renderProfileActivity(){
  const sessions=chatOwnerID && chatOwnerID===accountState.user?.id?chatSessions:[];
  const activity=profileActivity(sessions);
- for(const [valueId,hintId,value,hint] of [['profileTotalTokens','profileTotalTokensHint',activity.totalTokens,'已记录请求累计'],['profilePeakTokens','profilePeakTokensHint',activity.peakTokens,'单次请求最高']]){$(valueId).textContent=value===null?'—':new Intl.NumberFormat(uiLocale()).format(value);$(hintId).textContent=value===null?'暂无数据':hint;}
+ for(const [valueId,value] of [['profileTotalTokens',activity.totalTokens],['profilePeakTokens',activity.peakTokens]]){$(valueId).textContent=value===null?'—':new Intl.NumberFormat(uiLocale()).format(value);}
  $('profileChatCount').textContent=activity.total;$('profileArchivedCount').textContent=activity.archived;$('profileActiveDays').textContent=activity.activeDays;
  let tooltip=$('profileActivityTooltip');
  if(!tooltip){tooltip=document.createElement('wa-tooltip');tooltip.id='profileActivityTooltip';tooltip.placement='top';tooltip.trigger='manual';document.body.append(tooltip);}
@@ -1541,7 +1543,7 @@ async function saveProfileChange(change){
 $('profileName').addEventListener('keydown',event=>{if(event.key==='Enter' && !mountCompositionGuard($('prompt')).isComposing(event)){event.preventDefault();void action(()=>saveProfileChange({name:$('profileName').value}));}});
 $('changeAvatar').onclick=()=>void action(async()=>{if(profileSaving)return;const owner=accountState.user?.id;const avatar=await api.avatarPick();if(owner!==accountState.user?.id)throw new Error('选择期间账号已变化，请重新选择头像');if(avatar)await saveProfileChange({avatar});});
 $('languageSelect').onchange=()=>void action(async()=>{renderAccount(await api.accountProfileSave({language:$('languageSelect').value}));$('languageStatus').textContent='语言已保存到当前账号';});
-for(const button of document.querySelectorAll('[data-theme]'))button.onclick=()=>{themePreference=button.dataset.theme;applyTheme();localStorage.setItem('ui-theme',themePreference);};
+
 async function refreshRuntimeRegistry(detect=false,refreshEngine=null){
  const owner=accountState.user?.id,environment=dockerEnvironmentState.activeId;
  const result=await api.runtimeInfo({detect,refreshEngine});if(owner!==accountState.user?.id || environment!==dockerEnvironmentState.activeId)return runtimeRegistry;

@@ -774,7 +774,7 @@ body{--sidebar-motion-duration:.3s;--sidebar-motion-easing:cubic-bezier(.2,.7,.2
 #setupTypeTrigger::part(base):focus-visible{outline:2px solid var(--muted);outline-offset:2px}
 #setupEnvironmentType::part(menu){box-sizing:border-box;width:var(--setup-type-width);padding:6px;border:1px solid var(--line);border-radius:8px;background:var(--surface);box-shadow:0 8px 24px #00000012,0 2px 5px #00000008}
 #setupEnvironmentType wa-dropdown-item{padding:8px 10px;min-height:36px;border-radius:5px;font-size:14px;color:var(--ink)}
-#setupEnvironmentType wa-dropdown-item:hover{background:var(--soft);color:var(--ink)}
+#setupEnvironmentType wa-dropdown-item:hover{background:var(--hover);color:var(--ink)}
 #setupEnvironmentType wa-dropdown-item::part(details){margin-left:auto;color:var(--ink)}
 #setupEnvironmentType wa-dropdown-item wa-icon{width:16px;height:16px}
 #setupEnvironmentType{--wa-focus-ring:1px solid var(--muted)}
@@ -1288,8 +1288,8 @@ wa-option,wa-dropdown-item{
  --current-text-color:var(--ink);
 }
 wa-option:state(current),
-wa-option:not(:state(disabled)):is(:hover,:state(hover),:focus-visible){background:var(--soft);color:var(--ink)}
-wa-dropdown-item:not(:state(disabled),[disabled],[variant=danger]):is(:hover,:focus-visible,:state(submenu-open)){background:var(--soft);color:var(--ink)}
+wa-option:not(:state(disabled)):is(:hover,:state(hover),:focus-visible){background:var(--hover);color:var(--ink)}
+wa-dropdown-item:not(:state(disabled),[disabled],[variant=danger]):is(:hover,:focus-visible,:state(submenu-open)){background:var(--hover);color:var(--ink)}
 /* Selection is conveyed by the checkmark, not a persistent second highlight.
    Pointer hover takes precedence over the retained keyboard-current option. */
 wa-select:has(wa-option:hover) wa-option:not(:hover){background:transparent;color:var(--ink)}
@@ -2260,3 +2260,69 @@ body.chat-mode .content-tabs-viewport{padding-right:48px}
 
 .browser-download-reset[data-state=success]::part(base){color:var(--success)}
 .browser-download-reset[data-state=error]::part(base){color:var(--danger)}
+
+
+/* Shared outer corners for every overlay surface. */
+:root{--overlay-radius:14px}
+wa-dropdown::part(menu),wa-select::part(listbox),wa-tooltip::part(body),app-dialog::part(dialog),[popover],.context-picker{border-radius:var(--overlay-radius)!important}
+:root{--overlay-shadow:0 6px 24px rgb(0 0 0 / 12%);--overlay-border:1px solid var(--line)}
+
+/* Shared interactive geometry; keep the same corners before and during hover. */
+:root{--interaction-radius:14px;--wa-form-control-border-radius:14px}
+wa-input::part(base),wa-number-input::part(base),wa-textarea::part(base),wa-select::part(combobox),wa-dropdown-item::part(base){border-radius:var(--interaction-radius)!important}
+app-button:not([icon-only]):not(.composer-send):not(.chat-jump-latest)::part(base),.session-row-container,.context-picker-item,.settings-nav [data-setting],.sidebar .nav{border-radius:var(--interaction-radius)!important}
+app-button.icon-button::part(base){border-radius:var(--interaction-radius)!important}
+
+/* Option hover/selected backgrounds are painted by the host, not its label. */
+wa-option,wa-dropdown-item{border-radius:var(--interaction-radius)!important}
+
+/* Neutral menu interactions share the same hover surface as navigation. */
+wa-option,wa-dropdown-item:not([variant=danger]){--wa-color-neutral-fill-normal:var(--hover)}
+wa-option:not(:state(disabled)):is(:hover,:state(hover)),wa-dropdown-item:not(:state(disabled),[disabled],[variant=danger]):is(:hover,:state(submenu-open)){background:var(--hover)!important}
+
+/* Library-owned segmented single selection: semantics and keyboard handled by radios. */
+wa-radio-group.app-segmented{display:inline-block;max-width:100%}
+wa-radio-group.app-segmented::part(form-control-input){display:flex;gap:4px}
+wa-radio-group.app-segmented wa-radio{flex:1;justify-content:center;white-space:nowrap;border-radius:var(--interaction-radius);font-size:var(--menu-font-size);font-weight:400;--wa-form-control-activated-color:var(--hover)}
+wa-radio-group.app-segmented wa-radio:is(:hover,:state(checked)){background:var(--hover);color:var(--ink)}
+#themeSelect{width:230px;min-width:0;max-width:100%;flex:0 1 230px}
+#themeSelect wa-radio{padding-inline:6px}
+
+/* Compact automation editor; weekday toggles share the global button surface. */
+#learningDialog{--width:min(840px,90vw)}
+.learning-editor{grid-template-columns:minmax(0,1.15fr) minmax(300px,1fr);height:58vh}
+.learning-library,.learning-settings{padding:16px}
+.learning-settings{gap:14px}
+.learning-library li{padding:10px 0}
+.learning-library li p{margin-top:4px;line-height:1.5}
+.learning-library ol{margin:12px 0}
+.learning-editor .automation-name-input::part(input){font-size:14px;font-weight:500}
+.learning-next{padding:12px}
+.learning-days{margin-top:0;gap:4px}
+.learning-days app-button,.learning-days app-button[aria-pressed=true]{padding:0;background:transparent;color:var(--ink);min-width:0}
+.learning-days app-button::part(base){width:100%;min-height:28px;background:var(--surface);border:1px solid var(--line);border-radius:var(--interaction-radius);color:var(--ink)}
+.learning-days app-button[aria-pressed=true]::part(base){background:var(--hover)}
+
+/* Descriptive hints belong between the native label and the control. */
+:is(wa-input,wa-number-input,wa-textarea,wa-select):is([hint]:not([hint=""]),:has(>[slot="hint"])):not(.git-identity-field,.git-credential-field,.git-connection-field){display:grid;grid-template-columns:minmax(0,1fr)}
+:is(wa-input,wa-number-input,wa-textarea,wa-select):is([hint]:not([hint=""]),:has(>[slot="hint"])):not(.git-identity-field,.git-credential-field,.git-connection-field)::part(form-control-label){grid-row:1;margin:0!important}
+:is(wa-input,wa-number-input,wa-textarea,wa-select):is([hint]:not([hint=""]),:has(>[slot="hint"])):not(.git-identity-field,.git-credential-field,.git-connection-field)::part(hint){grid-row:2;margin:4px 0 8px;color:var(--muted);font-weight:400}
+:is(wa-input,wa-number-input,wa-textarea,wa-select):is([hint]:not([hint=""]),:has(>[slot="hint"])):not(.git-identity-field,.git-credential-field,.git-connection-field)::part(base),
+:is(wa-input,wa-number-input,wa-textarea,wa-select):is([hint]:not([hint=""]),:has(>[slot="hint"])):not(.git-identity-field,.git-credential-field,.git-connection-field)::part(combobox){grid-row:3}
+#themeSelect wa-radio::part(label){display:flex;align-items:center;gap:6px}
+#themeSelect wa-icon{font-size:14px;flex:none}
+
+
+.profile-stats{padding:14px 0}
+.profile-stats>div{grid-template-rows:auto auto;gap:4px}
+/* All ellipsis actions use the same transparent treatment as chat More. */
+app-button:has(wa-icon[src$="/ellipsis.svg"]),
+app-button:has(wa-icon[src$="/ellipsis.svg"])::part(base){background:transparent!important;border-color:transparent!important;box-shadow:none!important}
+
+.runtime-selected-base,#runtimeDefaultCommand{border-radius:14px}
+app-button[data-icon-action],app-button[data-icon-action]::part(base){background:transparent!important;border-color:transparent!important;box-shadow:none!important}
+app-button[data-icon-action]{color:var(--muted)!important}
+app-button[data-icon-action]:not([disabled]):not([loading]):is(:hover,:active){color:var(--ink)!important}
+
+#accountMenu::part(menu){border-radius:14px}
+

@@ -60,7 +60,7 @@ export function mountBrowserLibraryUI({document,api,host,onOpenURL,onChanged,cho
   extensions:{title:'扩展程序',description:'安装解压后的本地扩展。扩展仅在当前环境启用；部分 Chrome 扩展 API 不受支持。',cols:[['name','名称'],['path','安装位置'],['enabled','启用']]},
   downloads:{title:'下载',description:'删除记录不会删除已下载的文件。',cols:[['filename','文件'],['state','状态'],['progress','进度'],['error','说明']]}
  };
- function menu(row){const dropdown=el('wa-dropdown'),trigger=button('','ellipsis',null);trigger.className='icon-button';trigger.slot='trigger';trigger.setAttribute('aria-label','管理 '+(row.title || row.origin || row.name || row.filename || '记录'));dropdown.append(trigger);
+ function menu(row){const dropdown=el('wa-dropdown'),trigger=button('','ellipsis',null);trigger.setAttribute('appearance','plain');trigger.className='icon-button';trigger.slot='trigger';trigger.setAttribute('aria-label','管理 '+(row.title || row.origin || row.name || row.filename || '记录'));dropdown.append(trigger);
  const item=(label,name,run,danger=false)=>{const node=el('wa-dropdown-item');if(danger)node.variant='danger';const image=icon(name);image.slot='icon';node.append(image,label);node.onclick=()=>{dropdown.open=false;void run();};dropdown.append(node);};
  if(definitions[active].fields)item('编辑','pencil',()=>edit(row));
  if(active==='passwords'){item('查看密码','key-round',()=>showSecret(row));item('填充到当前网页','key-round',()=>request('fillPassword',{id:row.id},managerStatus));}

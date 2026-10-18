@@ -9,7 +9,10 @@ export class AppButton extends WaButton {
   slot[name=start]::slotted(*){margin-inline:0 var(--button-icon-gap)!important}
   slot[name=end]::slotted(*){margin-inline:var(--button-icon-gap) 0!important}
   :host([icon-only]) slot[name=start]::slotted(*),:host([icon-only]) slot[name=end]::slotted(*){margin-inline:0!important}
+  :host(.menu-action) .button{background:transparent!important;border-color:transparent!important;box-shadow:none!important;border-radius:6px}
+  :host(.menu-action:not([disabled]):hover) .button,:host(.menu-action:not([disabled]):active) .button{background:var(--hover)!important;border-color:transparent!important}
   :host([appearance=plain]) .button,:host(.transparent-action) .button,:host(.text-button) .button{background:transparent!important;border-color:transparent!important;box-shadow:none!important}
+  :host([data-icon-action]) .button{background:transparent!important;border-color:transparent!important;box-shadow:none!important;color:inherit!important}
   .button:focus-visible{outline:2px solid var(--field-focus-ring,color-mix(in srgb,var(--blue) 16%,transparent));outline-offset:2px}
   :host([layout=custom]) .button{display:inherit;align-items:inherit;justify-content:inherit;gap:inherit!important;width:100%;height:100%;min-height:0;padding:0!important;border:0;background:transparent;color:inherit;font:inherit;white-space:inherit}
   :host([layout=custom]) .label{display:contents}
@@ -25,6 +28,18 @@ export class AppButton extends WaButton {
   :host([variant=danger]) slot::slotted(wa-icon){color:inherit!important}
 
  `];
+ connectedCallback(){
+  super.connectedCallback();
+  this._iconObserver=new MutationObserver(()=>this.syncIconAction());
+  this._iconObserver.observe(this,{childList:true,subtree:true,characterData:true});
+  this.syncIconAction();
+ }
+ disconnectedCallback(){this._iconObserver?.disconnect();super.disconnectedCallback();}
+ syncIconAction(){
+  const plus=[...this.querySelectorAll('wa-icon')].some(icon=>/\/plus(?:-circle|-square)?\.svg$/.test(icon.src||'') || /^plus(?:-circle|-square)?$/.test(icon.name||''));
+  const iconOnly=!plus&&Boolean(this.querySelector('wa-icon,svg'))&&!this.textContent.trim()&&!this.hasAttribute('icon-action-exempt');
+  this.toggleAttribute('data-icon-action',iconOnly);
+ }
  constructor(){super();this.size='s';}
 }
 customElements.define('app-button',AppButton);

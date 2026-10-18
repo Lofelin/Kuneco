@@ -21,7 +21,7 @@ export function mountBrowserSettings({document,api,getScope,formatDate,onOpenSit
  function renderList(){
   const query=$('browserSiteFilter').value.trim().toLowerCase(),rows=(list?.sites || []).filter(row=>row.domain.includes(query));
   renderAppTable($('browserSiteTable'),{label:'已记录站点',minWidth:480,columns:[{key:'domain',label:'域名'},{key:'cookies',label:'Cookie',width:'90px'},{key:'origins',label:'已记录来源',width:'110px',render:row=>row.origins.length}],rows,onActivate:row=>void openSite(row),rowLabel:row=>'查看 '+row.domain+' 的 Cookie',empty:query?'没有匹配的站点':'当前环境暂无已记录站点',actions:row=>{
-   const menu=document.createElement('wa-dropdown'),button=document.createElement('app-button'),icon=document.createElement('wa-icon');button.slot='trigger';button.className='icon-button';button.setAttribute('aria-label','管理 '+row.domain);icon.src='assets/icons/ellipsis.svg';button.append(icon);
+   const menu=document.createElement('wa-dropdown'),button=document.createElement('app-button'),icon=document.createElement('wa-icon');button.slot='trigger';button.className='icon-button';button.setAttribute('aria-label','管理 '+row.domain);button.setAttribute('appearance','plain');icon.src='assets/icons/ellipsis.svg';button.append(icon);
    const item=document.createElement('wa-dropdown-item'),trash=document.createElement('wa-icon');item.variant='danger';trash.slot='icon';trash.src='assets/icons/trash-2.svg';item.append(trash,'清除站点数据');item.onclick=()=>{menu.open=false;confirm({kind:'site',domain:row.domain});};menu.append(button,item);return menu;
   }});
   $('browserCacheSize').textContent=list?'环境总缓存 '+(list.cacheBytes/1024/1024).toFixed(2)+' MB。':'';

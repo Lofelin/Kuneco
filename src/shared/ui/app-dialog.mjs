@@ -13,7 +13,7 @@ export class AppDialog extends WaDialog{
  static styles=[...WaDialog.styles,css`
   :host{--backdrop-filter:var(--app-modal-backdrop-filter,blur(4px));--wa-color-overlay-modal:var(--app-modal-backdrop-color,rgb(160 165 175 / 18%))}
   .dialog::backdrop{background:var(--app-modal-backdrop-color,rgb(160 165 175 / 18%))!important;backdrop-filter:var(--app-modal-backdrop-filter,blur(4px))!important}
-  .dialog{border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--ink)}
+  .dialog{border:1px solid var(--line);border-radius:var(--overlay-radius,14px);background:var(--surface);color:var(--ink)}
   .header{border-bottom:1px solid var(--line)!important;padding:10px var(--dialog-inset,16px)!important;min-height:44px;box-sizing:border-box;align-items:center;flex-shrink:0}
   .title{font-size:14px;font-weight:600;line-height:22px}
   .header-actions{align-self:center;align-items:center}
