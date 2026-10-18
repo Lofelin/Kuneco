@@ -5,6 +5,23 @@ import {EventEmitter} from 'node:events';
 import {StringDecoder} from 'node:string_decoder';
 import {randomUUID} from 'node:crypto';
 
+// Docker's creation-time Env survives gateway credential rotation. Read the
+// current managed proxy inside each new shell; keep offline consoles fail-closed.
+export const managedTerminalProxyScript='kuneco_proxy=$(cat /tmp/dingtu-chat-proxy 2>/dev/null) || kuneco_proxy=; kuneco_proxy=${kuneco_proxy:-http://127.0.0.1:9}; export HTTP_PROXY="$kuneco_proxy" HTTPS_PROXY="$kuneco_proxy" ALL_PROXY="$kuneco_proxy" http_proxy="$kuneco_proxy" https_proxy="$kuneco_proxy" all_proxy="$kuneco_proxy"; export NO_PROXY=localhost,127.0.0.1 no_proxy=localhost,127.0.0.1; unset kuneco_proxy; ';
+export const managedTerminalBashrc=`[ ! -r ~/.bashrc ] || . ~/.bashrc
+_kuneco_refresh_proxy() { ${managedTerminalProxyScript} }
+# DEBUG runs before commands, including ones entered at an already idle prompt.
+# Preserve an existing user DEBUG trap by chaining its command after the refresh.
+_kuneco_previous_debug=$(trap -p DEBUG)
+if [ -n "$_kuneco_previous_debug" ]; then
+ _kuneco_previous_debug=\${_kuneco_previous_debug#trap -- }
+ _kuneco_previous_debug=\${_kuneco_previous_debug% DEBUG}
+ eval "_kuneco_previous_debug=$_kuneco_previous_debug"
+fi
+trap '_kuneco_refresh_proxy; eval "$_kuneco_previous_debug"' DEBUG
+_kuneco_refresh_proxy
+`;
+
 function request(socketPath,path,body){
  return new Promise((resolve,reject)=>{
   const req=http.request({socketPath,path,method:'POST',headers:{'Content-Type':'application/json'}},res=>{
@@ -28,12 +45,22 @@ export class ContainerTerminal extends EventEmitter{
 for url do case "$url" in http://*|https://*) printf '\033]777;dingtu-open-url;%s\007' "$url"; exit;; esac; done
 `;
   await this.manager.exec(this.owner,this.id,['sh','-c','umask 077; printf %s "$2" > "$1" && chmod 700 "$1"','dingtu-browser',this.browserFile,browserScript]);
+  if(!item.external){
+   this.rcFile=this.browserFile+'.bashrc';
+   await this.manager.exec(this.owner,this.id,['sh','-c','umask 077; printf %s "$2" > "$1"','dingtu-console-rc',this.rcFile,managedTerminalBashrc]);
+  }
   const loginCommand=loginEngine==='codex'?'umask 077; mkdir -p "${CODEX_HOME:-$HOME/.codex}" && codex login':loginEngine==='cc'?'claude auth login':null;
   const command=loginCommand?['sh','-c','umask 077; echo $$ > "$1" || exit 1; shift; exec bash -ic "$1"','dingtu-console',this.pidFile,loginCommand+'; exec bash -i']:['sh','-c','umask 077; echo $$ > "$1" || exit 1; if command -v bash >/dev/null 2>&1; then exec bash -i; else exec sh -i; fi','dingtu-console',this.pidFile];
+  if(!item.external)command[2]=managedTerminalProxyScript+command[2];
+  if(this.rcFile){
+   // Pass the generated path as environment data, never interpolate shell input.
+   command[2]=command[2].replaceAll('exec bash -','exec bash --rcfile "$KUNECO_CONSOLE_RC" -');
+   if(loginCommand)command[command.length-1]=loginCommand+'; exec bash --rcfile "$KUNECO_CONSOLE_RC" -i';
+  }
   const result=await request(socketPath,'/containers/'+encodeURIComponent(container)+'/exec',{
    AttachStdin:true,AttachStdout:true,AttachStderr:true,Tty:true,Cmd:command,
    ...(item.external?{}:{User:'1000:1000'}),WorkingDir:workingDirectory || item.external?.workingDirectory || '/workspace',
-   Env:['TERM=xterm-256color','COLORTERM=truecolor','LANG=C.UTF-8','LC_ALL=C.UTF-8','BROWSER='+this.browserFile],ConsoleSize:[rows,cols]
+   Env:['TERM=xterm-256color','COLORTERM=truecolor','LANG=C.UTF-8','LC_ALL=C.UTF-8','BROWSER='+this.browserFile,...(this.rcFile?['KUNECO_CONSOLE_RC='+this.rcFile]:[])],ConsoleSize:[rows,cols]
   });
   this.execId=result.Id;if(this.closed)return;
   const detectLoginLink=createLoginLinkDetector(loginEngine,(url,login)=>{this.browserLogin=login;this.emit('open-url',url);});
@@ -62,7 +89,7 @@ for url do case "$url" in http://*|https://*) printf '\033]777;dingtu-open-url;%
  async resize(cols,rows){if(!this.closed && this.execId && Number.isInteger(cols) && Number.isInteger(rows) && cols>=2 && cols<=500 && rows>=1 && rows<=300)await request(this.endpoint.slice(7),'/exec/'+this.execId+'/resize?w='+cols+'&h='+rows,{});}
  close(){
   if(this.closed)return;this.closed=true;this.connectRequest?.destroy();this.socket?.destroy();
-  if(this.pidFile)void this.manager.exec(this.owner,this.id,['sh','-c','p="$1"; if test -r "$p"; then pid=$(cat "$p"); case "$pid" in ""|*[!0-9]*) ;; *) kill -HUP -- "-$pid" 2>/dev/null || kill -HUP "$pid" 2>/dev/null;; esac; rm -f "$p"; fi; rm -f "$2"','dingtu-close',this.pidFile,this.browserFile],{timeout:5000}).catch(()=>{});
+  if(this.pidFile)void this.manager.exec(this.owner,this.id,['sh','-c','p="$1"; if test -r "$p"; then pid=$(cat "$p"); case "$pid" in ""|*[!0-9]*) ;; *) kill -HUP -- "-$pid" 2>/dev/null || kill -HUP "$pid" 2>/dev/null;; esac; rm -f "$p"; fi; rm -f "$2" "$3"','dingtu-close',this.pidFile,this.browserFile,this.rcFile||''],{timeout:5000}).catch(()=>{});
   this.emit('exit');
  }
 }
