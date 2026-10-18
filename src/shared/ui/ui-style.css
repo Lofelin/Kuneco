@@ -2423,7 +2423,7 @@ wa-tab-group.app-section-tabs wa-tab-panel{--padding:28px}
 wa-tab-group.environment-detail-tabs::part(nav){padding-inline:var(--environment-content-inset)}
 wa-tab-group.environment-detail-tabs wa-tab-panel{--padding:28px var(--environment-content-inset)}
 .environments-body .environment-expanded{max-width:none;margin:0}
-.environment-expanded>.environment-card-header{padding:28px var(--environment-content-inset);gap:18px}
+.environment-expanded>.environment-card-header{padding:14px var(--environment-content-inset);gap:18px}
 .environment-tabbed-details{display:block;border:0;padding:0;margin:0}
 .environment-overview-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(260px,320px);gap:32px;align-items:start}
 .environment-overview-main,.environment-overview-aside{min-width:0}
@@ -2439,7 +2439,7 @@ wa-tab-group.environment-detail-tabs wa-tab-panel{--padding:28px var(--environme
 .environment-overview-aside .environment-inline-facts>div{display:grid;grid-template-columns:84px minmax(0,1fr);gap:12px;font-size:13px;line-height:20px}
 .environment-detail-tabs .preference-heading{margin-top:0}
 @media(max-width:1000px){.environment-overview-grid{grid-template-columns:minmax(0,1fr);gap:24px}.environment-overview-aside{width:100%;box-sizing:border-box}}
-@media(max-width:760px){.environment-expanded>.environment-card-header{padding-block:20px}wa-tab-group.environment-detail-tabs wa-tab-panel{--padding:20px var(--environment-content-inset)}}
+@media(max-width:760px){.environment-expanded>.environment-card-header{padding-block:14px}wa-tab-group.environment-detail-tabs wa-tab-panel{--padding:20px var(--environment-content-inset)}}
 
 /* Compact environment metadata uses the shared action component for navigation. */
 .environment-header-summary{display:flex;flex-wrap:wrap;align-items:center;gap:6px 16px;margin-top:8px;color:var(--muted);font-size:12px;line-height:18px}
