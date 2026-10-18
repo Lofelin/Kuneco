@@ -20,8 +20,8 @@ export class AppButton extends WaButton {
   :host(.segmented-action) .button{display:flex;align-items:center;justify-content:center;width:100%;height:auto;min-height:28px;padding:4px var(--button-padding-inline)!important;border:0!important;border-radius:4px;background:transparent!important;color:var(--muted)!important;box-shadow:none!important;filter:none!important;font:inherit;white-space:nowrap}
   :host(.segmented-action[aria-pressed=true]) .button{background:var(--surface)!important;color:var(--ink)!important}
   :host(.segmented-action:not([disabled]):hover) .button{color:var(--ink)!important}
-  :host(.retry-action) .button{color:var(--ink)!important;background:var(--surface)!important;border-color:var(--line)!important;white-space:nowrap;filter:none!important}
-  :host(.retry-action:not([disabled]):not([loading])) .button:is(:hover,:active){color:var(--ink)!important;background:var(--soft)!important;border-color:var(--line)!important;filter:none!important}
+  :host(.retry-action:not([appearance=plain],.transparent-action,.text-button,[data-icon-action])) .button{color:var(--ink)!important;background:var(--surface)!important;border-color:var(--line)!important;white-space:nowrap;filter:none!important}
+  :host(.retry-action:not([appearance=plain],.transparent-action,.text-button,[data-icon-action]):not([disabled]):not([loading])) .button:is(:hover,:active){color:var(--ink)!important;background:var(--soft)!important;border-color:var(--line)!important;filter:none!important}
   :host(.retry-action) slot::slotted(wa-icon){color:inherit}
   :host([variant=danger]) .button{background:var(--delete-background)!important;color:var(--delete-foreground)!important;border-color:transparent!important;box-shadow:none!important;filter:none!important}
   :host([variant=danger]:not([disabled]):not([loading])) .button:is(:hover,:active){background:var(--delete-hover-background)!important;color:var(--delete-hover-foreground)!important}
