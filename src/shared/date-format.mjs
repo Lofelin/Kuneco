@@ -1,4 +1,9 @@
 let displayPreferences={hourCycle:'system',timeDisplay:'absolute'};
+// Compact conversation-rail labels keep their original clock-only geometry.
+export function formatCompactTime(value){
+ const date=new Date(value);if(Number.isNaN(date.getTime()))return '—';
+ return new Intl.DateTimeFormat('en-US',{hour:'2-digit',minute:'2-digit',hour12:true}).format(date);
+}
 export function configureDateDisplay(value){displayPreferences={hourCycle:value.hourCycle,timeDisplay:value.timeDisplay};}
 export function formatDisplayDate(value,locale='zh-CN',kind='datetime',overrides={}){
  if(value===null || value===undefined || value==='')return '—';

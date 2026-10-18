@@ -39,7 +39,7 @@ import {ENVIRONMENT_ICONS,environmentIcon} from '../features/environments/enviro
 import {RUNTIME_INSTALL_COMMANDS,RUNTIME_CATALOG,runtimeIcon,supportsChat} from '../features/runtimes/runtime-install-config.mjs';
 import {mountConsole} from '../vendor/console.js';
 import {mountGalaxy} from '../shared/ui/galaxy-background.mjs';
-import {formatDisplayDate} from '../shared/date-format.mjs';
+import {formatDisplayDate,formatCompactTime} from '../shared/date-format.mjs';
 import {restoredChat} from '../features/chat/chat-selection.mjs';
 import {formatProxyLocation} from '../features/proxy/geo-location.mjs';
 import {profileActivity,activityTooltip} from '../features/account/profile-activity.mjs';
@@ -957,7 +957,7 @@ if(item.chatStatus==='running'){
  status.append(spinner,label,dots);
 }detail.append(status);
  const timestamp=item.updatedAt || item.createdAt;
- if(timestamp && Number.isFinite(Date.parse(timestamp))){const time=document.createElement('time');time.className='chat-item-time';time.dateTime=new Date(timestamp).toISOString();time.textContent=displayDate(timestamp); time.title=displayDate(timestamp);detail.append(time);}
+ if(timestamp && Number.isFinite(Date.parse(timestamp))){const time=document.createElement('time');time.className='chat-item-time';time.dataset.timeKind='compact';time.dateTime=new Date(timestamp).toISOString();time.textContent=formatCompactTime(timestamp);time.title=formatDisplayDate(timestamp,uiLocale(),'datetime',{timeDisplay:'absolute'});detail.append(time);}
  copy.append(title,detail);button.append(avatar,copy);sessionOrder.bind(button,item);
   button.onclick=()=>void action(async()=>{if(activeChatId===item.id && page==='cc')return;const version=++chatRestoreVersion;saveChatView();const value=await api.selectSession(item.id,{deferAuth:true,viewed:true});if(version===chatRestoreVersion)applySession(value,item);});
   const archive=createUI('app-button');archive.className='icon-button session-archive';archive.disabled=pendingArchives.has(item.id);archive.setAttribute('aria-label',item.archived?'取消归档':'归档对话');archive.title=item.archived?'取消归档':'归档对话';archive.append(createIcon(item.archived?'archive-restore':'archive'));archive.onclick=()=>void action(async()=>{if(chatRuns.has(item.id))throw new Error('请先停止此对话的回复');if(pendingArchives.has(item.id))return;const previous=item.archived,owner=chatOwnerID;pendingArchives.add(item.id);item.archived=!previous;renderSessionList();try{await api.archiveSession(item.id,item.archived);}catch(error){if(owner===chatOwnerID){const state=await api.state().catch(()=>null);const actual=state?.aiSessions?.find(session=>session.id===item.id);item.archived=actual?Boolean(actual.archived):previous;renderSessionList();}throw error;}finally{pendingArchives.delete(item.id);if(owner===chatOwnerID)renderSessionList();}});const pin=createUI('app-button');pin.className='icon-button session-pin'+(item.pinned?' pinned':'');pin.setAttribute('aria-label',item.pinned?'取消固定对话':'固定对话');pin.append(createIcon(item.pinned?'pin-off':'pin'));pin.onclick=()=>{item.pinned=!item.pinned;renderSessionList();persistChatViews();};wrapper.append(button,pin,archive);$(item.archived?'archivedList':'sessionList').append(wrapper);
