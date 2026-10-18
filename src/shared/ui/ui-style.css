@@ -2410,9 +2410,9 @@ wa-option.font-preview-option,wa-option.font-preview-option::part(label){font-fa
 /* Shared horizontal section navigation, with an underline for the active panel. */
 wa-tab-group.app-section-tabs{--indicator-color:var(--ink);--track-color:var(--line);--track-width:1px;display:block;min-width:0}
 wa-tab-group.app-section-tabs::part(nav){border-block:1px solid var(--line);padding-inline:28px}
-wa-tab-group.app-section-tabs::part(tabs){border-bottom:0;gap:20px}
+wa-tab-group.app-section-tabs::part(tabs){border-bottom:0;gap:16px}
 wa-tab-group.app-section-tabs wa-tab[active]{border-block-end:2px solid var(--ink);margin-block-end:-1px}
-wa-tab-group.app-section-tabs wa-tab::part(tab){padding:10px 0;margin:0;font-size:13px;line-height:20px;font-weight:500;color:var(--muted)}
+wa-tab-group.app-section-tabs wa-tab::part(tab){padding:8px 0;margin:0;font-size:12px;line-height:18px;font-weight:500;color:var(--muted)}
 wa-tab-group.app-section-tabs wa-tab[active]::part(tab){color:var(--ink)}
 wa-tab-group.app-section-tabs wa-tab-panel{--padding:28px}
 /* Environment identity stays above the tabs; long detail blocks live in their own panels. */
