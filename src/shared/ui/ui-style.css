@@ -2364,15 +2364,15 @@ app-button[data-icon-action]:not([disabled]):not([loading]):is(:hover,:active){c
 #proxyManualPanel>.field-row{margin:0 0 12px}
 #proxyFileChoose{--file-picker-min-height:96px;--file-picker-padding:16px}
 /* Device preferences reuse the shared settings rows and spacing tokens. */
-.settings-body :is([data-panel="preferences"],[data-panel="shortcuts"],[data-panel="console"]) section{margin-top:28px}
-.settings-body :is([data-panel="preferences"],[data-panel="shortcuts"],[data-panel="console"]) section>.preference-heading{margin-top:0}
-.settings-body :is([data-panel="shortcuts"],[data-panel="console"]) section:first-child{margin-top:0}
-.settings-body :is([data-panel="preferences"],[data-panel="shortcuts"],[data-panel="console"]) :is(wa-select,.shortcut-controls){width:var(--settings-value-width);max-width:100%;flex-shrink:0}
+.settings-body :is([data-panel="preferences"],[data-panel="shortcuts"],[data-panel="console"],[data-panel="containers"]) section{margin-top:28px}
+.settings-body :is([data-panel="preferences"],[data-panel="shortcuts"],[data-panel="console"],[data-panel="containers"]) section>.preference-heading{margin-top:0}
+.settings-body :is([data-panel="shortcuts"],[data-panel="console"],[data-panel="containers"]) section:first-child{margin-top:0}
+.settings-body :is([data-panel="preferences"],[data-panel="shortcuts"],[data-panel="console"],[data-panel="containers"]) :is(wa-select,.shortcut-controls){width:var(--settings-value-width);max-width:100%;flex-shrink:0}
 .preference-reading-preview,.preference-time-preview{padding:var(--settings-row-padding-block) var(--settings-row-padding-inline);overflow-wrap:anywhere}
 .preference-reading-preview p{font-size:var(--chat-font-size,14px);line-height:1.7;margin:0 0 8px}
 .preference-reading-preview code{font-size:var(--code-font-size,13px);line-height:1.7;white-space:pre-wrap}
 .preference-time-preview{color:var(--muted);font-size:var(--settings-row-title-size)}
-@container(max-width:480px){.settings-body :is([data-panel="preferences"],[data-panel="shortcuts"],[data-panel="console"]) .notification-setting-row{flex-wrap:wrap}.settings-body :is([data-panel="preferences"],[data-panel="shortcuts"],[data-panel="console"]) .notification-setting-copy{flex-basis:100%}}
+@container(max-width:480px){.settings-body :is([data-panel="preferences"],[data-panel="shortcuts"],[data-panel="console"],[data-panel="containers"]) .notification-setting-row{flex-wrap:wrap}.settings-body :is([data-panel="preferences"],[data-panel="shortcuts"],[data-panel="console"],[data-panel="containers"]) .notification-setting-copy{flex-basis:100%}}
 
 /* Reading size affects content, never global controls or settings labels. */
 .bubble:not(.error),#messages article>div,.bubble .markdown-body{font-size:var(--chat-font-size,14px);line-height:1.7}
