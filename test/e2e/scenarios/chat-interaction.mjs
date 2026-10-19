@@ -19,6 +19,15 @@ export async function verifyChatInteraction(context){
  const readiness=()=>evaluate(()=>({chatVisible:!document.getElementById('page-cc').classList.contains('hidden'),models:document.querySelectorAll('#sessionModel wa-option').length,efforts:document.querySelectorAll('#sessionEffort wa-option').length,modelDisabled:document.getElementById('sessionModel').disabled,addMounted:!!document.getElementById('deepseekAddImages'),addHidden:document.getElementById('deepseekAddImages')?.hidden,addDisabled:document.getElementById('deepseekAddImages')?.disabled,galleryMounted:!!document.querySelector('#deepseekImagePreview .image-gallery-stage'),currentSession:document.querySelector('#sessionList [data-session-id].active')?.dataset.sessionId||null}));
  // Closing a blank tab removes its DOM before asynchronous session activation ends.
  await until(async()=>{const state=await readiness();return state.chatVisible&&state.models>0&&state.efforts>0&&!state.modelDisabled&&state.addMounted&&!state.addHidden&&!state.addDisabled&&state.galleryMounted;}).catch(async error=>{throw new Error('Real composer did not become ready after guest session activation: '+JSON.stringify(await readiness())+'; '+error.message);});
+ const sendStyle=await evaluate(async()=>{
+  const button=document.getElementById('send');await button.updateComplete;
+  const base=button.shadowRoot.querySelector('[part~=base]'),style=getComputedStyle(base);
+  return {transparent:button.hasAttribute('data-icon-action'),background:style.backgroundColor,color:style.color,radius:style.borderRadius};
+ });
+ assert.equal(sendStyle.transparent,false,'primary send action retains its filled appearance');
+ assert.notEqual(sendStyle.background,'rgba(0, 0, 0, 0)');
+ assert.notEqual(sendStyle.background,sendStyle.color,'send arrow contrasts with its filled background');
+ assert.equal(sendStyle.radius,'50%');
  const widths=[];let primaryError;
  try{
 async function checkZoomMenu(selector,name){
