@@ -1219,7 +1219,7 @@ let runtimeRefreshPending=false,runtimePageScope=null,runtimePageUpdatedAt=0;
 async function refreshEnvironmentConfiguration(detect=false,refreshEngine=null,{navigation=false}={}){
  const scope=JSON.stringify([accountState.user?.id || null,dockerEnvironmentState.activeId]);
  const cached=runtimePageScope===scope;
- if(!cached){$('configuredRuntimeList').replaceChildren();closeRuntimeDetails();}
+ if(!cached){$('configuredRuntimeList').replaceChildren();$('configuredRuntimeList').classList.add('hidden');closeRuntimeDetails();}
  if(navigation && cached && Date.now()-runtimePageUpdatedAt<60000)return;
  if(detect || refreshEngine)environmentPageDirty=true;
  if(environmentConfigBusy){runtimeRefreshPending=true;return;}const owner=accountState.user?.id,id=dockerEnvironmentState.activeId;environmentConfigBusy=true;
@@ -1228,6 +1228,7 @@ async function refreshEnvironmentConfiguration(detect=false,refreshEngine=null,{
  try{
  const registry=await refreshRuntimeRegistry(detect,refreshEngine);if(owner!==accountState.user?.id || id!==dockerEnvironmentState.activeId)return;
  renderRuntimeTable($('configuredRuntimeList'),registry.runtimes,{actions:Boolean(id)});
+ $('configuredRuntimeList').classList.toggle('hidden',!registry.runtimes.length);
  runtimePageScope=scope;runtimePageUpdatedAt=Date.now();
  $('configuredRuntimeStatus').textContent=registry.runtimes.length?'':registry.checkedAt?'暂无运行时':'尚未检测运行时';
  $('runtimeEmptyState').classList.toggle('hidden',Boolean(registry.runtimes.length));
