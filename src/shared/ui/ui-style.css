@@ -328,7 +328,6 @@ body.dark #accountLogout:hover,body.dark #accountLogout:focus-visible{background
 .browser-tab .tab-close::part(base){width:20px;min-height:20px;height:20px;padding:0;background:transparent;border-radius:3px;}
 .browser-toolbar{padding:7px 12px;gap:8px;background:var(--canvas);}
 .browser-toolbar wa-input::part(base){min-height:32px;border-radius:7px;background:var(--surface);}
-#navigate::part(base){min-height:32px;border-radius:6px;}
 
 
 /* Provider marks retain their brand colors, independent of navigation states. */
@@ -565,7 +564,6 @@ app-button.tab-close{--icon-hit-size:24px;padding:0;align-self:center}
 #newTab{padding:0;align-self:center}
 .browser-toolbar{min-height:48px;padding:8px 12px;align-items:center}
 #navigate{padding:0;align-self:center;flex:0 0 auto}
-#navigate::part(base){height:32px;min-height:32px;padding:0 14px;font-size:13px;line-height:18px}
 
 .proxy-service-latencies{display:flex;gap:10px;justify-content:space-between;margin:8px 0 0;font-size:10px;line-height:18px;color:var(--muted);font-variant-numeric:tabular-nums;flex-wrap:nowrap}
 .proxy-service-latencies>span{white-space:nowrap}
