@@ -63,11 +63,17 @@ export async function verifyWorkspace(ctx,verifyBrowser,verifyUI,verifyComponent
  await setting('notifications');
  assert.equal(await e("document.querySelector('[data-notification=chat]').checked"),false,'notification preference survives document reload');
  await e("document.querySelector('[data-notification=chat]').shadowRoot.querySelector('input').click()");
- // Environment gate must protect IPC, not only disabled UI controls.
- assert.equal((await e("workspace.environmentCheck({timeZone:'Asia/Shanghai',languages:['en-US']})")).allowed,false);
- assert.ok(await e("document.getElementById('environmentGate').open"));
- assert.ok(await e("workspace.connect({protocol:'http',host:'127.0.0.1',port:1234},false).then(()=>false,()=>true)"));
- assert.equal((await e("workspace.environmentCheck({timeZone:'America/New_York',languages:['en-US']})")).allowed,true);
+ // System checks are advisory: warnings do not open a blocking dialog or gate IPC.
+ assert.equal((await e("workspace.environmentCheck({timeZone:'Asia/Shanghai',languages:['en-US']})")).passed,false);
+ assert.equal(await e("document.getElementById('environmentGate').open"),false);
+ assert.equal(await e("workspace.browser('open').then(()=>true)"),true);
+ await setting('environment');await click('#environmentInspect');
+ await until(()=>e("document.getElementById('environmentGate').open && !document.getElementById('environmentRetry').loading"));
+ assert.equal(await e("document.getElementById('environmentClose').disabled"),false);
+ await click('#environmentClose');await until(()=>e("!document.getElementById('environmentGate').open"));
+ assert.equal((await e("workspace.environmentCheck({timeZone:'Asia/Shanghai',languages:['zh-CN']})")).passed,false);
+ assert.equal(await e("document.getElementById('environmentGate').open"),false,'repeated warnings must not reopen the dismissed reminder');
+ assert.equal((await e("workspace.environmentCheck({timeZone:'America/New_York',languages:['en-US']})")).passed,true);
  await until(()=>e("!document.getElementById('environmentGate').open"));
  // The current import flow lives inside the proxy dialog, with parse/select/connect steps.
  await setting('proxy');await click('#openProxyDialog');await until(()=>e("document.getElementById('proxyDialog').open"));

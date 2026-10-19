@@ -103,36 +103,31 @@ const uiLocale=()=>$('languageSelect').value || 'zh-CN';
 const displayDate=(value,kind='datetime')=>formatDisplayDate(value,uiLocale(),kind);
 function displayEnvironmentDate(value,recent=false){return displayDate(value);}
 let displayedEnvironmentStatus=null;
-let environmentAllowed = false, environmentDetailsOpen = false, environmentChecking = false;
+let environmentDetailsOpen = false, environmentChecking = false;
 $('environmentGate').open=false;
-$('environmentGate').addEventListener('wa-hide',event=>{
-  if(!document.body.matches('.auth-mode,.auth-pending') && (!environmentAllowed || environmentChecking)) event.preventDefault();
-  else {environmentDetailsOpen=false;queueMicrotask(bounds);}
-});
+$('environmentGate').addEventListener('wa-hide',()=>{environmentDetailsOpen=false;queueMicrotask(bounds);});
 $('environmentGate').addEventListener('wa-after-hide',bounds);
 function closeEnvironmentDetails() {
-  if(!environmentAllowed || environmentChecking) return;
   environmentDetailsOpen=false; $('environmentGate').open=false; bounds();
 }
 $('environmentClose').onclick=closeEnvironmentDetails;
 function setEnvironment(status) {
   displayedEnvironmentStatus=status;
-  environmentAllowed = Boolean(status.allowed);
   
   
-  $('environmentSummary').textContent = status.allowed ? '检测通过，可以连接代理。' : '检测未通过，浏览器与本机 AI 访问已禁止。';
+  $('environmentSummary').textContent = status.passed ? '系统环境检测通过。检测结果仅供参考，不限制功能使用。' : '系统环境存在提醒，请查看以下信息。检测结果不限制功能使用。';
   $('environmentZone').textContent = status.timeZone || '未知';
   $('environmentLanguages').textContent = status.languages?.join(', ') || '未知';
   $('environmentCountries').textContent = status.countries?.map(code=>new Intl.DisplayNames(['zh-CN'],{type:'region'}).of(code)+' ('+code+')').join(', ') || '未知';
   $('environmentCheckedAt').textContent = status.checkedAt ? displayDate(status.checkedAt) : '尚未完成';
-  $('environmentClose').disabled = !status.allowed || environmentChecking;
+  $('environmentClose').disabled = false;
   $('environmentPolicyDate').textContent = status.policyDate ? displayDate(status.policyDate,'date') : '未知';
   $('environmentReasons').textContent = status.reasons?.join('；') || '';
   document.querySelectorAll('[data-environment]').forEach(field => {
     field.textContent = $(field.dataset.environment).textContent;
   });
   updateProxyActions();
-  if(document.body.matches('.auth-mode,.auth-pending') || (status.allowed && !environmentDetailsOpen && !environmentChecking)) $('environmentGate').open=false;
+  if(document.body.matches('.auth-mode,.auth-pending') || !environmentDetailsOpen) $('environmentGate').open=false;
   else if(!$('environmentGate').open) $('environmentGate').open=true;
   bounds();
 }
@@ -141,21 +136,21 @@ async function recheckEnvironment({showDetails=false} = {}) {
   environmentChecking=true;
   
   if(showDetails) { environmentDetailsOpen=true; if(!$('environmentGate').open) $('environmentGate').open=true; }
-  $('environmentRetry').disabled=true;$('environmentRetryLabel').textContent='正在检测…';
-  $('environmentClose').disabled=true;
+  $('environmentRetry').loading=true;$('environmentRetry').disabled=true;$('environmentRetryLabel').textContent='正在检测…';
+  $('environmentClose').disabled=false;
   $('environmentSummary').textContent='正在重新读取系统语言与时区…';
   bounds();
   let result;
   try { result=await api.environmentCheck(); }
-  catch(error) { result={allowed:false,reasons:['读取失败：'+error.message]}; }
+  catch(error) { result={passed:false,reasons:['读取失败：'+error.message]}; }
   finally {
     environmentChecking=false;
-    $('environmentRetry').disabled=false; $('environmentRetryLabel').textContent='重新检测';
+    $('environmentRetry').loading=false;$('environmentRetry').disabled=false; $('environmentRetryLabel').textContent='重新检测';
     
   }
   setEnvironment(result);
 }
-$('environmentRetry').onclick = () => void recheckEnvironment({showDetails:true});
+$('environmentRetry').onclick = $('environmentInspect').onclick = () => void recheckEnvironment({showDetails:true});
 
 $('browserTabs').addEventListener('wa-tab-show',event=>{if(event.detail.name && event.detail.name!==browserTabsState.activeId)void action(()=>api.browser('select',event.detail.name));});
 let suggestionsOpen = false, suggestionIndex = 0, suggestionItems = [], addressEditing = false;
@@ -211,7 +206,7 @@ async function bounds() {
     return box.width>0 && box.height>0 && box.left<rect.right && box.right>rect.left && box.top<rect.bottom && box.bottom>top;
   });
   const preview=$('browserMenuPreview');
-  if(menuOpen&&!dialogOpen&&page==='browser'&&environmentAllowed){
+  if(menuOpen&&!dialogOpen&&page==='browser'){
     if(browserPreviewTab!==browserTabsState.activeId||preview.hidden){
       browserPreviewRequest ||= api.browser('menuPreview').catch(()=>null).finally(()=>{browserPreviewRequest=null;});
       const frame=await browserPreviewRequest;if(revision!==browserBoundsRevision)return;
@@ -219,7 +214,7 @@ async function bounds() {
     }
   }else{preview.hidden=true;preview.removeAttribute('src');browserPreviewTab=null;}
   const overlayBlocksBrowser=dialogOpen||menuOpen;
-  void api.bounds({ x: rect.x, y: top, width: rect.width, height: Math.max(1, rect.bottom - top), visible: environmentAllowed && !overlayBlocksBrowser && page === 'browser' && (browserTabsState.mode!=='proxy' || network.state === 'ready') }).catch(() => {});
+  void api.bounds({ x: rect.x, y: top, width: rect.width, height: Math.max(1, rect.bottom - top), visible: !overlayBlocksBrowser && page === 'browser' && (browserTabsState.mode!=='proxy' || network.state === 'ready') }).catch(() => {});
 }
 let browserCookieRows=[],browserCookieRequest=0;
 function clearBrowserCookies(){browserSettingsUI.invalidate();cookiePreferenceRequest++;browserCookieRequest++;browserCookieRows=[];$('browserCookieList').replaceChildren();$('browserCookiesDialog').open=false;}
@@ -601,10 +596,10 @@ function updateProxyActions(){
  const label=connected?'断开代理':'连接代理';button.setAttribute('aria-label',label);button.title=label;
  button.querySelector('wa-icon').src=`assets/icons/${connected?'unplug':'plug'}.svg`;
  button.disabled=!savedConfigured || proxyActionBusy || network.state==='checking';
- $('verify').disabled=!savedConfigured || !environmentAllowed || proxyActionBusy || network.state==='checking';
+ $('verify').disabled=!savedConfigured || proxyActionBusy || network.state==='checking';
  const needsParse=$('proxyDialog').open && proxyMethod!=='manual' && !importPrepared;
  const importReady=Boolean(importPreview?.entries?.length) || (proxyMethod==='paste' && Boolean($('importText').value.trim())) || (proxyMethod==='file' && Boolean(proxyFileSelection));
- $('connect').disabled=(needsParse?!importReady:!configured) || !environmentAllowed || proxyActionBusy || network.state==='checking';
+ $('connect').disabled=(needsParse?!importReady:!configured) || proxyActionBusy || network.state==='checking';
  $('connect').classList.remove('hidden');
  $('connectLabel').textContent=proxyActionBusy || network.state==='checking'?'处理中…':needsParse?(importPreview?.entries?.length?'使用所选代理':proxyMethod==='file'?'导入并解析':'解析内容'):editingProxy?'保存并连接':'连接并核验出口';
 
@@ -647,7 +642,7 @@ function setNetwork(status) {
   $('chatProxyTooltip').disabled=chatNetworkReady();if(chatNetworkReady())$('chatProxyTooltip').open=false;
   $('send').disabled = (!busy && (draftPersistence.loading || !activeChatId));
   $('navigate').disabled = browserTabsState.mode==='proxy' && status.state !== 'ready';
-  $('verify').disabled = !currentProxyConfig?.host || proxyActionBusy || status.state==='checking' || !environmentAllowed;
+  $('verify').disabled = !currentProxyConfig?.host || proxyActionBusy || status.state==='checking';
   $('ccState').textContent = !chatNeedsProxy() && !busy?(chatSessions.find(item=>item.id===activeChatId)?.networkMode==='auto'?'自动 · '+(network.state==='ready'?'代理优先':'当前直连'):'当前对话使用直连'):busy ? `${RUNTIME_CATALOG[selectedEngine]?.name || selectedEngine} 正在处理…` : status.state === 'ready' ? (selectedEngine==='codex'?'Codex · 请求通过应用代理':'模型请求通过应用代理') : '等待连接代理';
   if(status.state==='ready' && page==='browser')void action(()=>api.browser('open'));
   bounds();
@@ -1400,7 +1395,7 @@ $('runtimeInstallConfirm').onclick=()=>void action(async()=>{
  finally{setRuntimeInstallLoading(false);environmentConfigBusy=false;$('runtimeInstallConfirm').loading=false;$('runtimeInstallCancel').disabled=false;$('runtimeDisplayName').disabled=false;$('runtimeDescription').disabled=false;$('runtimeInstallBack').disabled=false;$('runtimeInstallClose').disabled=false;$('deepseekApiKey').disabled=false;updateConfigurationActions();}
  if(owner===accountState.user?.id && id===dockerEnvironmentState.activeId){$('runtimeInstallDialog').open=false;await refreshEnvironmentConfiguration();}
 });
-const settingCopy={containers:['环境与容器','管理本设备的日志保留、自动清理与健康检查。'],console:['控制台','管理终端显示、输入与连接行为。'],git:['Git 管理','管理 Git SSH 公钥与代码仓库认证。'],browser:['浏览器','管理浏览器网络、站点数据和 Cookie 同步。'],profile:['个人资料','管理当前账号的基础信息。'],notifications:['通知','管理当前账号在本设备上的通知。'],shortcuts:['快捷键','配置发送方式和常用操作快捷键，仅保存在本设备。'],preferences:['偏好设置','管理语言、外观、阅读、时间显示和退出行为。'],proxy:['代理与出口','管理应用代理的连接与固定出口。'],environment:['本地系统','检测系统语言与时区，管理本机使用条件。']};
+const settingCopy={containers:['环境与容器','管理本设备的日志保留、自动清理与健康检查。'],console:['控制台','管理终端显示、输入与连接行为。'],git:['Git 管理','管理 Git SSH 公钥与代码仓库认证。'],browser:['浏览器','管理浏览器网络、站点数据和 Cookie 同步。'],profile:['个人资料','管理当前账号的基础信息。'],notifications:['通知','管理当前账号在本设备上的通知。'],shortcuts:['快捷键','配置发送方式和常用操作快捷键，仅保存在本设备。'],preferences:['偏好设置','管理语言、外观、阅读、时间显示和退出行为。'],proxy:['代理与出口','管理应用代理的连接与固定出口。'],environment:['本地系统','查看系统语言、时区与环境提醒，检测结果不限制功能使用。']};
 for(const tab of document.querySelectorAll('[data-setting]'))tab.onclick=()=>{const key=tab.dataset.setting;if(key==='console')void consoleSettings.refresh();if(key==='git')void gitSettings.ensureLoaded();if(key==='browser'){void loadBrowserCookiePreferences();void browserLibrary.refresh();}$('verify').classList.toggle('hidden',key!=='proxy');document.querySelectorAll('[data-setting]').forEach(item=>item.classList.toggle('active',item===tab));document.querySelectorAll('[data-panel]').forEach(panel=>panel.classList.toggle('hidden',panel.dataset.panel!==key));$('settingsTitle').textContent=settingCopy[key][0];$('notificationScopeBadge').classList.toggle('hidden',!['notifications','shortcuts','console','containers'].includes(key));$('notificationScopeBadge').lastChild.textContent=['shortcuts','console','containers'].includes(key)?'仅本设备':'当前账号 · 本设备';$('settingsTitleIcon').src='assets/icons/'+({containers:'boxes',console:'terminal',git:'git-branch',browser:'globe',profile:'user',preferences:'sliders-horizontal',notifications:'bell',shortcuts:'keyboard',proxy:'shield-check',environment:'monitor'})[key]+'.svg';$('settingsDescription').textContent=settingCopy[key][1];};
 let themePreference='light';try{themePreference=localStorage.getItem('ui-theme') || 'light';}catch{}
 if(!['light','dark','system'].includes(themePreference))themePreference='light';

@@ -152,7 +152,7 @@ app.commandLine.appendSwitch('host-resolver-rules', 'MAP * ~NOTFOUND, EXCLUDE lo
 app.commandLine.appendSwitch('dns-prefetch-disable');
 app.commandLine.appendSwitch('lang', 'en-US');
 app.commandLine.appendSwitch('accept-lang', 'en-US,en');
-let environmentStatus = {allowed:false,reasons:['尚未完成系统环境检测'],languages:[],countries:[]}, environmentPromise, environmentTimer;
+let environmentStatus = {passed:false,reasons:['尚未完成系统环境检测'],languages:[],countries:[]}, environmentPromise, environmentTimer;
 let fixtureEnvironment = fixtureMode && process.env.WORKSPACE_TEST_ENV ? JSON.parse(process.env.WORKSPACE_TEST_ENV) : null;
 let window, browser, gateway, healthTimer, project = '', sessionId, claudePath = '', codexPath = '', codexSessionId, selectedEngine = 'cc', codexModel = null, connecting = false;
 const runs=new ChatRuns();
@@ -200,14 +200,9 @@ async function checkEnvironment() {
   environmentPromise = (async () => {
     const result = fixtureEnvironment ? evaluateEnvironment(fixtureEnvironment) : await readSystemEnvironment();
     environmentStatus = result;
-    if (!result.allowed) { directBrowserTransport?.closeConnections();stopBrowserTabs();await stopGateway(); emit('network',{state:'blocked',reason:'系统环境检测未通过，访问已禁止'}); }
     showBrowserViews(); emit('environment',result); return result;
   })().finally(() => { environmentPromise = null; });
   return environmentPromise;
-}
-async function requireEnvironment() {
-  const result = await checkEnvironment();
-  if (!result.allowed) throw new Error('系统环境检测未通过：' + result.reasons.join('；'));
 }
 function guarded(handler) {
   return async (event, ...args) => {
@@ -249,7 +244,7 @@ function showBrowserViews() {
   for (const tab of browserTabs.values()) {
     if (!tab.wc || tab.wc.isDestroyed()) continue;
     tab.view.setBounds(browserBounds);
-    tab.view.setVisible(environmentStatus.allowed && browserVisible && browserNetworkReady() && tab.id === activeTabId && tab.started);
+    tab.view.setVisible(browserVisible && browserNetworkReady() && tab.id === activeTabId && tab.started);
   }
 }
 function publishTabs() { showBrowserViews(); emit('browserTabs', browserState()); }
@@ -301,7 +296,7 @@ function configureBrowserSession(browserSession){
   const ready=browserProxyConfiguration().then(config=>browserSession.setProxy(config));
   browserSession.webRequest.onBeforeRequest((details, callback) => {
     if(details.resourceType==='mainFrame' && browserSession===session.fromPartition(browserPartition()) && handleContainerLoginCallback(details.url)){callback({cancel:true});return;}
-    let blocked = !environmentStatus.allowed || !browserNetworkReady(details.url) || failedBrowserSessions.has(browserSession);
+    let blocked = !browserNetworkReady(details.url) || failedBrowserSessions.has(browserSession);
     if (/^(https?|wss):/.test(details.url)) {
       try { localBrowserUrl(details.url.replace(/^wss:/, 'https:')); } catch { blocked = true; }
     } else if (!/^(about:|data:|blob:)/.test(details.url) && !(details.url.startsWith('chrome-extension:')&&browserSession.extensions.getExtension(new URL(details.url).hostname))) blocked = true;
@@ -336,7 +331,7 @@ function createBrowserTab(url, popupOptions, openerId) {
     wc.stop(); publishTabs();
   }, { initializeBlank: !popupOptions })]).catch(error => { failedBrowserSessions.add(browserSession); tab.privacyError = true; tab.error = '隐私防护初始化失败，访问已禁止'; if (fixtureMode) console.error('PRIVACY_INIT', error.message); publishTabs(); });
   wc.setWindowOpenHandler(details => {
-    if (!environmentStatus.allowed || !browserNetworkReady()) return { action: 'deny' };
+    if (!browserNetworkReady()) return { action: 'deny' };
     try { if (details.url !== 'about:blank'){localBrowserUrl(details.url);if(!browserFeatures?.agentAllowed(wc,details.url))return {action:'deny'};} }
     catch { return { action: 'deny' }; }
     // Chromium owns the popup navigation, POST body and opener relationship.
@@ -503,7 +498,7 @@ function refreshProxyRegion(next=gateway){
 }
 async function connect(config, remember, {environmentSwitch=false}={}) {
   if(accountChanging || (containerOperation && !environmentSwitch) || browserRoutingChanging)throw new Error('网络、账号或环境切换中，请稍后连接');
-  await requireEnvironment();requireActiveEnvironment();
+  requireActiveEnvironment();
   if (connecting) throw new Error('正在连接，请稍候');
   if (pinsLoadError) throw new Error('固定出口记录损坏，已禁止连接；请恢复原记录，不能自动接受新IP');
   await Promise.all([...browserTabs.values()].map(tab => tab.privacyReady));
@@ -532,7 +527,6 @@ async function connect(config, remember, {environmentSwitch=false}={}) {
     for(const current of configuredBrowserSessions.keys()){await current.closeAllConnections();await current.setProxy(configuration);}
     await saveConfig(validated, remember);
     const status = await next.verify(probeUrl);
-    await requireEnvironment();
     if (gateway !== next) throw new Error('连接期间系统环境发生变化');
     next.serviceProbes=!fixtureMode;
     next.startMonitoring(probeUrl);
@@ -617,7 +611,7 @@ ipcMain.handle('workspace:dockerEnvironments',guarded(async(action='state',value
    const data=await dockerEnvs.load(owner);if(!id && data.localEnabled===false)throw new Error('请先创建环境');
    const item=id?(await dockerEnvs.get(owner,id)).item:null;
    const proxy=gateway,testing=value.action==='test';
-   if(testing && !item?.external && (proxy?.status.state!=='ready' || !environmentStatus.allowed))throw new Error('当前环境代理未连接或出口未核验，请先连接');
+   if(testing && !item?.external && (proxy?.status.state!=='ready'))throw new Error('当前环境代理未连接或出口未核验，请先连接');
    const context=id?{route:item.external?'external':'managed',project:project || undefined}:{local:true,project:project || undefined,root:localGitDirectory(owner),route:'local',proxy:testing?proxy?.url:undefined};
    context.defaultIdentity={name:account.user?.name || account.user?.username || '',email:account.user?.email || ''};
    const result=await executeGitOperation({action:value.action || 'read',value:value.data || {},context,
@@ -872,7 +866,7 @@ ipcMain.handle('workspace:connect', guarded(async (config, remember) => {
   return connect(config, remember);
 }));
 ipcMain.handle('workspace:disconnect', guarded(async () => { await stopGateway({preserveDirectChat:true}); emit('network', { state: 'blocked', reason: '已断开，使用代理的浏览器和对话请求已停止' }); return true; }));
-ipcMain.handle('workspace:verify', guarded(async () => { await requireEnvironment(); if (!gateway) throw new Error('请先连接代理'); return gateway.checkNow(); }));
+ipcMain.handle('workspace:verify', guarded(async () => { if (!gateway) throw new Error('请先连接代理'); return gateway.checkNow(); }));
 if (fixtureMode) ipcMain.handle('workspace:browserProbe', guarded(async (url, params, method = 'Runtime.evaluate') => {
   const tab = [...browserTabs.values()].find(tab => tab.wc.getURL() === url);
   if (!tab) throw new Error('Test page missing');
@@ -990,7 +984,6 @@ ipcMain.handle('workspace:browserSettings', guarded(async mode => {
 }));
 ipcMain.handle('workspace:browserLibrary',guarded((action,payload)=>browserFeatures.operate(action,payload)));
 ipcMain.handle('workspace:browser', guarded(async (action, value) => {
-  await requireEnvironment();
   if(action==='menuPreview'){
     const tab=browserTabs.get(activeTabId),owner=dockerOwner(),environment=activeContainerId;
     if(!tab?.started||!tab.wc||tab.wc.isDestroyed()||!browserNetworkReady())return null;
@@ -1088,7 +1081,7 @@ async function runLearningAutomation(item,question,controller){
  if(ownerId!==account?.user?.id || environmentId!==activeContainerId || accountChanging || containerOperation)throw new Error('账号或环境已变化');
  if(requiresProxy && !gateway && !runs.size)await connect(savedConfig,false);
  const proxy=requiresProxy?gateway:{status:{state:'ready',mode:'direct'}};
- const valid=()=>account?.user?.id===ownerId && activeContainerId===environmentId && !accountChanging && !containerOperation && environmentStatus.allowed && (!requiresProxy || gateway===proxy && proxy?.status.state==='ready') && !controller.signal.aborted;
+ const valid=()=>account?.user?.id===ownerId && activeContainerId===environmentId && !accountChanging && !containerOperation && (!requiresProxy || gateway===proxy && proxy?.status.state==='ready') && !controller.signal.aborted;
  if(!valid())throw new Error('当前环境的代理未连接或出口未核验；本次未发送，问题进度保留。');
  const abortIfInvalid=setInterval(()=>{if(!valid())controller.abort();},500);
  const timeout=setTimeout(()=>controller.abort(),180000);
@@ -1164,7 +1157,7 @@ ipcMain.handle('workspace:newSession',guarded(async(options)=>{
  if(accountChanging || containerOperation || chatNetworkChanging)throw new Error('正在处理环境或连接方式切换，请稍候');
  requireActiveEnvironment();const choice=validateSessionOptions(options);
  if(accountChanging || runtimeOwner!==(account?.user?.id || null) || !registeredRuntimes?.runtimes.some(item=>item.id===choice.engine))throw new Error('请先前往运行时手动检测本机运行时');
- if(activeContainerId && !(await dockerEnvs.state(dockerOwner())).environments.find(item=>item.id===activeContainerId)?.running)throw new Error('请先启动当前容器环境');await requireEnvironment();if(accountChanging || generation!==chatGeneration)throw new Error('对话账号或环境已变化');storeCurrentSession();
+ if(activeContainerId && !(await dockerEnvs.state(dockerOwner())).environments.find(item=>item.id===activeContainerId)?.running)throw new Error('请先启动当前容器环境');if(accountChanging || generation!==chatGeneration)throw new Error('对话账号或环境已变化');storeCurrentSession();
  const item={id:randomUUID(),environmentId:activeContainerId,engine:choice.engine,model:choice.model,networkMode:choice.networkMode,project:'',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),sessionId:undefined,codexSessionId:undefined};aiSessions.set(item.id,item);if(['deepseek','codex'].includes(item.engine))await repairSessionModel(item);activateAISession(item,{viewed:true});
  const executable=item.engine==='cc'?await findClaude():await findExecutable('codex');
  return {...item,...(item.engine==='codex'?{models:await currentCodexModels().catch(()=>[])}:{}),auth:activeContainerId?await containerAuth(item.engine):await detectAIAuth({engine:item.engine,executable,gateway})};
@@ -1220,7 +1213,7 @@ ipcMain.handle('workspace:chatCompact',guarded(async value=>{
  const proxy=controller.networkMode==='proxy',networkOwner=gateway;let timeout;
  const valid=()=>!controller.signal.aborted&&generation===chatGeneration&&owner===dockerOwner()&&environment===activeContainerId&&(!proxy||gateway===networkOwner&&gateway?.status.state==='ready');
  try{
-  await requireEnvironment();requireActiveEnvironment();if(!valid())throw new Error('环境或代理不可用');
+  requireActiveEnvironment();if(!valid())throw new Error('环境或代理不可用');
   if(value.action==='restore'&&item.engine!=='deepseek')throw new Error('运行时未提供恢复接口');
   if(value.action==='compact'){const auth=environment?await containerAuth(item.engine):await detectAIAuth({engine:item.engine,executable:await findExecutable('codex'),gateway});if(auth.state!=='signed-in')throw new Error('当前环境运行时未登录');}
   if(item.engine==='deepseek'){if(!environment)throw new Error('DeepSeek 需要当前容器环境');await dockerEnvs.syncDeepSeekSource(owner,environment);}
@@ -1290,7 +1283,7 @@ ipcMain.handle('workspace:cc', guarded(async (prompt,rewind,chatId=activeAISessi
   try {
   if(['deepseek','codex'].includes(engine)){if(prompt && typeof prompt==='object')prompt={...prompt,text:documentPrompt(prompt.text,normalizeDocuments(prompt.documents||[]))};prompt=engine==='codex'?normalizeCodexInput(prompt):normalizeDeepSeekInput(prompt);for(const image of prompt.images){if(!image.dataURL)continue;const decoded=nativeImage.createFromDataURL(image.dataURL),size=decoded.getSize();const limit=prompt.images.length>=15?4096:8192;if(decoded.isEmpty() || size.width>limit || size.height>limit)throw new Error('图片无效或尺寸超过 '+limit+' 像素');}}
   if(accountChanging || containerOperation || chatNetworkChanging)throw new Error('正在处理环境或连接方式切换，请稍候');
-  await requireEnvironment();requireActiveEnvironment();
+  requireActiveEnvironment();
   if(!chatId || runtimeOwner!==(account?.user?.id || null) || !registeredRuntimes?.runtimes.some(item=>item.id===engine))throw new Error('请先手动检测运行时并新建对话');
   await repairSessionModel(preparedChat);
   if(accountChanging || !valid())throw new Error('对话账号或环境已变化，请重新发送');
@@ -1323,7 +1316,7 @@ ipcMain.handle('workspace:cc', guarded(async (prompt,rewind,chatId=activeAISessi
   controller.networkMode=requiresProxy?'proxy':'direct';
   const nativeSessionId=preparedChat.sessionId,nativeCodexId=preparedChat.codexSessionId;
   const owner = requiresProxy?gateway:{status:{state:'ready',mode:'direct'}};
-  const canContinue=()=>valid() && environmentStatus.allowed && !controller.signal.aborted && (!requiresProxy || gateway===owner && owner.status.state==='ready');
+  const canContinue=()=>valid() && !controller.signal.aborted && (!requiresProxy || gateway===owner && owner.status.state==='ready');
   const directSpawn=requiresProxy?null:createDirectChatSpawner(canContinue);
   const baseLaunch=containerSpawn || directSpawn || createRestrictedCCSpawner({port:owner.port,canStart:canContinue});
   const launch=observeRuntimeLaunch(options=>{if(!canContinue())throw new Error('对话网络不可用');return baseLaunch(activeContainerId?options:{...options,env:localGitEnvironment(options.env || process.env,requestOwner,requiresProxy?owner.url:'')});},{journal:environmentEvents,owner:requestOwner,id:environmentId,engine,signal:controller.signal});
@@ -1356,7 +1349,7 @@ ipcMain.handle('workspace:cc', guarded(async (prompt,rewind,chatId=activeAISessi
         mcpServers:{kuneco:createSdkMcpServer({name:'kuneco',version:'1.0.0',tools:[tool('KunecoBrowser',browserTool.definition.description,{action:z.string(),tabId:z.string().optional(),url:z.string().optional(),selector:z.string().optional(),text:z.string().optional(),amount:z.number().optional(),name:z.string().optional(),input:z.record(z.string(),z.unknown()).optional()},async args=>{try{return {content:[{type:'text',text:JSON.stringify(await browserTool.execute(args))}]};}catch(error){return {isError:true,content:[{type:'text',text:error.message}]};}})]})},
         cwd: workingDirectory, pathToClaudeCodeExecutable: activeContainerId?'claude':claudePath, model:model || undefined,
         env: chatRuntimeEnvironment(requiresProxy?proxyEnvironment(process.env, owner.url):directChatEnvironment(process.env)), settingSources: ['user','project','local'],
-        spawnClaudeCodeProcess: launch || createRestrictedCCSpawner({port:owner.port,canStart:()=>environmentStatus.allowed && gateway === owner && owner.status.state === 'ready' && !controller.signal.aborted}),
+        spawnClaudeCodeProcess: launch || createRestrictedCCSpawner({port:owner.port,canStart:()=>gateway === owner && owner.status.state === 'ready' && !controller.signal.aborted}),
         permissionMode: 'default',canUseTool:(toolName,input,options)=>toolApprovals.request({toolName,input,...options,signal:controller.signal,scope:{owner:requestOwner,environmentId},emit:emitChat}), abortController: controller, includePartialMessages: true,hooks:fileHooks,
         resume: nativeSessionId,
       } });
@@ -1426,7 +1419,7 @@ app.whenReady().then(async () => {
   setInterval(()=>{if(!accountChanging && chatDirty && chatReady && account?.user?.id===chatOwner)void persistAISessions().catch(()=>{});},15000).unref();
   containerOperation=!fixtureMode && Boolean(account.user);
   await createWindow();
-  await checkEnvironment();
+  void checkEnvironment().catch(() => {});
   environmentTimer = setInterval(() => { void checkEnvironment().catch(() => {}); }, 30000);
   learningAutomations=new LearningAutomations({file:path.join(app.getPath('userData'),'learning-automations.json'),context:()=>({owner:account?.user?.id || null,environmentId:activeContainerId}),execute:runLearningAutomation,notify:()=>emit('learningAutomationsChanged',{})});
   await learningAutomations.load();

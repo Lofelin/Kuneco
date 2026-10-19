@@ -5,7 +5,7 @@ const exec = promisify(execFile);
 export const policy = JSON.parse(await readFile(new URL('../../data/environment-policy.json',import.meta.url),'utf8'));
 export function evaluateEnvironment({timeZone,languages,effectiveTimeZone = timeZone,error} = {}) {
   const reasons = [];
-  if(error) reasons.push('系统环境读取失败，禁止使用');
+  if(error) reasons.push('系统环境读取失败，请稍后重新检测');
   if(!Array.isArray(languages) || !languages.length || typeof languages[0] !== 'string' || !/^[a-z]{2,3}(?:-[a-z0-9]+)*$/i.test(languages[0])) reasons.push('无法确定系统语言');
   else if(/^zh(?:-|$)/i.test(languages[0])) reasons.push('系统首选语言为中文');
   let zone = timeZone; const visited = new Set();
@@ -14,7 +14,7 @@ export function evaluateEnvironment({timeZone,languages,effectiveTimeZone = time
   if(!countries.length) reasons.push('时区无法映射到国家或地区（包括 UTC 等通用时区）');
   else if(policy.deniedZones.includes(zone) || countries.some(country=>!policy.supported.includes(policy.parents[country] || country))) reasons.push('时区所属地区不在本地保存的官方支持地区名单中');
   if(effectiveTimeZone !== timeZone) reasons.push('进程 TZ 覆盖与系统时区不一致');
-  return {allowed:reasons.length===0,timeZone:timeZone || '未知',effectiveTimeZone:effectiveTimeZone || '未知',languages:languages || [],countries,reasons,checkedAt:new Date().toISOString(),policyDate:policy.reviewedAt};
+  return {passed:reasons.length===0,timeZone:timeZone || '未知',effectiveTimeZone:effectiveTimeZone || '未知',languages:languages || [],countries,reasons,checkedAt:new Date().toISOString(),policyDate:policy.reviewedAt};
 }
 export async function readSystemEnvironment({executable=process.execPath,platform=process.platform,env=process.env} = {}) {
   try {
