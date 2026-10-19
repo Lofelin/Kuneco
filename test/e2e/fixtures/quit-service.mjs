@@ -11,8 +11,11 @@ export function createQuitFixture({evaluate:e,until,client,modelControl,child,di
    await e("workspace.newSession({engine:'codex',model:'desktop-fixture-model',networkMode:'direct'})");
    const origin=await e('performance.timeOrigin');await client.call('Page.reload');
    await until(()=>e(`performance.timeOrigin!==${origin}&&performance.getEntriesByName('chat-records-ready').length>0`));
-   await e("document.querySelector('[data-page=cc]').click();document.getElementById('prompt').value='KUNECO_QUIT_HOLD';document.getElementById('prompt').dispatchEvent(new Event('input',{bubbles:true}))");
-   await until(()=>e("!document.getElementById('send').disabled"));
+   await e("document.querySelector('[data-page=cc]').click()");
+   // Record restoration precedes draft hydration and the asynchronous auth probe.
+   // A merely enabled button can still save to the outbox instead of sending.
+   await until(()=>e("!document.getElementById('prompt').disabled && !document.getElementById('send').disabled && document.getElementById('send').getAttribute('aria-label')==='发送消息'"));
+   await e("document.getElementById('prompt').value='KUNECO_QUIT_HOLD';document.getElementById('prompt').dispatchEvent(new Event('input',{bubbles:true}))");
    await e("document.getElementById('send').shadowRoot.querySelector('button').click()");
    await until(()=>e("workspace.state().then(state=>workspace.chatInsights({owner:state.chatOwner,environmentId:state.containerId,chatId:state.activeAISessionId})).then(view=>view.running)"));
    const next=new Date(Math.floor(Date.now()/60000)*60000+60000),time=next.toISOString().slice(11,16);

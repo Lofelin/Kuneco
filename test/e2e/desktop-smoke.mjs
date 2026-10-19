@@ -48,7 +48,7 @@ const accountFixture=http.createServer(async(req,res)=>{
  else if(browserFixture && await browserFixture.route(req,res,token,body)){}
  else{res.writeHead(404);res.end(JSON.stringify({error:'Unsupported fixture route: '+req.url}));}
 });
-const sockets = new Set(); let child;let consoleFixture; let browserRequests = 0; let exitRequests = 0; let client; let popupPost = null; let fixtureExitIp = '203.0.113.23'; let acceptLanguages = [];
+const sockets = new Set(); let child;let consoleFixture; let stderr='';let browserRequests = 0; let exitRequests = 0; let client; let popupPost = null; let fixtureExitIp = '203.0.113.23'; let acceptLanguages = [];
 const stun = dgram.createSocket('udp4'); let stunPackets = 0; stun.on('message',()=>stunPackets++);
 const temp = await realpath(await mkdtemp(path.join(tmpdir(), 'kuneco-desktop-')));
 const realmProbe = () => {
@@ -125,7 +125,6 @@ if(process.argv[2]==='app-server'){let cwd;require('readline').createInterface({
 else {process.stdin.resume();process.stdin.on('end',()=>{let control={};try{control=JSON.parse(require('fs').readFileSync(process.env.WORKSPACE_TEST_MODEL_CONTROL,'utf8'));}catch{}if(control.holdAll){console.log(JSON.stringify({type:'thread.started',thread_id:'quit-automation-fixture'}));setInterval(()=>{},1000);return;}console.log(JSON.stringify({type:'item.completed',item:{type:'agent_message',text:'fixture response'}}));console.log(JSON.stringify({type:'turn.completed',usage:{input_tokens:1,output_tokens:1}}));});}
 `;
  await writeFile(path.join(bin,'codex'),mock,{mode:0o700});
- let stderr='';
  child=spawn(process.execPath,['src/app/start.mjs',`--remote-debugging-port=${debugPort}`,'--test-fixture','--enable-automation','--site-per-process','--unsafely-treat-insecure-origin-as-secure=http://fixture.invalid,http://frame.invalid'],{cwd:root,env:{...process.env,WORKSPACE_TEST_MODEL_CONTROL:modelControl,WORKSPACE_TEST_AUTH_ONLY:'',PATH:bin+path.delimiter+process.env.PATH,WORKSPACE_ACCOUNT_SERVER_URL:`http://127.0.0.1:${accountFixture.address().port}`,WORKSPACE_TEST_PROBE_URL:'http://fixture.invalid/exit',WORKSPACE_TEST_HOME_URL:'http://fixture.invalid/home',WORKSPACE_TEST_ENV:JSON.stringify({timeZone:'America/New_York',languages:['en-US']}),WORKSPACE_TEST_DATA_DIR:temp},stdio:['ignore','pipe','pipe']});
  child.stdout.on('data',chunk=>process.stdout.write(chunk));
  child.stderr.on('data',chunk=>stderr+=chunk);
@@ -156,6 +155,7 @@ else {process.stdin.resume();process.stdin.on('end',()=>{let control={};try{cont
  await writeFile(path.join(root,'artifacts/legacy-migration.json'),JSON.stringify({passed:true,at:new Date().toISOString(),chat:chatRegressionMapping,controls:controlsRegressionCoverage,quitEvidence,dialogs:'dialog-regression.mjs all real mounted dialogs',browser:'browser-regression.mjs BL-01..10, BS-01..06, BL-03-container-ui + IPC'},null,2));
  console.log('PASS 完整桌面验收：组件与布局、运行时与会话、通知持久化、代理导入与固定出口、浏览器隔离/导航/弹窗/断网、账号隔离。仅本地夹具，未调用真实账号或模型。');
 } catch(error){
+ console.error('Desktop application diagnostics:\n'+stderr);
  if(client){try{const screenshot=await client.call('Page.captureScreenshot');await mkdir(path.join(root,'artifacts'),{recursive:true});await writeFile(path.join(root,'artifacts/desktop-failure.png'),Buffer.from(screenshot.data,'base64'));}catch{}}
  throw error;
 } finally {

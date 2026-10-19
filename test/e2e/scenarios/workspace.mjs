@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {mkdir,writeFile,readFile} from 'node:fs/promises';
 import path from 'node:path';
+import {runDesktopOperation} from '../helpers/desktop-operation.mjs';
 
 export async function verifyWorkspace(ctx,verifyBrowser,verifyUI,verifyComponents){
  const {evaluate:e,until,client,temp,proxyPort,getBrowserRequests,getExitRequests,setExitIP,accountProfiles,captureUI}=ctx;
@@ -103,7 +104,7 @@ export async function verifyWorkspace(ctx,verifyBrowser,verifyUI,verifyComponent
  setExitIP('203.0.113.99');const config={protocol:'http',host:'127.0.0.1',port:proxyPort,username:'demo',password:'secret'};
  const changed=await e(`workspace.connect(${JSON.stringify(config)},false)`);assert.equal(changed.state,'blocked','changed egress must be rejected');setExitIP('203.0.113.23');
  // Two fixture accounts exercise isolation without real credentials, Docker or providers.
- const login=async username=>{await e(`workspace.accountLogin(${JSON.stringify({username,password:'fixture-password',confirmPassword:'fixture-password'})})`);await until(()=>e("document.getElementById('accountName').textContent.startsWith('测试用户')"));};
+ const login=async username=>{await runDesktopOperation(ctx,`workspace.accountLogin(${JSON.stringify({username,password:'fixture-password',confirmPassword:'fixture-password'})})`,{name:'fixture account login '+username});await until(()=>e("document.getElementById('accountName').textContent.startsWith('测试用户')"));};
  await login('layout-one');await verifyComponents?.();assert.equal((await state()).aiSessions.length,0,'guest sessions do not leak into account');
  await setting('notifications');await e("document.querySelector('[data-notification=network]').shadowRoot.querySelector('input').click()");
  assert.equal(await e("document.querySelector('[data-notification=network]').checked"),false);
