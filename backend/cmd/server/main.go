@@ -1,8 +1,8 @@
 package main
 
 import (
-	"kuneco/backend/internal/server"
 	"github.com/joho/godotenv"
+	"kuneco/backend/internal/server"
 	"log"
 	"net/http"
 	"net/netip"
@@ -25,7 +25,8 @@ func main() {
 	if err != nil || parsed.Host == "" || (parsed.Scheme != "https" && !(parsed.Scheme == "http" && (parsed.Hostname() == "localhost" || parsed.Hostname() == "127.0.0.1"))) {
 		log.Fatal("PUBLIC_URL must be HTTPS or localhost HTTP")
 	}
-	cfg := server.Config{PublicURL: publicURL, GoogleClientID: os.Getenv("GOOGLE_CLIENT_ID"), GoogleClientSecret: os.Getenv("GOOGLE_CLIENT_SECRET")}
+	googleClientID, googleClientSecret := server.GoogleOAuthCredentials()
+	cfg := server.Config{PublicURL: publicURL, GoogleClientID: googleClientID, GoogleClientSecret: googleClientSecret}
 	for _, raw := range strings.Split(os.Getenv("TRUSTED_PROXY_CIDRS"), ",") {
 		if strings.TrimSpace(raw) != "" {
 			prefix, err := netip.ParsePrefix(strings.TrimSpace(raw))

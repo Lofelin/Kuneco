@@ -24,7 +24,7 @@ The longer-term goal is to make collaboration between AI agents across platforms
 
 - macOS for the current desktop workflow.
 - Node.js and npm compatible with the dependencies in `package-lock.json`.
-- For the local account service: Go 1.26 and PostgreSQL, plus Google OAuth credentials to enable sign-in.
+- For the local account service: Go 1.26 and PostgreSQL. Google sign-in uses the bundled OAuth client by default.
 - A configured AI runtime or API key for the provider you want to use. Runtime authentication is separate from signing in to Kuneco.
 
 ### Run from source
@@ -36,7 +36,7 @@ npm ci
 cp backend/.env.example backend/.env
 ```
 
-Create a PostgreSQL database and update `DATABASE_URL` in `backend/.env`. To enable Google sign-in, also set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`, and register this callback URL with your OAuth client:
+Create a PostgreSQL database and update `DATABASE_URL` in `backend/.env`. Google sign-in uses the shared OAuth client committed with the source; no credentials need to be copied from another computer. To use your own client, set both `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`, and register this callback URL:
 
 ```text
 http://localhost:8787/v1/auth/google/callback
@@ -50,7 +50,7 @@ npm start
 
 The launcher builds the UI and starts or reuses the local account service before opening Electron. The account service continues running after the desktop window closes. To use an existing remote service instead, set `WORKSPACE_ACCOUNT_SERVER_URL`.
 
-See the [account service guide (Chinese)](backend/README.md) for configuration, database setup, and deployment details. Keep credentials in your local configuration, out of version control.
+See the [account service guide (Chinese)](backend/README.md) for configuration, database setup, and deployment details. Keep database passwords, encryption keys, and user tokens local. The shared Google OAuth client is in `backend/internal/server/google-oauth.json` and embedded in the server. If the Google Cloud app is in testing mode, new accounts must be added as test users; its maintainer controls publishing status, redirect URLs, and quotas.
 
 ### Set up your workspace
 

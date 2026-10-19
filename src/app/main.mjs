@@ -1407,6 +1407,7 @@ app.whenReady().then(async () => {
   preferenceStore=createPreferenceStore(path.join(app.getPath('userData'),'ui-preferences.json'));
   try{await preferenceStore.load();}catch(error){preferenceLoadError=error.message;}
   app.setName('Kuneco');
+  if(process.platform==='darwin')app.dock.setIcon(path.join(here,'assets/brand/kuneco-macos.png'));
   Menu.setApplicationMenu(Menu.buildFromTemplate([...(process.platform==='darwin'?[{label:'Kuneco',role:'appMenu'}]:[]),{role:'fileMenu'},{role:'editMenu'},{label:'显示',submenu:[{role:'resetZoom'},{role:'zoomIn'},{role:'zoomOut'},{type:'separator'},{role:'togglefullscreen'}]},{role:'windowMenu'}]));
   app.configureHostResolver({ enableBuiltInResolver: false, secureDnsMode: 'off' });
   await loadConfig();

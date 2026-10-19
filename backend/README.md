@@ -4,7 +4,7 @@ Go 1.26（Go 工具链自动下载）、标准库 HTTP、Google OAuth2 + OIDC、
 
 ## 本机运行
 
-从项目根目录执行 `npm start` 会先检查本机账号后端：已就绪则复用，否则使用 Go 构建并启动，健康检查通过后打开 Kuneco 桌面应用。后端独立运行，关闭窗口不会停止它，日志位于 `backend/data/account-server.log`；启动失败时终端显示原因。配置远程 `WORKSPACE_ACCOUNT_SERVER_URL` 时不启动本机服务。也可单独执行 `npm run backend:start`；或在本目录执行 `go run ./cmd/server`。配置读取 `backend/.env`。首次使用请复制 `.env.example`，填写自己的数据库连接和 Google OAuth 凭据，并将文件权限设为 `0600`；`.env` 已加入 `.gitignore`，示例文件不包含真实凭据。默认监听 127.0.0.1:8787，PUBLIC_URL=http://localhost:8787。客户端 WORKSPACE_ACCOUNT_SERVER_URL 默认为 http://localhost:8787。
+从项目根目录执行 `npm start` 会先检查本机账号后端：已就绪则复用，否则使用 Go 构建并启动，健康检查通过后打开 Kuneco 桌面应用。后端独立运行，关闭窗口不会停止它，日志位于 `backend/data/account-server.log`；启动失败时终端显示原因。配置远程 `WORKSPACE_ACCOUNT_SERVER_URL` 时不启动本机服务。也可单独执行 `npm run backend:start`；或在本目录执行 `go run ./cmd/server`。配置读取 `backend/.env`。首次使用请复制 `.env.example`，填写自己的数据库连接，并将文件权限设为 `0600`；`.env` 已加入 `.gitignore`，示例文件不包含数据库密码或加密密钥。Google 登录默认使用 `internal/server/google-oauth.json` 中随源码提交并嵌入二进制的共享 OAuth 客户端。在 `.env` 或进程环境中同时设置 `GOOGLE_CLIENT_ID` 与 `GOOGLE_CLIENT_SECRET` 可覆盖；两者留空使用内置配置，单独覆盖一个字段不会混用共享客户端的另一个字段。共享配置不包含用户 token、数据库密码或加密密钥。Google Cloud 测试模式下，仅配置的测试用户可登录；发布状态、回调地址与配额由 OAuth 客户端维护者管理。默认监听 127.0.0.1:8787，PUBLIC_URL=http://localhost:8787。客户端 WORKSPACE_ACCOUNT_SERVER_URL 默认为 http://localhost:8787。
 
 Google Cloud 客户端类型选 Web 应用；授权重定向 URI 必须为 `http://localhost:8787/v1/auth/google/callback`。生产改为 HTTPS 域名后，同步调整 PUBLIC_URL、Google 回调和客户端服务器地址。
 
@@ -50,7 +50,7 @@ Google Cloud 客户端类型选 Web 应用；授权重定向 URI 必须为 `http
 
 ## 品牌与已有数据兼容
 
-对外应用名称为 Kuneco。macOS 开发启动器会在 `node_modules/.cache/kuneco-desktop/` 生成本机签名的 `Kuneco.app`，原生名称、可执行文件及版本对应项目配置，Bundle ID 为 `io.github.lofelin.kuneco`。这不是已签名公证的发行安装包；当前图标继续沿用 Electron。
+对外应用名称为 Kuneco。macOS 开发启动器会在 `node_modules/.cache/kuneco-desktop/` 生成本机签名的 `Kuneco.app`，原生名称、可执行文件及版本对应项目配置，Bundle ID 为 `io.github.lofelin.kuneco`。这不是已签名公证的发行安装包；应用使用仓库中的 `kuneco.icns`；Dock 使用匹配的 `kuneco-macos.png`，保留透明留白与圆角。品牌原图 `kuneco.png` 用于界面；修改后在 macOS 执行 `npm run build:icon` 重新生成 PNG 与全部 ICNS 尺寸并提交，其他电脑启动无需生成。启动器根据 ICNS 内容更新本机缓存。
 
 旧用户数据目录 `定途工作空间`、浏览器会话分区、Docker 容器/卷/引擎标识及 DeepSeek 配置目录继续保留。不要对这些内部标识做全局替换，也不要删除现有加密密钥；原生品牌信息与数据兼容身份分别管理。
 

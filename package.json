@@ -6,6 +6,7 @@
   "description": "Kuneco is a unified workspace for isolated environments, containers, and proxy management, built toward seamless collaboration between AI agents across platforms.",
   "main": "src/app/main.mjs",
   "scripts": {
+    "build:icon": "node scripts/build/build-app-icon.mjs",
     "start": "node src/app/start.mjs",
     "test": "node --test test/unit/*/*.test.mjs",
     "check": "npm run build:ui && node scripts/build/build-browser-preload.mjs && node --check src/app/main.mjs && node --check src/features/proxy/proxy.mjs && node --check src/app/renderer.js && node --check src/app/preload.cjs && node --check src/features/proxy/iproyal-import.mjs && node --check src/features/browser/browser-font-policy.cjs && node --check src/app/start.mjs && node --check src/features/browser/browser-policy.mjs && node --check src/features/runtimes/ai-auth.mjs && node --check src/features/runtimes/codex-runner.mjs && node --check src/features/runtimes/cc-network-guard.mjs && node --check src/features/environments/environment-gate.mjs && node --check src/features/browser/browser-worker-policy.cjs && node --check src/features/account/account-client.mjs && node --check src/features/environments/docker-environments.mjs && node --check docker/runtime/gateway.mjs && node --check docker/runtime/exec.mjs",

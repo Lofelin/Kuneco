@@ -24,7 +24,7 @@ Kuneco 将 AI 对话、内置浏览器、本机与容器环境，以及代理设
 
 - macOS：当前桌面开发流程支持的平台。
 - Node.js 与 npm：版本需兼容 `package-lock.json` 中的依赖。
-- 本机账号服务需要 Go 1.26 和 PostgreSQL；启用登录还需要 Google OAuth 凭据。
+- 本机账号服务需要 Go 1.26 和 PostgreSQL；Google 登录默认使用项目内置 OAuth 客户端。
 - 你要使用的 AI 运行时或服务商 API Key。AI 工具的认证与 Kuneco 账号登录相互独立。
 
 ### 从源码启动
@@ -36,7 +36,7 @@ npm ci
 cp backend/.env.example backend/.env
 ```
 
-创建 PostgreSQL 数据库，在 `backend/.env` 中填写 `DATABASE_URL`。如需 Google 登录，还要填写 `GOOGLE_CLIENT_ID` 和 `GOOGLE_CLIENT_SECRET`，并在 OAuth 客户端中登记回调地址：
+创建 PostgreSQL 数据库，在 `backend/.env` 中填写 `DATABASE_URL`。Google 登录默认使用随源码提交的共享 OAuth 客户端，无需复制其他电脑的 `.env`。如需使用自己的 OAuth 客户端，请同时填写 `GOOGLE_CLIENT_ID` 和 `GOOGLE_CLIENT_SECRET`，并登记回调地址：
 
 ```text
 http://localhost:8787/v1/auth/google/callback
@@ -50,7 +50,7 @@ npm start
 
 启动器会构建界面，启动或复用本机账号服务，再打开 Electron。关闭桌面窗口后，账号服务仍会继续运行。如需连接已有的远程服务，可设置 `WORKSPACE_ACCOUNT_SERVER_URL`。
 
-配置、数据库和部署细节见[账号服务指南](backend/README.md)。凭据只保存在本地配置中，不要提交到版本控制。
+配置、数据库和部署细节见[账号服务指南](backend/README.md)。数据库密码、加密密钥和用户令牌保存在本地；共享 Google OAuth 客户端位于 `backend/internal/server/google-oauth.json`，并编译进账号服务。Google Cloud 若处于测试模式，新账号需要加入测试用户；发布状态、回调地址与配额由客户端维护者管理。
 
 ### 建立你的工作空间
 
