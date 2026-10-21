@@ -1,17 +1,9 @@
+import {canonical,physical,shortcutFromEvent} from '../../shared/shortcut-keys.mjs';
+export {shortcutFromEvent} from '../../shared/shortcut-keys.mjs';
 export const shortcutDefaults=Object.freeze({newChat:'Mod+N',searchChat:'Mod+F',focusComposer:'Mod+L',stopReply:'Mod+Shift+Escape',toggleSidebar:'Mod+B',settings:'Mod+,',shortcuts:'Mod+Shift+,',nextTab:'Ctrl+Tab',previousTab:'Ctrl+Shift+Tab',closeTab:'Mod+Shift+W',pinTab:'Mod+Shift+P',browser:'Mod+Shift+B',automation:'Mod+Shift+A',runtimes:'Mod+Shift+R',console:'Mod+`'});
-const modifiers=['Mod','Ctrl','Alt','Shift'];
-const specialKeys=new Set(['Tab','Escape','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Home','End','PageUp','PageDown','Backspace','Delete']);
-function canonical(value){
- if(value==='')return '';
- if(typeof value!=='string')throw new Error('快捷键必须是按键组合');
- const parts=value.split('+'),key=parts.pop();
- if(!key||parts.some(p=>!modifiers.includes(p))||new Set(parts).size!==parts.length||(!parts.includes('Mod')&&!parts.includes('Ctrl')&&!parts.includes('Alt'))||!(specialKeys.has(key)||/^[A-Za-z0-9,./;\[\]\\`=-]$/.test(key)))throw new Error('请使用 Command/Ctrl 或 Alt 加普通按键；Enter 保留用于发送');
- return [...modifiers.filter(m=>parts.includes(m)),key.length===1?key.toUpperCase():key].join('+');
-}
-function physical(value,mac){return value.split('+').map(x=>x==='Mod'?(mac?'Meta':'Ctrl'):x).filter((x,i,a)=>a.indexOf(x)===i).sort().join('+');}
 function reserved(binding){
  if(!binding)return false;
- const bits=binding.split('+'),key=bits.at(-1),command=bits.includes('Mod')||bits.includes('Ctrl');
+ const bits=binding.split('+'),key=bits.at(-1),command=bits.includes('Mod')||bits.includes('Meta')||bits.includes('Ctrl');
  return command&&(['C','V','X','A','Z','Q','H','M','0','=','-'].includes(key)&&(!bits.includes('Shift')||key==='Z'))||command&&key==='W'&&!bits.includes('Shift')||bits.includes('Alt')&&key==='Tab';
 }
 export function validateShortcuts(value){
@@ -30,18 +22,6 @@ export function normalizeShortcuts(value){
  if(!value||typeof value!=='object'||Array.isArray(value))return result;
  for(const id of Object.keys(result))if(Object.hasOwn(value,id)){try{result[id]=canonical(value[id]);}catch{}}
  try{validateShortcuts(result);return result;}catch{return {...shortcutDefaults};}
-}
-export function shortcutFromEvent(event,platform=''){
- const mac=/darwin|mac/i.test(platform),parts=[];
- if(mac?event.metaKey:event.ctrlKey)parts.push('Mod');
- if(mac&&event.ctrlKey)parts.push('Ctrl');
- if(event.altKey)parts.push('Alt');if(event.shiftKey)parts.push('Shift');
- let key=event.key;
- if(event.code?.startsWith('Key'))key=event.code.slice(3);
- else if(event.code?.startsWith('Digit'))key=event.code.slice(5);
- else if(event.code==='Comma')key=',';else if(event.code==='Backquote')key='`';
- if(['Control','Meta','Alt','Shift'].includes(key))return null;
- return [...parts,key?.length===1?key.toUpperCase():key].join('+');
 }
 export function mountShortcuts({document,platform='',getBindings,actions,onError=()=>{}}){
  const listener=event=>{
