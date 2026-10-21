@@ -149,7 +149,6 @@ wa-card.card{border:1px solid var(--line);border-radius:7px;background:var(--sur
 #settingsDialog .settings-nav{width:168px;padding-top:20px;background:var(--shell);}
 #settingsDialog .settings-nav-title{display:none;}
 #settingsDialog .settings-content{padding:24px 28px;}
-#settingsDialog .settings-page-heading h1{font-size:20px;}
 @media(max-width:700px){#settingsDialog::part(dialog){max-width:calc(100vw - 24px);}#settingsDialog .settings-nav{width:128px;padding:16px 8px;}#settingsDialog .settings-content{padding:20px 16px;}#settingsDialog .metrics{grid-template-columns:1fr;}#settingsDialog .field-row{flex-wrap:wrap;}#settingsDialog wa-card.settings-default::part(body){grid-template-columns:1fr;}}
 
 
@@ -190,7 +189,6 @@ wa-input::part(input),wa-number-input::part(input),wa-select::part(combobox),wa-
 .account-trigger::part(base){width:100%;min-height:54px;}
 .settings-nav{width:192px;}
 .settings-nav-title,.rail-heading strong{font-size:16px;line-height:24px;}
-.settings-page-heading h1{font-size:24px;line-height:32px;}
 .card h2,.compact h1{font-size:16px;line-height:24px;}
 .settings-page-heading p,.muted,.project-bar,.cc-scope,label{font-size:13px;line-height:18px;}
 .session-list-heading,.rail-footer,.workspace>footer{font-size:12px;line-height:16px;}
@@ -286,7 +284,6 @@ body.dark #accountLogout:hover,body.dark #accountLogout:focus-visible{background
 #prompt::part(textarea-wrapper),#prompt::part(base),#prompt::part(textarea){border:0!important;box-shadow:none!important;outline:0!important;background:transparent;}
 #prompt::part(textarea){padding:0;}
 .automation-page{padding:28px 32px;}
-.automation-page h1{font-size:24px;line-height:32px;}
 .automation-empty{height:70%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;color:var(--muted);}
 .automation-empty h2{font-size:16px;margin:0;}.automation-empty p{font-size:13px;margin:0;}
 
@@ -490,7 +487,7 @@ app-button wa-icon,wa-dropdown-item wa-icon,wa-icon{font-size:16px!important;wid
 #changeAvatar.profile-avatar-edit{position:absolute;right:-3px;top:0;--icon-hit-size:28px}
 #changeAvatar.profile-avatar-edit::part(base){border-radius:50%!important;background:var(--ink);color:var(--surface);border:2px solid var(--canvas)}
 #changeAvatar.profile-avatar-edit:hover::part(base){background:var(--muted)}
-#profileName.profile-name-input{width:min(100%,320px);margin:0}
+#profileName.profile-name-input{width:var(--settings-value-width);max-width:100%;margin:0}
 #profileName::part(base){border:1px solid transparent;background:transparent;box-shadow:none;border-radius:8px}
 #profileName::part(input){text-align:center;font-size:26px;font-weight:550;line-height:34px;padding:4px 8px}
 #profileName:focus-within::part(base){border-color:var(--blue);box-shadow:0 0 0 2px color-mix(in srgb,var(--blue) 15%,transparent)}
@@ -540,9 +537,13 @@ app-button wa-icon,wa-dropdown-item wa-icon,wa-icon{font-size:16px!important;wid
 @media(max-width:1150px){.profile-stats{padding:16px 0}.profile-stats>div{padding:0 6px}.profile-panel .profile-details{grid-template-columns:1fr;gap:16px}.profile-details>div{padding:0;border-right:0}.profile-activity-grid{gap:3px}}
 
 /* Content pages share the chat rail's title row and divider. */
-:root{--content-heading-height:49px}
+:root{--content-heading-height:49px;--content-heading-font-size:16px;--content-heading-line-height:24px;--content-heading-font-weight:550;--content-heading-icon-size:16px;--content-heading-description-size:12px;--content-heading-description-line-height:18px;--content-heading-copy-gap:16px}
 .rail-heading,.content-page-header,.settings-nav-title{height:var(--content-heading-height);min-height:var(--content-heading-height);box-sizing:border-box;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:0 14px;border-bottom:1px solid var(--line);flex-shrink:0}
-.content-page-header h1,.content-page-header h2{font-size:16px;line-height:24px;font-weight:550;letter-spacing:0;margin:0;color:var(--ink)}
+.content-page-header h1,.content-page-header h2{font-size:var(--content-heading-font-size);line-height:var(--content-heading-line-height);font-weight:var(--content-heading-font-weight);letter-spacing:0;margin:0;color:var(--ink);flex:none}
+.content-page-heading{display:flex;align-items:center;gap:var(--content-heading-copy-gap);min-width:0}
+.content-page-header .content-page-description{display:block;margin:0;min-width:0;color:var(--muted);font-size:var(--content-heading-description-size);font-weight:400;line-height:var(--content-heading-description-line-height);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.content-page-header>.content-page-heading{flex:1}
+.content-page-header>app-button,.content-page-header>[class$="-actions"]{flex:none}
 .automation-page{padding:0;display:flex;flex-direction:column}
 .automation-empty{flex:1;height:auto;padding:32px}
 .runtime-state.runtime-empty{inset:var(--content-heading-height) 0 0}
@@ -659,7 +660,6 @@ app-button.content-tab-pin::part(base),app-button.content-tab-close::part(base){
 .environment-detail-facts{display:grid;grid-template-columns:120px minmax(0,1fr);gap:16px;margin:24px 0;padding:22px;border:1px solid var(--line);border-radius:10px;background:var(--surface);font-size:13px}
 .environment-detail-facts dt{color:var(--muted)}.environment-detail-facts dd{margin:0;overflow-wrap:anywhere}
 .environment-detail-runtimes{margin-top:30px}.environment-detail-runtimes h3{font-size:14px}
-.environment-page-title{display:flex;align-items:center;gap:10px;min-width:0}
 .environment-count{color:var(--muted);font-size:14px}
 .environment-page-subtitle{margin:0 0 0 8px;color:var(--muted);font-size:13px;font-weight:400;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .environment-detail-open .environment-page-header{display:none}
@@ -1016,10 +1016,8 @@ body.environment-onboarding:not(.auth-mode)>.setup-window-drag{display:block}
 #setupCancel{position:fixed;left:24px;top:76px;z-index:3;-webkit-app-region:no-drag}
 #setupCancel::part(base){color:var(--muted)}
 #setupCancel:hover::part(base){color:var(--ink)}
-.console-heading{display:flex;align-items:center;gap:16px;min-width:0}
-.console-subtitle{margin:0;color:var(--muted);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .console-status:empty{display:none}
-@media(max-width:850px){#setupCancel{left:16px;top:64px}.console-subtitle{max-width:240px}}
+@media(max-width:850px){#setupCancel{left:16px;top:64px}}
 
 .runtime-toolbar-actions{display:flex;align-items:center;gap:8px}
 .runtime-empty-message{min-height:240px;display:flex;align-items:center;justify-content:center}
@@ -1114,7 +1112,7 @@ body.environment-onboarding:not(.auth-mode)>.setup-window-drag{display:block}
 
 /* Main titles have a consistent icon; chat owns its separate session heading. */
 .content-page-header h1,.content-page-header h2{display:flex;align-items:center;gap:10px}
-.content-page-header h1>wa-icon,.content-page-header h2>wa-icon,.settings-nav-title>wa-icon{flex:none;width:16px!important;height:16px!important}
+.content-page-header h1>wa-icon,.content-page-header h2>wa-icon,.settings-nav-title>wa-icon{flex:none;width:var(--content-heading-icon-size)!important;height:var(--content-heading-icon-size)!important}
 .settings-nav-title{justify-content:flex-start;gap:10px}
 .runtime-page{display:flex;flex-direction:column;overflow:hidden}
 .runtime-management{flex:1;min-height:0;width:100%;margin:0 auto;padding:28px;overflow:auto;display:flex;flex-direction:column}
@@ -1538,13 +1536,13 @@ app-button.retry-action[loading] wa-icon,app-button.retry-action[aria-busy=true]
 /* Align preference controls to the same compact right-hand column. */
 .settings-panel[data-panel="preferences"] .preference-row{min-height:var(--settings-row-height);padding-block:var(--settings-row-padding-block);box-sizing:border-box}
 .settings-panel[data-panel="preferences"] #languageSelect,
-.settings-panel[data-panel="preferences"] .theme-segments{width:230px;flex:0 0 230px;box-sizing:border-box}
+.settings-panel[data-panel="preferences"] .theme-segments{width:var(--settings-value-width);flex:0 0 var(--settings-value-width);box-sizing:border-box}
 #languageSelect::part(combobox){min-height:34px;height:34px;box-sizing:border-box}
 .settings-panel[data-panel="preferences"] .theme-segments{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));height:34px;padding:3px;gap:3px;border-radius:6px}
 .theme-segments app-button{min-width:0;width:100%}
 .theme-segments app-button::part(base){width:100%;height:28px;min-height:28px;padding:3px 6px;font-size:12px;line-height:20px;justify-content:center;border-radius:4px}
 .theme-segments app-button::part(label){justify-content:center;white-space:nowrap}
-@media(max-width:700px){.settings-panel[data-panel="preferences"] #languageSelect,.settings-panel[data-panel="preferences"] .theme-segments{width:200px;flex-basis:200px}}
+
 
 /* Keep settings content compact when navigation is collapsed. */
 .settings-content:has([data-panel]:not(.hidden)) :is(.settings-page-heading,.settings-body){max-width:var(--settings-form-max-width);width:100%;box-sizing:border-box;margin-inline:auto}
@@ -1578,10 +1576,6 @@ app-button.retry-action[loading] wa-icon,app-button.retry-action[aria-busy=true]
 .environments-body.is-loading>#environmentOverview{visibility:hidden;pointer-events:none}
 @media(prefers-reduced-motion:reduce){.environment-loading>wa-icon{animation:none}}
 
-.browser-page-title{display:flex;align-items:center;gap:16px;min-width:0}
-.browser-page-title h1{flex:none}
-.browser-page-title p{margin:0;color:var(--muted);font-size:12px;font-weight:400;line-height:1.6;min-width:0}
-@media(max-width:1000px){.browser-page-title{gap:10px}.browser-page-title p{font-size:11px}}
 
 .environment-version-date{display:flex;flex-wrap:wrap;align-items:baseline;gap:5px 8px;margin-top:8px;font-size:11px;line-height:1.6}
 .environment-version-date>span:first-child{color:var(--muted);white-space:nowrap}
@@ -2000,7 +1994,10 @@ wa-switch{--wa-form-control-activated-color:var(--ink)}
 .notification-settings section+section{margin-top:32px}
 .notification-settings section>.preference-heading{margin-top:0}
 .notification-setting-row{display:flex;align-items:center;gap:16px;padding:10px 16px;border-bottom:1px solid var(--line)}
+.notification-setting-row[hidden]{display:none}
+.notification-setting-row wa-radio-group.app-segmented{flex-shrink:0}
 .notification-setting-row:last-child{border-bottom:0}
+.notification-setting-row:not(:has(~ .notification-setting-row:not([hidden]))){border-bottom:0}
 .notification-setting-copy{flex:1;min-width:0}
 .notification-setting-copy strong{display:block;font-size:13px;font-weight:500;line-height:20px;color:var(--ink)}
 .notification-setting-copy p{font-size:12px;line-height:18px;color:var(--muted);margin:2px 0 0}
@@ -2366,10 +2363,10 @@ app-button[data-icon-action]:not([disabled]):not([loading]):is(:hover,:active){c
 #proxyManualPanel>.field-row{margin:0 0 12px}
 #proxyFileChoose{--file-picker-min-height:96px;--file-picker-padding:16px}
 /* Device preferences reuse the shared settings rows and spacing tokens. */
-.settings-body :is([data-panel="preferences"],[data-panel="shortcuts"],[data-panel="console"],[data-panel="containers"]) section{margin-top:28px}
-.settings-body :is([data-panel="preferences"],[data-panel="shortcuts"],[data-panel="console"],[data-panel="containers"]) section>.preference-heading{margin-top:0}
-.settings-body :is([data-panel="shortcuts"],[data-panel="console"],[data-panel="containers"]) section:first-child{margin-top:0}
-.settings-body :is([data-panel="preferences"],[data-panel="shortcuts"],[data-panel="console"],[data-panel="containers"]) :is(wa-select,.shortcut-controls){width:var(--settings-value-width);max-width:100%;flex-shrink:0}
+.settings-body :is([data-panel="preferences"],[data-panel="shortcuts"],[data-panel="console"],[data-panel="containers"],[data-panel="environment"]) section{margin-top:28px}
+.settings-body :is([data-panel="preferences"],[data-panel="shortcuts"],[data-panel="console"],[data-panel="containers"],[data-panel="environment"]) section>.preference-heading{margin-top:0}
+.settings-body :is([data-panel="shortcuts"],[data-panel="console"],[data-panel="containers"],[data-panel="environment"]) section:first-child{margin-top:0}
+.settings-body .shortcut-controls{width:var(--settings-value-width);max-width:100%;flex-shrink:0}
 .preference-reading-preview,.preference-time-preview{padding:var(--settings-row-padding-block) var(--settings-row-padding-inline);overflow-wrap:anywhere}
 .preference-reading-preview p{font-size:var(--chat-font-size,14px);line-height:1.7;margin:0 0 8px}
 .preference-reading-preview code{font-size:var(--code-font-size,13px);line-height:1.7;white-space:pre-wrap}
@@ -2400,7 +2397,10 @@ html[data-reduced-motion="true"] *,html[data-reduced-motion="true"] *::before,ht
 /* Font choices preview the same family as conversation text; menu metrics stay global. */
 wa-option.font-preview-option,wa-option.font-preview-option::part(label){font-family:var(--option-font-family)}
 
-.settings-body [data-panel="console"] :is(wa-input,wa-select){width:var(--settings-value-width);max-width:100%;flex-shrink:0}
+/* Every settings panel, including dynamically mounted fields, shares the language control width. */
+.settings-body [data-panel] :is(wa-input,wa-number-input,wa-select):not(.git-identity-field,.git-credential-field,.git-connection-field):not(app-dialog *){width:var(--settings-value-width);max-width:100%;min-width:0;flex:0 0 auto;box-sizing:border-box}
+/* Integrated field labels occupy the row; only their input column uses the standard width. */
+.settings-body :is(.git-identity-field,.git-credential-field,.git-connection-field){grid-template-columns:minmax(70px,1fr) minmax(0,var(--settings-value-width));width:100%;flex:1;max-width:100%}
 .settings-body [data-panel="console"] wa-radio-group.app-segmented{flex-shrink:0}
 
 .console-directory-controls{display:flex;align-items:center;justify-content:flex-end;gap:8px;max-width:var(--settings-value-width);min-width:0}
@@ -2500,3 +2500,10 @@ wa-tab-group.environment-detail-tabs wa-tab-panel{--padding:16px var(--environme
 .long-message-toggle,.long-message-toggle::part(base){color:inherit!important}
 
 .long-message-body.is-expanded{max-height: min(600px,60vh);overflow:auto;overflow-anchor:none;overscroll-behavior:contain}
+/* Cascading menus use the same outer panel tokens as root menus. */
+wa-dropdown-item::part(submenu){border-radius:var(--overlay-radius)!important;border:1px solid var(--line)!important;background:var(--surface);color:var(--ink);box-shadow:var(--overlay-shadow);font-size:var(--menu-font-size);font-weight:400;line-height:var(--menu-line-height)}
+/* Flipped submenus must not let the pointer bridge intercept adjacent menu actions. */
+wa-dropdown-item::part(submenu)::before{pointer-events:none}
+wa-dropdown-item::part(details){font-size:var(--menu-font-size);font-weight:400;line-height:var(--menu-line-height)}
+
+.preference-save-status:empty{display:none}

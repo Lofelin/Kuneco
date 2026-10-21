@@ -1,10 +1,10 @@
 /** Global data table. Callers provide columns/cell content, never row geometry or events. */
-export function renderAppTable(host,{columns,rows=[],label='数据表格',minWidth=0,onActivate,rowLabel,actions,empty='暂无数据'}={}){
- const doc=host.ownerDocument;host.classList.add('app-table');host.setAttribute('aria-label',label);
+export function renderAppTable(host,{columns,rows=[],label='数据表格',appearance='default',minWidth=0,onActivate,rowLabel,actions,actionsVisible=false,actionsWidth='48px',empty='暂无数据'}={}){
+ const doc=host.ownerDocument;host.dataset.appearance=appearance==='list'?'list':'default';host.classList.add('app-table');host.setAttribute('aria-label',label);host.toggleAttribute('data-actions-visible',Boolean(actions&&actionsVisible));
  const table=doc.createElement('table');table.setAttribute('aria-label',label);table.style.minWidth=minWidth+'px';
  const colgroup=doc.createElement('colgroup'),head=doc.createElement('thead'),heading=doc.createElement('tr'),body=doc.createElement('tbody');
  for(const column of columns){const col=doc.createElement('col');if(column.width)col.style.width=column.width;colgroup.append(col);const th=doc.createElement('th');th.scope='col';th.textContent=column.label;heading.append(th);}
- if(actions){const col=doc.createElement('col');col.style.width='48px';colgroup.append(col);const th=doc.createElement('th');th.scope='col';th.setAttribute('aria-label','操作');heading.append(th);}
+ if(actions){const col=doc.createElement('col');col.style.width=actionsWidth;colgroup.append(col);const th=doc.createElement('th');th.scope='col';th.setAttribute('aria-label','操作');heading.append(th);}
  head.append(heading);
  for(const [index,item] of rows.entries()){
   const row=doc.createElement('tr');

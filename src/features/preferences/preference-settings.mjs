@@ -11,7 +11,7 @@ export function mountPreferenceSettings({host,getPreferences,save}){
   const control=segmented?createAppSegmented(doc,options):element(options?'wa-select':'wa-switch');control.id='preference-'+key;control.setAttribute('aria-labelledby',label.id);control.setAttribute('aria-describedby',hint.id);control.size='s';
   if(options&&!segmented)for(const [value,text] of options){const option=element('wa-option',text);option.value=String(value);if(key==='chatFontFamily'){option.classList.add('font-preview-option');option.style.setProperty('--option-font-family',chatFontFamilies[value]);}control.append(option);}
   row.append(copy,control);group.append(row);controls.set(key,control);
-  control.addEventListener('change',async()=>{if(control.disabled)return;const value=options?(key.endsWith('FontSize')?Number(control.value):control.value):control.checked;render(false);status.textContent='正在保存…';try{await save({[key]:value});status.textContent='已保存到本设备';}catch(error){status.textContent='保存失败：'+error.message;}finally{render();}});
+  control.addEventListener('change',async()=>{if(control.disabled)return;const value=options?(key.endsWith('FontSize')?Number(control.value):control.value):control.checked;render(false);status.textContent='正在保存…';try{await save({[key]:value});status.textContent='';}catch(error){status.textContent='保存失败：'+error.message;}finally{render();}});
  }
  const reading=section('阅读','调整对话字体、字号与内容宽度，同时应用到主窗口和独立聊天窗口。');
  row(reading,'chatFontFamily','对话字体','应用到对话正文与输入栏；代码保留等宽字体。',[['system','系统'],['serif','衬线'],['sans','无衬线'],['opendyslexic','OpenDyslexic']]);
@@ -28,7 +28,7 @@ export function mountPreferenceSettings({host,getPreferences,save}){
  const timePreview=element('div',null,'preference-time-preview');timePreview.setAttribute('aria-live','polite');time.append(timePreview);
  const lifecycle=section('退出应用','关闭主窗口或退出 Kuneco 时，保护正在执行的任务。');
  row(lifecycle,'confirmQuit','退出前提醒运行任务','有聊天或自动化正在运行时，列出任务并等待确认。');
- const status=element('p',null,'muted');status.setAttribute('role','status');host.append(status);
+ const status=element('p',null,'muted preference-save-status');status.setAttribute('role','status');host.append(status);
  function render(ready=true){const p=getPreferences();const sizeControl=controls.get('chatFontSize');for(const option of sizeControl.querySelectorAll('[data-legacy-size]'))option.remove();if(![12,14,18].includes(p.chatFontSize)){const option=createAppSegmentedOption(doc,{value:p.chatFontSize,label:'自定义（'+p.chatFontSize+' px）',icon:'type'});option.setAttribute('data-legacy-size','');sizeControl.append(option);}for(const [key,control] of controls){control.disabled=!ready;if(control.tagName==='WA-SWITCH')control.checked=p[key];else control.value=String(p[key]);}timePreview.textContent='预览：'+formatDisplayDate(Date.now()-300000,doc.documentElement.lang,'datetime',p);timePreview.title=formatDisplayDate(Date.now()-300000,doc.documentElement.lang,'datetime',{...p,timeDisplay:'absolute'});}
  render(false);return {render,error(message){status.textContent=message;render(false);}};
 }

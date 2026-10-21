@@ -8,7 +8,7 @@ app-table,.app-table{display:block;box-sizing:border-box;width:100%;max-width:10
 .app-table td strong{display:flex;align-items:center;gap:10px;min-width:0;color:var(--ink);font-size:inherit;font-weight:600}
 .app-table td strong>wa-icon{width:20px;height:20px;flex:none}
 .app-table tr.app-table-clickable{cursor:pointer}
-.app-table tr.app-table-clickable:is(:hover,:focus-visible){background:var(--soft)}
+.app-table tr.app-table-clickable:is(:hover,:focus-visible){background:color-mix(in srgb,var(--hover) 45%,var(--canvas))}
 .app-table tr.app-table-clickable:focus-visible{outline:2px solid var(--field-focus-ring,color-mix(in srgb,var(--blue) 16%,transparent));outline-offset:-2px}
 .app-table .app-table-actions{padding-inline:4px;text-align:center}
 .app-table-actions>wa-dropdown{opacity:0;pointer-events:none}
@@ -18,3 +18,21 @@ app-table,.app-table{display:block;box-sizing:border-box;width:100%;max-width:10
 .markdown-body>app-table{margin:12px 0 16px}
 .markdown-body>app-table table{table-layout:auto}
 .markdown-body>app-table th,.markdown-body>app-table td{min-width:75px}
+
+.app-table[data-actions-visible] .app-table-actions>wa-dropdown{opacity:1;pointer-events:auto}
+
+/* Flat lists retain the shared table semantics and interaction contract. */
+.app-table[data-appearance="list"]{border:0;border-radius:0;background:transparent}
+.app-table[data-appearance="list"] th{background:var(--data-list-sticky-bg,var(--canvas));padding-block:6px;border-bottom:0}
+.app-table[data-appearance="list"] td{padding-block:16px}
+.app-table-summary{display:flex;flex-direction:column;gap:4px;min-width:0}
+.app-table-summary strong{font-size:13px;font-weight:500;line-height:20px}
+.app-table-summary p{margin:0;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12px;line-height:20px}
+.app-table-source{display:inline-flex;align-items:center;gap:6px}
+.app-table-source wa-icon{width:16px;height:16px;flex:none}
+
+.app-table-action-group{display:flex;align-items:center;justify-content:flex-end;gap:8px;padding-inline:8px;white-space:nowrap}
+.app-table-action-group>app-button,.app-table-action-group>wa-dropdown{flex:none}
+
+.app-table-action-group>wa-dropdown>[slot="trigger"]{opacity:0;pointer-events:none}
+.app-table tr:is(:hover,:focus-within) .app-table-action-group>wa-dropdown>[slot="trigger"],.app-table-action-group>wa-dropdown[open]>[slot="trigger"]{opacity:1;pointer-events:auto}

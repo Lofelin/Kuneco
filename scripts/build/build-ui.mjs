@@ -1,6 +1,7 @@
 import {build} from 'esbuild';
 import {readFile,copyFile,cp} from 'node:fs/promises';
 await build({entryPoints:['src/shared/ui/ui-components.mjs'],outfile:'src/vendor/ui.js',bundle:true,format:'esm',target:'chrome140',minify:true,legalComments:'eof'});
+await build({entryPoints:['src/shared/ui/dropdown-positioning.mjs'],outfile:'src/vendor/dropdown-positioning.js',bundle:true,format:'esm',target:'chrome140',minify:true});
 await build({entryPoints:['src/shared/ui/ui-theme.css'],outfile:'src/vendor/ui.css',bundle:true,minify:true,loader:{'.woff2':'file'},assetNames:'fonts/[name]-[hash]'});
 
 const styleBuild=await build({entryPoints:['src/shared/ui/ui-style.css'],outfile:'src/vendor/ui-overrides.css',loader:{'.svg':'dataurl'},bundle:true,minify:true,logLevel:'warning'});

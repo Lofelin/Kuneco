@@ -17,7 +17,7 @@ test('preference segmented values save as numbers and restore actual state on fa
  const view=mountPreferenceSettings({host,getPreferences:()=>preferences,save:async patch=>{saved.push(patch);if(fail)throw Error('offline');preferences={...preferences,...patch};}});
  view.render();
  const size=host.querySelector('#preference-chatFontSize');assert.equal(size.value,'14');
- size.value='18';size.dispatchEvent(new dom.window.Event('change'));assert.equal(size.disabled,true);await tick();assert.deepEqual(saved[0],{chatFontSize:18});assert.equal(size.value,'18');assert.equal(size.disabled,false);
+ size.value='18';size.dispatchEvent(new dom.window.Event('change'));assert.equal(size.disabled,true);await tick();assert.deepEqual(saved[0],{chatFontSize:18});assert.equal(size.value,'18');assert.equal(size.disabled,false);assert.equal(host.querySelector('.preference-save-status').textContent,'');
  fail=true;size.value='12';size.dispatchEvent(new dom.window.Event('change'));await tick();assert.equal(size.value,'18');assert.match(host.textContent,/保存失败/);
  const width=host.querySelector('#preference-chatWidth');assert.equal(width.querySelectorAll('wa-icon').length,3);assert.equal(width.value,'wide');dom.window.close();
 });
