@@ -9,14 +9,12 @@ export function mountConsolePaste({host,getPreferences,getSession,onPaste}){
  function cancel(){pending=null;preview.value='';dialog.open=false;}
  cancelButton.onclick=cancel;dialog.addEventListener('wa-hide',()=>{pending=null;preview.value='';});
  confirm.onclick=()=>{const request=pending;cancel();if(request&&request.session===getSession())onPaste(request.text);};
- host.addEventListener('paste',event=>{
-  const text=event.clipboardData?.getData('text/plain');if(text===undefined)return;
-  // Capture before xterm handles the DOM event; confirmed text still uses xterm's bracketed-paste path.
-  event.preventDefault();event.stopImmediatePropagation();
+ function request(text){
   const session=getSession();if(!session||pending)return;
   if(!getPreferences().consoleConfirmPaste||!/[\r\n]/.test(text)){onPaste(text);return;}
   if(doc.querySelector('app-dialog[open]'))return;
   pending={session,text};preview.value=text;dialog.open=true;
- },true);
- return {cancel};
+ }
+ host.addEventListener('paste',event=>{const text=event.clipboardData?.getData('text/plain');if(text===undefined)return;event.preventDefault();event.stopImmediatePropagation();request(text);},true);
+ return {cancel,request};
 }

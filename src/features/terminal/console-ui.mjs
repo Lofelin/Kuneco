@@ -1,3 +1,4 @@
+import {consoleShortcutAction} from '../../shared/console-shortcuts.mjs';
 import {consoleOptions,consoleDefaults} from '../../shared/console-preferences.mjs';
 import {mountConsolePaste} from './console-paste.mjs';
 import {Terminal} from '@xterm/xterm';
@@ -20,6 +21,22 @@ export function mountConsole(api,{openBrowser,getPreferences=()=>consoleDefaults
   terminal.parser.registerOscHandler(777,data=>{if(!data.startsWith('dingtu-open-url;'))return false;openLink(data.slice(16));return true;});
   // Handle Space on keydown: do not depend on Chromium's legacy keypress.
   terminal.attachCustomKeyEventHandler(event=>{
+   const shortcut=consoleShortcutAction(event,getPreferences().consoleShortcuts,api.platform);
+   if(shortcut){
+    if(event.type==='keydown'){
+     event.preventDefault();
+     if(!event.repeat){
+      if(shortcut==='copy'&&terminal.hasSelection())void navigator.clipboard.writeText(terminal.getSelection()).catch(error=>{status.textContent='复制失败：'+error.message;});
+      if(shortcut==='paste'){const session=token;void navigator.clipboard.readText().then(text=>{if(token===session&&session)paste.request(text);}).catch(error=>{status.textContent='粘贴失败：'+error.message;});}
+      if(shortcut==='selectAll')terminal.selectAll();
+      if(shortcut==='clear')terminal.clear();
+      if(shortcut==='scrollTop')terminal.scrollToTop();
+      if(shortcut==='scrollBottom')terminal.scrollToBottom();
+      if(shortcut==='interrupt')terminal.input('\x03',true);
+     }
+    }
+    return false;
+   }
    if(event.key!==' ' || event.ctrlKey || event.altKey || event.metaKey || event.isComposing)return true;
    if(event.type==='keydown'){event.preventDefault();terminal.input(' ',true);}
    return false;
