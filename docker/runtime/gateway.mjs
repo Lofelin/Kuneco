@@ -12,13 +12,13 @@ async function control(action,value={}){
  if(action==='status')return gateway?.status || {state:'blocked',reason:'代理未连接'};
  if(closing)throw superseded();
  if(action==='connect'){
-  if(!['native','gost'].includes(value.engine || 'native'))throw new Error('未知代理内核');
+  if(!['native','gost','mihomo'].includes(value.engine || 'native'))throw new Error('未知代理内核');
   const ticket=++generation;
   return enqueue(async()=>{
    if(ticket!==generation)throw superseded();
    await gateway?.stop();
    if(ticket!==generation)throw superseded();
-   const candidate=new ProxyGateway(value.config,{gostBinary:value.engine==='gost'?'/usr/local/bin/gost':null,listenHost:'0.0.0.0',listenPort:8080,expectedIp:value.expectedIp,healthInterval:60000,jitter:0.2});
+   const candidate=new ProxyGateway(value.config,{gostBinary:value.engine==='gost'?'/usr/local/bin/gost':null,mihomoBinary:value.engine==='mihomo'?'/usr/local/bin/mihomo':null,listenHost:'0.0.0.0',listenPort:8080,expectedIp:value.expectedIp,healthInterval:60000,jitter:0.2});
    gateway=candidate;
    try{
     await candidate.start();

@@ -1,5 +1,7 @@
 import {RequestLifecycle,PerformanceStats,requestOutcome} from './request-lifecycle.mjs';
 import {startGost} from './gost-sidecar.mjs';
+import {startMihomo} from './mihomo-sidecar.mjs';
+import {validateSubscriptionProxy} from './subscription-node.mjs';
 import http from 'node:http';
 import https from 'node:https';
 import net from 'node:net';
@@ -9,6 +11,10 @@ import { EventEmitter } from 'node:events';
 import { SocksClient } from 'socks';
 
 export function validateProxy(config) {
+  const profileId=config?.profileId;
+  if(profileId!==undefined && (typeof profileId!=='string'||!/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i.test(profileId)))throw new Error('代理配置标识无效');
+  const metadata=profileId?{profileId}:{};
+  if(['vless','hysteria2','ss'].includes(config?.protocol))return {...validateSubscriptionProxy(config),...metadata};
   if (!['http', 'https', 'socks5'].includes(config.protocol)) throw new Error('请选择 HTTP、HTTPS 或 SOCKS5 代理');
   const host = String(config.host ?? '').trim();
   if (!host || /[\s/@?#]/.test(host)) throw new Error('代理地址应填写主机名或 IP，不包含协议、路径或账号');
@@ -17,7 +23,7 @@ export function validateProxy(config) {
   const username = String(config.username ?? '');
   const password = String(config.password ?? '');
   if (/[\r\n]/.test(username + password)) throw new Error('代理凭据不能包含换行');
-  return { protocol: config.protocol, host, port, username, password };
+  return { protocol: config.protocol, host, port, username, password,...metadata };
 }
 
 export function proxyEnvironment(base, proxyUrl) {
@@ -129,15 +135,16 @@ function forwardingHeaders(headers) {
 }
 
 export class ProxyGateway extends EventEmitter {
-  constructor(config, { timeout = 15000, allowLocalTargets = false, ca = undefined, expectedIp = null, healthInterval = 60000, retryBase = 5000, retryMax = 300000, leaseMs = 180000, jitter = 0.2, onVerified = null, listenHost = '127.0.0.1', listenPort = 0, gostBinary = null, coreRetryBase = 1000, coreRetryMax = 30000, coreRetryLimit = 5, coreStableMs = 60000, forwardingLimit = 64, forwardingQueueLimit = 128, targetForwardingLimit = Math.min(16,forwardingLimit), targetQueueLimit = Math.min(32,forwardingQueueLimit), queueTimeout = 15000, responseHeadersTimeout = 30000, responseBodyTimeout = 30000, uploadIdleTimeout = 30000, downstreamIdleTimeout = 30000 } = {}) {
+  constructor(config, { timeout = 15000, allowLocalTargets = false, ca = undefined, expectedIp = null, healthInterval = 60000, retryBase = 5000, retryMax = 300000, leaseMs = 180000, jitter = 0.2, onVerified = null, listenHost = '127.0.0.1', listenPort = 0, gostBinary = null, mihomoBinary = null, coreRetryBase = 1000, coreRetryMax = 30000, coreRetryLimit = 5, coreStableMs = 60000, forwardingLimit = 64, forwardingQueueLimit = 128, targetForwardingLimit = Math.min(16,forwardingLimit), targetQueueLimit = Math.min(32,forwardingQueueLimit), queueTimeout = 15000, responseHeadersTimeout = 30000, responseBodyTimeout = 30000, uploadIdleTimeout = 30000, downstreamIdleTimeout = 30000 } = {}) {
     super();
     this.config = validateProxy(config);
     if (expectedIp && !net.isIP(expectedIp)) throw new Error('固定出口 IP 无效');
     Object.assign(this, { healthInterval, retryBase, retryMax, leaseMs, jitter });
     this.onVerified = onVerified;
-    this.listenHost=listenHost;this.listenPort=listenPort;this.gostBinary=gostBinary;
+    this.listenHost=listenHost;this.listenPort=listenPort;this.gostBinary=gostBinary;this.mihomoBinary=mihomoBinary;
+    if(this.config.node&&!mihomoBinary)throw new Error('缺少订阅协议内核，请安装 Mihomo');
     Object.assign(this,{coreRetryBase,coreRetryMax,coreRetryLimit,coreStableMs});
-    this.coreGeneration=0;this.coreAvailable=!gostBinary;this.coreAttempts=0;
+    this.coreGeneration=0;this.coreAvailable=!(gostBinary||mihomoBinary);this.coreAttempts=0;
     this.monitoring = false; this.quarantined = false; this.failures = 0;
     this.timeout = timeout;
     for(const value of [responseHeadersTimeout,responseBodyTimeout,uploadIdleTimeout,downstreamIdleTimeout])if(!Number.isFinite(value)||value<=0)throw new Error('无效响应超时');
@@ -189,7 +196,7 @@ export class ProxyGateway extends EventEmitter {
     return req.headers['proxy-authorization'] === `Basic ${Buffer.from(`workspace:${this.token}`).toString('base64')}`;
   }
   async start() {
-    if(this.gostBinary){try{await this.launchCore();}catch(error){await this.stop();throw error;}this.status.engine='gost';}else this.status.engine='native';
+    if(this.gostBinary||this.mihomoBinary){try{await this.launchCore();}catch(error){await this.stop();throw error;}this.status.engine=this.mihomoBinary?'mihomo':'gost';}else this.status.engine='native';
     this.server = http.createServer({requestTimeout:0,headersTimeout:60000}, (req, res) => this.forward(req, res));
     // Upload progress is bounded by RequestLifecycle, not a total receipt deadline.
     this.server.on('checkContinue',(req,res)=>this.forward(req,res,true));
@@ -208,11 +215,11 @@ export class ProxyGateway extends EventEmitter {
   }
   async launchCore() {
     const generation=++this.coreGeneration;
-    const sidecar=await startGost(this.config,{binary:this.gostBinary,ca:this.ca,onExit:()=>{
+    const sidecar=await (this.mihomoBinary?startMihomo:startGost)(this.config,{binary:this.mihomoBinary||this.gostBinary,ca:this.ca,onExit:()=>{
       if(this.closed || generation!==this.coreGeneration)return;
       this.coreAvailable=false;++this.coreGeneration;
       clearTimeout(this.coreStableTimer);this.coreStableTimer=null;clearTimeout(this.healthTimer);
-      this.block('GOST 内核退出，等待恢复并重新核验固定出口');
+      this.block('代理内核退出，等待恢复并重新核验固定出口');
       this.update({verificationState:'unavailable',coreState:'waiting'});
       this.scheduleCoreRecovery();
     }});
@@ -222,7 +229,7 @@ export class ProxyGateway extends EventEmitter {
   scheduleCoreRecovery() {
     clearTimeout(this.coreTimer);
     if(this.closed || this.quarantined)return;
-    if(this.coreAttempts>=this.coreRetryLimit){this.update({coreState:'exhausted',recovering:false,nextRetryAt:null,reason:'GOST 连续恢复失败，已停止自动重试；请重新连接代理'});return;}
+    if(this.coreAttempts>=this.coreRetryLimit){this.update({coreState:'exhausted',recovering:false,nextRetryAt:null,reason:'代理内核连续恢复失败，已停止自动重试；请重新连接代理'});return;}
     const delay=Math.min(this.coreRetryMax,this.coreRetryBase*2**this.coreAttempts);
     this.update({recovering:true,coreState:'waiting',coreAttempts:this.coreAttempts,nextRetryAt:new Date(Date.now()+delay).toISOString()});
     this.coreTimer=setTimeout(()=>{
@@ -247,11 +254,11 @@ export class ProxyGateway extends EventEmitter {
         this.markCoreStable();
       }
     }catch{
-      if(!this.closed && !this.quarantined){this.coreAvailable=false;this.block('GOST 恢复失败，等待重试；不会直连');this.scheduleCoreRecovery();}
+      if(!this.closed && !this.quarantined){this.coreAvailable=false;this.block('代理内核恢复失败，等待重试；不会直连');this.scheduleCoreRecovery();}
     }
   }
   markCoreStable(){
-    if(!this.gostBinary || this.closed || this.quarantined || !this.coreAvailable || this.status.state!=='ready' || this.coreStableTimer)return;
+    if(!(this.gostBinary||this.mihomoBinary) || this.closed || this.quarantined || !this.coreAvailable || this.status.state!=='ready' || this.coreStableTimer)return;
     const generation=this.coreGeneration;
     this.coreStableTimer=setTimeout(()=>{this.coreStableTimer=null;if(!this.closed&&!this.quarantined&&this.coreAvailable&&generation===this.coreGeneration&&this.status.state==='ready'){this.coreAttempts=0;this.update({coreAttempts:0});}},this.coreStableMs);
     this.coreStableTimer.unref?.();
@@ -546,11 +553,11 @@ export class ProxyGateway extends EventEmitter {
     return this.verifying;
   }
   async detectRegion(url='https://ipinfo.io/json') {
-    this.assertOpen();const pinned=this.status.ip;const body=(await this.readText(url)).trim();let code,city,region;
-    try{const data=JSON.parse(body);if(data.error || data.bogon || normalizedIP(data.ip)!==normalizedIP(pinned))throw new Error('地区检测结果与固定出口不一致');const geo=data.geo || data;code=geo.country_code || geo.country;city=typeof geo.city==='string'?geo.city.slice(0,120):'';region=typeof geo.region==='string'?geo.region.slice(0,120):'';}
+    this.assertOpen();const pinned=this.status.ip;const body=(await this.readText(url)).trim();let code,city,region,timezone;
+    try{const data=JSON.parse(body);if(data.error || data.bogon || normalizedIP(data.ip)!==normalizedIP(pinned))throw new Error('地区检测结果与固定出口不一致');const geo=data.geo || data;try{if(geo.timezone){new Intl.DateTimeFormat('en',{timeZone:geo.timezone});timezone=geo.timezone;}}catch{}code=geo.country_code || geo.country;city=typeof geo.city==='string'?geo.city.slice(0,120):'';region=typeof geo.region==='string'?geo.region.slice(0,120):'';}
     catch(error){if(body.startsWith('{'))throw error;const fields=Object.fromEntries(body.split('\n').map(line=>{const i=line.indexOf('=');return [line.slice(0,i),line.slice(i+1)];}));if(normalizedIP(fields.ip)!==normalizedIP(pinned))throw new Error('地区检测结果与固定出口不一致');code=fields.loc;}
     this.assertOpen();if(this.status.ip!==pinned || !/^[A-Z]{2}$/.test(code || ''))throw new Error('地区检测结果与固定出口不一致');
-    this.update({countryCode:code,city,region,regionLanguage:'en',regionSource:new URL(url).hostname,regionCheckedAt:new Date().toISOString()});return code;
+    this.update({countryCode:code,city,region,timezone,regionLanguage:'en',regionSource:new URL(url).hostname,regionCheckedAt:new Date().toISOString()});return code;
   }
   async verifySources(urls) {
     const generation=this.coreGeneration,poolGeneration=this.poolGeneration;

@@ -18,3 +18,5 @@ artifacts/
 .DS_Store
 
 vendor/gost/
+
+/vendor/mihomo/

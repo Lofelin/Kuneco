@@ -14,3 +14,6 @@ src/features/proxy/*
 !docker/runtime/*.sh
 
 !src/features/proxy/gost-sidecar.mjs
+
+!src/features/proxy/mihomo-sidecar.mjs
+!src/features/proxy/subscription-node.mjs

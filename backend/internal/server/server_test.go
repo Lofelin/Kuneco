@@ -4,13 +4,14 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"kuneco/backend/internal/migration"
 	"github.com/joho/godotenv"
+	"kuneco/backend/internal/migration"
 	"net/http/httptest"
 	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -334,7 +335,7 @@ func TestSQLiteMigrationPreservesRecords(t *testing.T) {
 		t.Fatal("migrated session not usable")
 	}
 	saved, err := s.store.Proxy(user.ID)
-	if err != nil || *saved != proxy {
+	if err != nil || !reflect.DeepEqual(*saved, proxy) {
 		t.Fatal("migrated ciphertext not usable")
 	}
 	if _, _, err = s.store.Login(User{GoogleSub: "after-import"}, "", "", "test", "test"); err != nil {

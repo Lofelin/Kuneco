@@ -246,19 +246,19 @@ export class DockerEnvironments {
   active.add(pending);
   try{return await pending;}finally{active.delete(pending);if(!active.size)this.environmentPreparations.delete(prefix);}
  }
- async ensureGateway(owner,id){
+ async ensureGateway(owner,id,engineOverride){
   const key=resourcePrefix(owner,id);
   return this.withEnvironmentPreparation(key,async assertCurrent=>{
    this.gatewayPreparations ||= new Map();
    const previous=this.gatewayPreparations.get(key) || Promise.resolve();
-   const pending=previous.catch(()=>{}).then(()=>{assertCurrent();return this.prepareGateway(owner,id,assertCurrent);});this.gatewayPreparations.set(key,pending);
+   const pending=previous.catch(()=>{}).then(()=>{assertCurrent();return this.prepareGateway(owner,id,assertCurrent,engineOverride);});this.gatewayPreparations.set(key,pending);
    try{return await pending;}finally{if(this.gatewayPreparations.get(key)===pending)this.gatewayPreparations.delete(key);}
   });
  }
- async prepareGateway(owner,id,assertCurrent=()=>{}){
+ async prepareGateway(owner,id,assertCurrent=()=>{},engineOverride){
   assertCurrent();
   const {prefix,item}=await this.get(owner,id),name=prefix+'-gateway',network=prefix+'-private';
-  assertCurrent();const engine=process.env.KUNECO_PROXY_ENGINE || 'native';
+  assertCurrent();const engine=engineOverride || (item.proxy?.node?'mihomo':process.env.KUNECO_PROXY_ENGINE || 'native');
   const image=await gatewayImage(this,item.imageName || LEGACY_IMAGE,engine);
   assertCurrent();await ensurePrivateNetwork(this,network);assertCurrent();
   const existing=await inspectContainer(this,name);assertCurrent();
@@ -355,10 +355,10 @@ export class DockerEnvironments {
  async stop(owner,id){const {prefix,item}=await this.get(owner,id);await this.stopEnvironmentResources(prefix,item);return this.state(owner);}
  async connect(owner,id,config,expectedIp,onVerified){
   return this.withEnvironmentPreparation(resourcePrefix(owner,id),async assertEnvironmentCurrent=>{
-  const {item}=await this.get(owner,id);if(item.external)throw new Error('已有容器使用原网络，请使用应用代理连接');assertEnvironmentCurrent();const {prefix,name,network}=await this.ensureGateway(owner,id);assertEnvironmentCurrent();
+  const {item}=await this.get(owner,id);if(item.external)throw new Error('已有容器使用原网络，请使用应用代理连接');assertEnvironmentCurrent();const {prefix,name,network}=await this.ensureGateway(owner,id,config.node?'mihomo':undefined);assertEnvironmentCurrent();
   // Give the container service time to bind without silently retrying a proxy request.
   let ready=false;for(let i=0;i<30;i++){try{await this.rpc(owner,id,'status');assertEnvironmentCurrent();ready=true;break;}catch{assertEnvironmentCurrent();await new Promise(r=>setTimeout(r,100));}}if(!ready)throw new Error('容器代理服务未启动');
-  const info=await this.rpc(owner,id,'connect',{config,expectedIp,engine:process.env.KUNECO_PROXY_ENGINE || 'native'});
+  const info=await this.rpc(owner,id,'connect',{config,expectedIp,engine:config.node?'mihomo':process.env.KUNECO_PROXY_ENGINE || 'native'});
   assertEnvironmentCurrent();const ports=JSON.parse(await this.command(['inspect','--format','{{json .NetworkSettings.Ports}}',name]));const port=Number(ports['8080/tcp']?.[0]?.HostPort);if(!port)throw new Error('容器代理端口未就绪');
   assertEnvironmentCurrent();const gatewayIP=await this.command(['inspect','--format',`{{(index .NetworkSettings.Networks "${network}").IPAddress}}`,name]);
   assertEnvironmentCurrent();const adapter=new ContainerGateway(this,owner,id,port,info.token,onVerified);

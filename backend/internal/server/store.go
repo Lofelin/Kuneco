@@ -16,6 +16,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"regexp"
 	"time"
 )
 
@@ -36,15 +37,42 @@ type User struct {
 	LastLoginAt   string `json:"lastLoginAt"`
 }
 type Proxy struct {
-	Protocol string `json:"protocol"`
-	Host     string `json:"host"`
-	Port     int    `json:"port"`
-	Username string `json:"username"`
-	Password string `json:"password"`
+	ProfileID string          `json:"profileId,omitempty"`
+	Name      string          `json:"name,omitempty"`
+	NodeID    string          `json:"nodeId,omitempty"`
+	Node      json.RawMessage `json:"node,omitempty"`
+	Protocol  string          `json:"protocol"`
+	Host      string          `json:"host"`
+	Port      int             `json:"port"`
+	Username  string          `json:"username"`
+	Password  string          `json:"password"`
 }
 
 func (p Proxy) Valid() bool {
-	return (p.Protocol == "http" || p.Protocol == "https" || p.Protocol == "socks5") && net.ParseIP(p.Host) != nil && p.Port > 0 && p.Port < 65536 && len(p.Username) < 1024 && len(p.Password) < 4096
+	if p.ProfileID != "" && !regexp.MustCompile(`^[a-fA-F0-9]{8}-(?:[a-fA-F0-9]{4}-){3}[a-fA-F0-9]{12}$`).MatchString(p.ProfileID) {
+		return false
+	}
+	if p.Port < 1 || p.Port > 65535 || len(p.Username) >= 1024 || len(p.Password) >= 4096 {
+		return false
+	}
+	if p.Protocol == "http" || p.Protocol == "https" || p.Protocol == "socks5" {
+		return net.ParseIP(p.Host) != nil && len(p.Node) == 0
+	}
+	if p.Protocol != "vless" && p.Protocol != "hysteria2" && p.Protocol != "ss" {
+		return false
+	}
+	if len(p.Node) > 32768 || len(p.NodeID) != 64 || len(p.Name) > 480 {
+		return false
+	}
+	if net.ParseIP(p.Host) == nil && !regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9.-]{0,252}$`).MatchString(p.Host) {
+		return false
+	}
+	var n struct {
+		Type   string `json:"type"`
+		Server string `json:"server"`
+		Port   int    `json:"port"`
+	}
+	return json.Unmarshal(p.Node, &n) == nil && n.Type == p.Protocol && n.Server == p.Host && n.Port == p.Port
 }
 
 type Store struct {
