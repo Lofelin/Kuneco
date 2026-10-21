@@ -154,7 +154,7 @@ async function recheckEnvironment({showDetails=false} = {}) {
 $('environmentRetry').onclick = $('environmentInspect').onclick = () => void recheckEnvironment({showDetails:true});
 
 $('browserTabs').addEventListener('wa-tab-show',event=>{if(event.detail.name && event.detail.name!==browserTabsState.activeId)void action(()=>api.browser('select',event.detail.name));});
-let suggestionsOpen = false, suggestionIndex = 0, suggestionItems = [], addressEditing = false;
+let suggestionsOpen = false, suggestionIndex = 0, suggestionItems = [], addressEditing = false, addressDraft = null;
 let addressHistory = [];
 // Browser history is loaded from the account/environment-scoped main-process library.
 const protocolLabel = value => ({ http: 'HTTP / HTTPS', https: 'HTTPS（TLS 入口）', socks5: 'SOCKS5',vless:'VLESS',hysteria2:'Hysteria2',ss:'Shadowsocks' })[value] || value;
@@ -833,17 +833,22 @@ function renderBrowserTabs(state) {
   browserModeSwitches.render(state.mode);
   $('browserNetworkLabel').textContent=({direct:'直接连接',proxy:'使用应用代理',mixed:'自动选择'})[state.mode]||'使用应用代理';
   $('browserNetworkMenu').querySelector('[slot=start]').src='assets/icons/'+({direct:'globe',proxy:'shield-check',mixed:'network'}[state.mode]||'shield-check')+'.svg';
-  for(const item of document.querySelectorAll('[data-browser-network]'))item.checked=item.dataset.browserNetwork===state.mode;
+  for(const item of document.querySelectorAll('[data-browser-network]')){item.checked=item.dataset.browserNetwork===state.mode;item.disabled=false;item.title='';}
   const direct=state.mode==='direct',mixed=state.mode==='mixed';
-  $('browserViewport').querySelector('.browser-empty h2').textContent=mixed?'自动选择访问线路':direct?'使用本机网络浏览':'在同一出口下浏览';
+  $('browserViewport').querySelector('.browser-empty h2').textContent=mixed?'自动选择访问线路':direct?(state.isolation==='container'?'使用容器网络浏览':'使用本机网络浏览'):'在同一出口下浏览';
   $('browserViewport').querySelector('.browser-empty p').textContent=mixed?'优先使用代理，首次连接失败时尝试直连；成功后按域名固定线路。':direct?'输入网址或关键词，无需连接代理。':'连接代理后输入网址或关键词，默认使用 Google 搜索。';
+  if(state.isolation==='container')$('browserViewport').querySelector('.browser-empty p').textContent='网页在当前环境的独立 Linux 容器中运行；按所选模式使用直连、应用代理或自动选择线路。';
   if(network.state!=='ready')$('footerStatus').textContent=mixed?'● 自动选择 · 代理未连接时尝试直连':direct?'● 代理未连接 · 浏览器直连':'● 应用联网已锁定';
   $('navigate').disabled=state.mode==='proxy' && network.state!=='ready';
-  if (changedTab) { addressEditing = false; closeSuggestions(); browserToolbar.tabChanged(); }
+  if (changedTab) { addressEditing = false; addressDraft = null; closeSuggestions(); browserToolbar.tabChanged(); }
   $('browserTabs').replaceChildren();
   for (const tab of state.tabs) {
     const item=document.createElement('wa-tab');item.panel=tab.id;item.className=`browser-tab tab-select ${tab.id===state.activeId?'active':''}`;item.dataset.url=tab.url;item.id='browser-tab-'+tab.id;
-    const title=document.createElement('span');title.className='tab-title';title.textContent=`${tab.loading?'◌ ':''}${tab.title}`;
+    item.setAttribute('aria-busy',String(Boolean(tab.loading)));
+    // Chromium's original ui/webui/resources/images/throbber_small.svg (BSD license beside asset).
+    if(tab.loading){const spinner=document.createElement('img');spinner.src='./assets/icons/chromium-throbber.svg';spinner.className='browser-tab-loading';spinner.alt='正在加载网页';item.append(spinner);}
+    else{const icon=document.createElement('img');icon.className='browser-tab-favicon';icon.alt='';icon.src=/^data:image\//i.test(tab.favicon||'')?tab.favicon:'./assets/icons/globe.svg';icon.onerror=()=>{icon.onerror=null;icon.src='./assets/icons/globe.svg';};item.append(icon);}
+    const title=document.createElement('span');title.className='tab-title';title.textContent=tab.title;
     const close=createUI('app-button');close.className='tab-close';close.setAttribute('icon-action-exempt','');close.append(createIcon('x'));close.setAttribute('aria-label',`关闭 ${tab.title}`);
     close.onclick=event=>{event.stopPropagation();void action(()=>api.browser('close',tab.id));};
     item.append(title,close);$('browserTabs').append(item);const tooltip=document.createElement('wa-tooltip');tooltip.for=item.id;tooltip.textContent=tab.url;$('browserTabs').append(tooltip);
@@ -854,7 +859,7 @@ function renderBrowserTabs(state) {
   if (active) {
     $('browserMessage').classList.toggle('has-error', Boolean(active.error));
     if (!addressEditing) $('address').value = browserAddress(active.url);
-    $('browserMessage').textContent = active.error || (active.loading ? (mixed?'正在自动选择访问线路…':state.mode==='direct'?'正在通过本机网络加载…':'正在通过应用代理加载…') : active.started ? (mixed?(active.route==='direct'?'自动选择 · 当前域名使用本机直连。':active.route==='proxy'?'自动选择 · 当前域名使用应用代理。':'自动选择 · 尚未确定当前域名线路。'):state.mode==='direct'?'页面使用本机网络直接连接。':'页面使用应用代理。') : '输入网址或关键词，默认使用 Google 搜索。');
+    $('browserMessage').textContent = active.error || (active.loading ? (mixed?'正在自动选择访问线路…':state.mode==='direct'?(state.isolation==='container'?'正在通过容器网络加载…':'正在通过本机网络加载…'):'正在通过应用代理加载…') : active.started ? (mixed?(active.route==='direct'?'自动选择 · 当前域名使用本机直连。':active.route==='proxy'?'自动选择 · 当前域名使用应用代理。':'自动选择 · 尚未确定当前域名线路。'):state.mode==='direct'?(state.isolation==='container'?'页面使用容器网络直接连接。':'页面使用本机网络直接连接。'):'页面使用应用代理。') : '输入网址或关键词，默认使用 Google 搜索。');
   }
   bounds();
 }
@@ -863,7 +868,7 @@ function closeSuggestions() {
   $('address').setAttribute('aria-expanded', 'false'); $('address').removeAttribute('aria-activedescendant'); bounds();
 }
 function chooseSuggestion(item) {
-  closeSuggestions(); addressEditing = false; $('address').blur();
+  closeSuggestions(); addressEditing = false; addressDraft = null; $('address').blur();
   void action(() => item.tabId ? api.browser('select', item.tabId) : api.browser('navigate', item.url));
 }
 function renderSuggestions(reset = true) {
@@ -902,10 +907,10 @@ function renderSuggestions(reset = true) {
   suggestionsOpen = true; $('addressSuggestions').classList.remove('hidden');
   $('address').setAttribute('aria-expanded', 'true'); $('address').setAttribute('aria-activedescendant', `address-option-${suggestionIndex}`); bounds();
 }
-$('newTab').onclick = () => action(() => { closeSuggestions(); addressEditing = false; return api.browser('new'); });
-$('navigate').onclick = () => { const url = resolveBrowserAddress($('address').value); closeSuggestions(); addressEditing = false; $('address').blur(); void action(() => api.browser('navigate', url)); };
-$('address').onfocus = () => { $('address').value=browserTabsState.tabs.find(t=>t.id===browserTabsState.activeId)?.url || $('address').value; addressEditing = true; $('address').select(); renderSuggestions(); };
-$('address').oninput = () => { addressEditing = true; renderSuggestions(); };
+$('newTab').onclick = () => action(() => { closeSuggestions(); addressEditing = false; addressDraft = null; return api.browser('new'); });
+$('navigate').onclick = () => { const url = resolveBrowserAddress(addressDraft ?? $('address').value); addressDraft = null; closeSuggestions(); addressEditing = false; $('address').blur(); void action(() => api.browser('navigate', url)); };
+$('address').onfocus = () => { $('address').value=browserTabsState.tabs.find(t=>t.id===browserTabsState.activeId)?.url || $('address').value; addressDraft = null; addressEditing = true; $('address').select(); renderSuggestions(); };
+$('address').oninput = () => { addressDraft = $('address').value; addressEditing = true; renderSuggestions(); };
 $('address').onblur = () => { addressEditing = false; closeSuggestions();$('address').value=browserAddress(browserTabsState.tabs.find(t=>t.id===browserTabsState.activeId)?.url || $('address').value); };
 $('address').onkeydown = event => {
   if (event.isComposing) return;

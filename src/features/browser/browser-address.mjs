@@ -16,3 +16,11 @@ export function resolveBrowserAddress(input) {
   url.searchParams.set('hl', 'en');
   return url.href;
 }
+
+// Only the internal empty page bypasses ordinary web address validation.
+export function validateBrowserNavigationURL(raw){
+ const value=String(raw).trim();if(value==='about:blank')return value;
+ let url;try{url=new URL(value.includes('://')?value:`https://${value}`);}catch{throw Error('网址无效，请检查后重试。');}
+ if(!['https:','http:'].includes(url.protocol)||url.username||url.password)throw Error('仅支持普通 HTTP／HTTPS 页面');
+ if(url.hostname.toLowerCase().replace(/^\[|\]$/g,'')==='0.0.0.0')throw Error('请使用具体的本地服务地址');return url.href;
+}

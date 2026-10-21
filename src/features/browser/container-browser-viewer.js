@@ -1,0 +1,11 @@
+const screen=document.getElementById('screen'),typing=document.getElementById('typing');
+window.containerBrowser.onFrame(data=>{screen.src='data:image/jpeg;base64,'+data;});
+const send=value=>window.containerBrowser.input(value);
+const buttons=['left','middle','right'];
+for(const [name,event] of [['pointerdown','mousePressed'],['pointerup','mouseReleased'],['pointermove','mouseMoved']])screen.addEventListener(name,e=>{e.preventDefault();if(name==='pointerdown'){typing.focus();screen.setPointerCapture(e.pointerId);}send({type:'mouse',event,x:e.clientX,y:e.clientY,button:name==='pointermove'?'none':buttons[e.button]||'none',buttons:e.buttons,clickCount:name==='pointermove'?0:e.detail||1});});
+screen.addEventListener('wheel',e=>{e.preventDefault();send({type:'mouse',event:'mouseWheel',x:e.clientX,y:e.clientY,deltaX:e.deltaX,deltaY:e.deltaY});},{passive:false});
+screen.addEventListener('contextmenu',e=>e.preventDefault());
+for(const name of ['keydown','keyup'])document.addEventListener(name,e=>{const modifiers=(e.altKey?1:0)|(e.ctrlKey?2:0)|(e.metaKey?4:0)|(e.shiftKey?8:0);if(e.key==='v'&&(e.metaKey||e.ctrlKey))return;if(e.key.length===1&&!e.ctrlKey&&!e.metaKey&&!e.altKey)return;e.preventDefault();send({type:'key',event:name==='keydown'?'keyDown':'keyUp',key:e.key,code:e.code,keyCode:e.keyCode,modifiers});});
+typing.addEventListener('input',e=>{if(e.isComposing)return;if(typing.value)send({type:'text',text:typing.value});typing.value='';});
+typing.addEventListener('compositionend',()=>{if(typing.value)send({type:'text',text:typing.value});typing.value='';});
+typing.addEventListener('paste',e=>{e.preventDefault();send({type:'text',text:e.clipboardData.getData('text/plain')});});

@@ -222,7 +222,7 @@ export class DockerEnvironments {
   const {item,prefix}=await this.get(owner,id);if(name!==item.name)throw new Error('请输入完整且一致的环境名称');if(item.external)return;
   await this.stopDirectTasks(prefix);
   // List first so unavailable engines and removal failures cannot look like successful deletion.
-  for(const [kind,names] of [['container',[prefix+'-worker',prefix+'-gateway']],['network',[prefix+'-private',prefix+'-direct-egress']],['volume',[prefix+'-worker-home',prefix+'-worker-work']]]){
+  for(const [kind,names] of [['container',[prefix+'-browser',prefix+'-browser-transport',prefix+'-worker',prefix+'-gateway']],['network',[prefix+'-private',prefix+'-direct-egress',prefix+'-browser-egress']],['volume',[prefix+'-browser-home',prefix+'-worker-home',prefix+'-worker-work']]]){
    const existing=new Set((await this.command([kind,'ls',...(kind==='container'?['-a']:[]),'--format','{{.Name'+(kind==='container'?'s':'')+'}}'])).split('\n'));
    for(const name of names)if(existing.has(name))await this.command([kind,'rm',...(kind==='container'?['-f']:[]),name]);
   }
@@ -331,7 +331,7 @@ export class DockerEnvironments {
    const [cleanup]=await Promise.allSettled([direct,...(this.environmentPreparations?.get(prefix)||[])]);
    const endpoint=item.external?.endpoint || this.endpoint;
    const names=new Set((await this.command(['ps','-a',...(item.external?['--no-trunc']:[]),'--format',item.external?'{{.ID}}':'{{.Names}}'],{endpoint})).split('\n'));
-   const targets=item.external?[item.external.id]:['worker','gateway'].map(suffix=>prefix+'-'+suffix);
+   const targets=item.external?[item.external.id]:['browser','browser-transport','worker','gateway'].map(suffix=>prefix+'-'+suffix);
    const errors=cleanup.status==='rejected'?[cleanup.reason]:[];
    for(const target of targets){
     if(!names.has(target))continue;

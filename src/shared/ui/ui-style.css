@@ -560,6 +560,7 @@ app-button wa-icon,wa-dropdown-item wa-icon,wa-icon{font-size:16px!important;wid
 #browserTabs::part(tabs){align-items:center;gap:5px}
 wa-tab.browser-tab{flex:0 0 200px;width:200px;min-width:130px;max-width:200px;height:34px;padding:0;overflow:hidden;box-sizing:border-box}
 wa-tab.browser-tab::part(base){box-sizing:border-box;display:flex;align-items:center;width:100%;height:34px;min-height:34px;padding:0 7px 0 12px;gap:8px;line-height:18px}
+.browser-tab-loading,.browser-tab-favicon{flex:none;width:16px;height:16px;object-fit:contain}
 .browser-tab .tab-title{min-width:0;line-height:18px}
 app-button.tab-close{--icon-hit-size:24px;padding:0;align-self:center}
 #newTab{padding:0;align-self:center}

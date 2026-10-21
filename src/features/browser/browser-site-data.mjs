@@ -26,7 +26,7 @@ export class BrowserSiteData{
   await sync.clear(matches,async()=>{
    // Exclude cookies here: Chromium clearData cookies expands to the registrable domain.
    const dataTypes=['backgroundFetch','fileSystems','indexedDB','localStorage','serviceWorkers','webSQL','cache'];
-   await this.storage.clearData({dataTypes,...(kind==='site'?{origins:site.origins,originMatchingMode:'origin-in-all-contexts'}:{})});
+   await this.storage.clearData({dataTypes,...(this.storage.container&&kind==='all'?{origins:rows.sites.flatMap(item=>item.origins)}:{}),...(kind==='site'?{origins:site.origins,originMatchingMode:'origin-in-all-contexts'}:{})});
    const cookies=await this.storage.cookies.get({});
    for(const cookie of cookies)if(matches(cookie))await expireCookie(this.storage,cookie);
    if(kind==='all'){await this.storage.clearAuthCache();this.origins.clear();}

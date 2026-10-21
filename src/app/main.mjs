@@ -1,3 +1,8 @@
+import {createContainerBrowserNetwork} from '../features/browser/container-browser-network.mjs';
+import {ContainerBrowserFiles} from '../features/browser/container-browser-files.mjs';
+import {ContainerBrowserEngine,ensureContainerBrowserImage} from '../features/browser/container-browser-engine.mjs';
+import {ContainerBrowserContents} from '../features/browser/container-browser-contents.mjs';
+import {containerBrowserStorage} from '../features/browser/container-browser-storage.mjs';
 import {ProxyProfiles,profileEgressIdentity} from '../features/proxy/proxy-profiles.mjs';
 import {undoTurnChanges} from '../features/chat/turn-change-undo.mjs';
 import {stageCodexDocuments,originalDocumentPrompt} from '../features/runtimes/codex-documents.mjs';
@@ -38,6 +43,7 @@ import {LearningAutomations} from '../features/automation/learning-automation.mj
 import {mergeChatPayload,saveChatSnapshot} from '../features/chat/chat-sync.mjs';
 import {chatRuntimeEnvironment,chatRequestRoute,chatNetworkMode,directChatEnvironment,createDirectChatSpawner} from '../features/chat/chat-network.mjs';
 import {createBrowserDirectTransport} from '../features/browser/browser-direct.mjs';
+import {validateBrowserNavigationURL as localBrowserUrl} from '../features/browser/browser-address.mjs';
 import {browserRoute,normalizeBrowserMode} from '../features/browser/browser-routing.mjs';
 import {RUNTIME_CATALOG,CLI_RUNTIMES,supportsChat} from '../features/runtimes/runtime-install-config.mjs';
 import {removeCLIRuntime} from '../features/runtimes/runtime-removal.mjs';
@@ -94,7 +100,7 @@ const environmentBrowserPartition=(owner,id)=>'persist:dingtu-'+createHash('sha2
 let cookiePreferences={},browserDataBusy=false,browserClearBusy=false;const cookieSyncs=new Map();
 const cookiePreferenceKey=(owner,id)=>JSON.stringify([owner,id]);
 function cookieContext(){
- const owner=dockerOwner(),id=activeContainerId,key=cookiePreferenceKey(owner,id),storage=session.fromPartition(browserPartition());
+ const owner=dockerOwner(),id=activeContainerId,key=cookiePreferenceKey(owner,id),storage=currentBrowserStorage();
  if(cookieSyncs.has(key))return cookieSyncs.get(key);
  const pref={mode:cookiePreferences[key]?.mode==='account'?'account':'local'};
  const ctx={owner,id,pref,error:'',sync:null,sites:new BrowserSiteData({storage,file:path.join(app.getPath('userData'),'browser-sites',createHash('sha256').update(key).digest('hex')+'.json')})};
@@ -186,6 +192,7 @@ function saveEgressPin(config, ip, scope) {
 let browserMode='proxy',browserRoutingChanging=false,directBrowserTransport,directBrowserTransportPromise;
 const browserNetworkReady=(url)=>!browserClearBusy && !browserRoutingChanging && (browserMode==='direct' || browserMode==='mixed' || gateway?.status.state==='ready');
 async function browserProxyConfiguration(){
+ if(useContainerBrowser())return {mode:'fixed_servers',proxyRules:'http://127.0.0.1:1',proxyBypassRules:'<-loopback>'};
  if(browserMode!=='proxy'){directBrowserTransport=await (directBrowserTransportPromise ||= createBrowserDirectTransport({routeProxy:host=>{if(browserMode==='direct')return null;if(gateway?.status.state!=='ready')throw new Error('代理未连接');return gateway;},allowDirectFallback:()=>browserMode==='mixed',onRouteSelected:()=>publishTabs()}).catch(error=>{directBrowserTransportPromise=null;throw error;}));return {mode:'fixed_servers',proxyRules:directBrowserTransport.address,proxyBypassRules:'<-loopback>'};}
  return {mode:'fixed_servers',proxyRules:gateway?.address || 'http://127.0.0.1:1',proxyBypassRules:'<-loopback>'};
 }
@@ -233,23 +240,17 @@ function handleContainerLoginCallback(raw){
  }
  return true;
 }
-function localBrowserUrl(raw) {
-  const url = new URL(raw.includes('://') ? raw : `https://${raw}`);
-  if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password) throw new Error('仅支持普通 HTTP／HTTPS 页面');
-  const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, '');
-  if(host==='0.0.0.0')throw new Error('请使用具体的本地服务地址');
-  return url.href;
-}
 function browserActualRoute(url){
- try{const target=new URL(url);if(!/^https?:$/.test(target.protocol))return null;return browserMode==='mixed'?directBrowserTransport?.getRoute(target.hostname)||null:browserMode==='direct'?'direct':'proxy';}catch{return null;}
+ try{const target=new URL(url);if(!/^https?:$/.test(target.protocol))return null;if(useContainerBrowser())return browserMode==='mixed'?containerBrowserEngine?.transport?.route(target.hostname)||null:browserMode==='direct'?'direct':'proxy';return browserMode==='mixed'?directBrowserTransport?.getRoute(target.hostname)||null:browserMode==='direct'?'direct':'proxy';}catch{return null;}
 }
 function browserState() {
-  return { mode:browserMode, activeId: activeTabId, tabs: [...browserTabs.values()].map(({ id, url, title, started, loading, error,wc }) => ({ id, url, title, started, loading, error,zoom:wc&&!wc.isDestroyed()?wc.getZoomFactor():1, route:started?browserActualRoute(url):null })) };
+  return { mode:browserMode, isolation:useContainerBrowser()?'container':'local', activeId: activeTabId, tabs: [...browserTabs.values()].map(({ id, url, title, started, loading, error,favicon,wc }) => ({ id, url, title, started, loading, error,favicon,zoom:wc&&!wc.isDestroyed()?wc.getZoomFactor():1, route:started?browserActualRoute(url):null })) };
 }
 function showBrowserViews() {
   for (const tab of browserTabs.values()) {
     if (!tab.wc || tab.wc.isDestroyed()) continue;
     tab.view.setBounds(browserBounds);
+    if(tab.remote){void tab.wc.resize(browserBounds).catch(()=>{});tab.wc.setVisible(browserVisible && browserNetworkReady() && tab.id===activeTabId && tab.started);}
     tab.view.setVisible(browserVisible && browserNetworkReady() && tab.id === activeTabId && tab.started);
   }
 }
@@ -285,9 +286,91 @@ function navigateBrowserTab(tab, url) {
   // WebContents events own the final state, independent of this promise.
   void tab.privacyReady.then(() => { if (tab.privacyError || tab.wc.isDestroyed()) throw new Error('Privacy protection unavailable'); return tab.wc.loadURL(target); }).catch(error => {
     if (!browserTabs.has(tab.id) || error.code === 'ERR_ABORTED' || error.errno === -3) return;
-    tab.error = '页面加载失败，请检查代理和目标网站。'; tab.loading = false; publishTabs();
+    tab.error = tab.remote?'容器浏览器访问失败：'+error.message:'页面加载失败，请检查代理和目标网站。'; tab.loading = false; publishTabs();
   });
 }
+const remoteBrowserStores=new Map();
+let containerBrowserEngine,containerBrowserStarting,containerBrowserClosing=Promise.resolve();
+const remoteBrowserViewers=new Map();
+function useContainerBrowser(){return Boolean(activeContainerId&&!fixtureMode);}
+function currentBrowserStorage(){
+ if(!useContainerBrowser())return session.fromPartition(browserPartition());
+ const key=JSON.stringify([dockerOwner(),activeContainerId]);
+ if(!remoteBrowserStores.has(key)){const owner=dockerOwner(),environmentId=activeContainerId;remoteBrowserStores.set(key,containerBrowserStorage(async()=>{if(owner!==dockerOwner()||environmentId!==activeContainerId)throw Error('浏览器存储不属于当前账号环境');const engine=await ensureContainerBrowser();if(owner!==dockerOwner()||environmentId!==activeContainerId||engine.owner!==owner||engine.environmentId!==environmentId)throw Error('浏览器存储环境已变化');return engine;}));}
+ return remoteBrowserStores.get(key);
+}
+async function closeContainerBrowser(){
+ const engine=containerBrowserEngine;containerBrowserEngine=null;
+ if(engine)containerBrowserClosing=containerBrowserClosing.catch(()=>{}).then(()=>engine.close());
+ return containerBrowserClosing;
+}
+async function ensureContainerBrowser(){
+ const owner=dockerOwner(),environmentId=activeContainerId,proxy=gateway,mode=browserMode;
+ const assertCurrent=()=>{if(!owner||!environmentId||owner!==dockerOwner()||environmentId!==activeContainerId||browserMode!==mode||(mode!=='direct'&&gateway!==proxy)||(mode==='proxy'&&proxy?.status.state!=='ready')||accountChanging||containerOperation)throw Error('当前浏览器网络未就绪或环境已变化，容器浏览器已禁止访问');};
+ assertCurrent();if(containerBrowserEngine?.networkMode===mode&&(mode==='direct'||containerBrowserEngine.gatewayOwner===proxy)&&!containerBrowserEngine.transport?.stopped&&containerBrowserEngine.owner===owner&&containerBrowserEngine.environmentId===environmentId&&!containerBrowserEngine.stopped)return containerBrowserStarting||containerBrowserEngine;
+ if(containerBrowserStarting)return containerBrowserStarting;
+ const pending=(async()=>{
+  await closeContainerBrowser();assertCurrent();
+  if(mode==='proxy')await proxy.checkNow();
+  else if(mode==='mixed'&&proxy?.status.state==='ready')await proxy.checkNow().catch(()=>{});assertCurrent();
+  const {item,prefix}=await dockerEnvs.get(owner,environmentId);assertCurrent();if(item.external)throw Error('外部容器尚未接入独立浏览器，请使用受管理的环境');
+  let gatewayIP=mode==='direct'||proxy?.status.state!=='ready'?null:await dockerEnvs.command(['inspect','--format',`{{(index .NetworkSettings.Networks "${prefix}-private").IPAddress}}`,prefix+'-gateway']);assertCurrent();
+  // Region lookup is performed by the already verified proxy, never the host.
+  if(mode!=='direct'&&proxy?.status.state==='ready'&&!proxy.status.timezone)await proxy.detectRegion().catch(()=>{});assertCurrent();
+  const region=mode!=='direct'&&proxy?.status.state==='ready'?proxy.status:{};
+  const timezone=region.timezone||'UTC';
+  const locales={JP:'ja-JP',US:'en-US',GB:'en-GB',TW:'zh-TW',HK:'zh-HK',SG:'en-SG',DE:'de-DE',FR:'fr-FR',KR:'ko-KR',CA:'en-CA',AU:'en-AU'};
+  const locale=locales[region.countryCode]||'en-US';
+  let engine;const image=await ensureContainerBrowserImage(dockerEnvs);assertCurrent();
+  const transport=await createContainerBrowserNetwork(dockerEnvs,{owner,environmentId,mode,image,proxy:gatewayIP?{ip:gatewayIP,token:proxy.token}:null,assertCurrent,onRouteSelected:()=>publishTabs(),onClosed:()=>{if(engine)void engine.close().catch(()=>{});}});
+  try{assertCurrent();}catch(error){await transport.close();throw error;}
+  gatewayIP=transport.gatewayIP;
+  engine=new ContainerBrowserEngine(dockerEnvs,{owner,environmentId,gatewayIP,token:transport.token,timezone,locale,assertCurrent,
+   allowRequest:(url,sessionId)=>{try{localBrowserUrl(url);if(handleContainerLoginCallback(url))return false;const host=new URL(url).hostname.replace(/^\[|\]$/g,'');if(host==='localhost'||host.endsWith('.localhost')||host.endsWith('.local')||host==='host.docker.internal'||!host.includes('.')&&!isIP(host)||isIP(host)&&!publicProxyAddress(host))return false;if(!/^https?:/.test(url))return url==='about:blank';const tab=[...browserTabs.values()].find(t=>t.remote&&t.wc.sessionId===sessionId);if(!tab)return false;if(browserNetworkReady(url)&&(!browserFeatures||browserFeatures.agentAllowed(tab.wc,url))){void cookieContext().sites.record(url).catch(()=>{});return true;}return false;}catch{return false;}}});
+  engine.transport=transport;engine.networkMode=mode;engine.gatewayOwner=proxy;containerBrowserEngine=engine;await engine.start();assertCurrent();
+  engine.files=new ContainerBrowserFiles(engine,{findContents:frameId=>[...browserTabs.values()].find(t=>t.remote&&t.wc.engine===engine&&t.wc.frames.has(frameId))?.wc,onDownload:(item,wc)=>{if(!browserFeatures?.agentAllowed(wc,item.getURL(),'download')){item.cancel();return;}currentBrowserStorage().emit('will-download',{},item,wc);}});await engine.files.enable();assertCurrent();
+  engine.on('closed',()=>{for(const tab of browserTabs.values())if(tab.remote&&tab.wc.engine===engine){tab.error='容器浏览器已断开，请重新打开';tab.loading=false;}publishTabs();});
+  return engine;
+ })();containerBrowserStarting=pending;
+ try{return await pending;}catch(error){await closeContainerBrowser();throw error;}finally{if(containerBrowserStarting===pending)containerBrowserStarting=null;}
+}
+function createContainerBrowserTab(url,openerId){
+ const scope={owner:dockerOwner(),environmentId:activeContainerId};
+ const view=new WebContentsView({webPreferences:{partition:'kuneco-container-viewer',preload:path.join(here,'features/browser/container-browser-viewer-preload.cjs'),sandbox:true,contextIsolation:true,nodeIntegration:false}});
+ view.webContents.setWindowOpenHandler(()=>({action:'deny'}));
+ view.webContents.on('will-navigate',event=>event.preventDefault());
+ const tab={id:randomUUID(),view,openerId,url:'https://www.google.com/',title:'新标签页',started:false,loading:false,error:'',remote:true};
+ let target;
+ const ready=ensureContainerBrowser;
+ target=new ContainerBrowserContents({ready,nativeImage,viewer:view.webContents,
+  allowed:value=>{if(scope.owner!==dockerOwner()||scope.environmentId!==activeContainerId)return false;try{localBrowserUrl(value);return browserNetworkReady(value)&&(!browserFeatures||browserFeatures.agentAllowed(target,value));}catch{return false;}},
+  onDialog:details=>browserFeatures.ask(scope,'网页提示',String(details.message||'').slice(0,4000)),
+  onFileChooser:async(details,contents)=>{if(scope.owner!==dockerOwner()||scope.environmentId!==activeContainerId||!browserNetworkReady())throw Error('环境已变化或代理未就绪');const selected=await browserFeatures.ask(scope,'选择容器文件','填写当前环境 /workspace 内的文件完整路径。文件只在容器内读取，不打开本机文件选择器。',undefined,'/workspace/');if(!selected)return;if(scope.owner!==dockerOwner()||scope.environmentId!==activeContainerId||!browserNetworkReady()||contents.isDestroyed())throw Error('环境已变化或代理未就绪');await contents.engine.files.upload(contents,details,selected);},
+  onPopup:value=>createBrowserTab(value,undefined,tab.id),onNavigate:value=>{if(scope.owner===dockerOwner()&&scope.environmentId===activeContainerId)void cookieContext().sites.record(value).catch(()=>{});}});
+ tab.wc=target;tab.privacyReady=Promise.resolve();
+ void browserFeatures?.configured(currentBrowserStorage(),scope).catch(error=>emit('browserLibraryError',{message:error.message}));
+ browserTabs.set(tab.id,tab);remoteBrowserViewers.set(view.webContents.id,tab);window.contentView.addChildView(view);view.setVisible(false);
+ void view.webContents.loadFile(path.join(here,'features/browser/container-browser-viewer.html'));
+ browserFeatures?.attach(tab);
+ target.on('did-start-loading',()=>{tab.loading=true;publishTabs();});
+ target.on('did-stop-loading',()=>{tab.loading=false;publishTabs();});
+ for(const event of ['did-navigate','did-navigate-in-page'])target.on(event,(_e,value)=>{tab.url=value;tab.started=true;tab.error='';publishTabs();});
+ target.on('page-title-updated',(_e,value)=>{tab.title=value;publishTabs();});
+ target.on('page-favicon-updated',(_e,icons)=>{tab.favicon=icons[0]||'';publishTabs();});
+ target.once('destroyed',()=>{remoteBrowserViewers.delete(view.webContents.id);if(!view.webContents.isDestroyed())view.webContents.close();removeBrowserTab(tab);});
+ target.on('notice',message=>{if(scope.owner===dockerOwner()&&scope.environmentId===activeContainerId)emit('browserLibraryError',{message});});
+ target.on('did-fail-load',(_event,_code,message)=>{tab.error=message;tab.loading=false;publishTabs();});
+ activeTabId=tab.id;browser=view;
+ // Navigation/history commands must target the container, never the viewer.
+ tab.viewNavigation=target;
+ if(url)navigateBrowserTab(tab,url);publishTabs();return tab;
+}
+ipcMain.on('container-browser:input',(event,value)=>{
+ const tab=remoteBrowserViewers.get(event.sender.id);
+ if(!tab||tab.id!==activeTabId||!browserVisible||!browserNetworkReady()||tab.wc.isDestroyed())return;
+ void tab.wc.input(value||{}).catch(()=>{});
+});
+
 const configuredBrowserSessions=new Map();
 const failedBrowserSessions=new WeakSet();
 function configureBrowserSession(browserSession){
@@ -319,6 +402,7 @@ function configureBrowserSession(browserSession){
  configuredBrowserSessions.set(browserSession,ready);return ready;
 }
 function createBrowserTab(url, popupOptions, openerId) {
+  if(useContainerBrowser())return createContainerBrowserTab(url,openerId);
   const browserSession = session.fromPartition(browserPartition());
   browserSession.setUserAgent(browserSession.getUserAgent(), 'en-US,en');
   const routingReady=configureBrowserSession(browserSession);
@@ -387,7 +471,13 @@ async function stopGateway({preserveDirectChat=false}={}) {
   account?.closeConnections();
   clearInterval(healthTimer); healthTimer = null;
   abortRun(task=>!preserveDirectChat || task.networkMode!=='direct');
-  if (gateway) { const old = gateway; gateway = null; await old.stop(); }
+  const old = gateway;gateway = null;
+  // Retire the browser bound to this exact gateway even when reconnecting uses
+  // the same persisted proxy token. Stop website execution before replacing it.
+  if(browserMode!=='direct'||accountChanging||containerOperation)await closeContainerBrowser();
+  if(old)await old.stop();
+  // Drain an initializer invalidated above before a new gateway can be installed.
+  await containerBrowserStarting?.catch(()=>{});
   if(browserMode==='proxy')stopBrowserTabs();
 }
 const aiSessions=new Map(); let activeAISessionId, defaultEngine='cc', defaultCodexModel=null;
@@ -608,8 +698,9 @@ ipcMain.handle('workspace:applyIproyal', guarded(async ({ batchId, index, relayI
 }));
 ipcMain.handle('workspace:cancelImport', guarded(async () => { pendingImport = null; return true; }));
 function resetEnvironmentBrowser(){
+ void closeContainerBrowser().catch(()=>{});
  browserFeatures?.invalidate();
- for(const tab of browserTabs.values()){tab.closing=true;window.contentView.removeChildView(tab.view);if(!tab.wc.isDestroyed())tab.wc.close();}browserTabs.clear();createBrowserTab();publishTabs();
+ const previousTabs=[...browserTabs.values()];browserTabs.clear();for(const tab of previousTabs){tab.closing=true;window.contentView.removeChildView(tab.view);if(!tab.wc.isDestroyed())tab.wc.close();}createBrowserTab();publishTabs();
 }
 async function containerAuth(engine){
  if(!supportsChat(engine))return {state:'unknown',checkedAt:new Date().toISOString()};
@@ -731,7 +822,7 @@ ipcMain.handle('workspace:dockerEnvironments',guarded(async(action='state',value
   if(!chatReady || chatOwner!==owner)throw new Error('对话记录尚未加载，无法完整删除环境，请稍后重试');
   if(id!==null)await dockerEnvs.deleteResources(owner,id,value.name);
   else await account.deleteLocalEnvironment(hostname());
-  if(deletingActive){for(const tab of browserTabs.values()){tab.closing=true;window.contentView.removeChildView(tab.view);if(!tab.wc.isDestroyed())tab.wc.close();}browserTabs.clear();}
+  if(deletingActive){const previousTabs=[...browserTabs.values()];browserTabs.clear();for(const tab of previousTabs){tab.closing=true;window.contentView.removeChildView(tab.view);if(!tab.wc.isDestroyed())tab.wc.close();}}
   const partition=environmentBrowserPartition(owner,id);
   const storage=session.fromPartition(partition);await storage.closeAllConnections();await storage.clearStorageData();await storage.clearCache();await storage.clearAuthCache();
   const deleted=new Set([...aiSessions.values()].filter(item=>(item.environmentId || null)===id).map(item=>item.id));
@@ -982,7 +1073,7 @@ ipcMain.handle('workspace:browserCookies', guarded(async (settings) => {
    await ctx.sync.setMode(settings.mode).catch(()=>{ctx.error='Cookie 同步失败，请检查账号服务后刷新重试';});
   }finally{browserDataBusy=false;publishTabs();}
  }else await ctx.sync.sync().catch(ctx.sync.onError);
- const storage=session.fromPartition(environmentBrowserPartition(owner,environmentId));
+ const storage=currentBrowserStorage();
  await storage.cookies.flushStore();
  const cookies=await storage.cookies.get({});
  if(owner!==dockerOwner() || environmentId!==activeContainerId || accountChanging || containerOperation)throw new Error('账号或环境已切换，请重新打开设置');
@@ -1004,7 +1095,7 @@ ipcMain.handle('workspace:browserData',guarded(async(action='status',value={})=>
  try{
   // Closing pages prevents JavaScript from recreating data during removal.
   for(const tab of [...browserTabs.values()])removeBrowserTab(tab,true);
-  const storage=session.fromPartition(environmentBrowserPartition(owner,environmentId));
+  const storage=currentBrowserStorage();
   await storage.closeAllConnections();
   await ctx.sites.clear(value,ctx.sync);
   if(!valid())throw new Error('账号或环境已变化');
@@ -1014,9 +1105,11 @@ ipcMain.handle('workspace:browserData',guarded(async(action='status',value={})=>
 ipcMain.handle('workspace:browserSettings', guarded(async mode => {
  if(!['proxy','direct','mixed'].includes(mode))throw new Error('未知浏览器连接方式');
  if(browserDataBusy || browserRoutingChanging || connecting || accountChanging || containerOperation)throw new Error('网络或环境切换中，请稍后重试');
+ if(mode===browserMode)return browserState();
  const previous=browserMode;browserRoutingChanging=true;
  const currentSession=session.fromPartition(browserPartition());
  try{
+  if(useContainerBrowser()){browserMode=mode;await closeContainerBrowser();await containerBrowserStarting?.catch(()=>{});const file=path.join(app.getPath('userData'),'browser-preferences.json');await mkdir(app.getPath('userData'),{recursive:true,mode:0o700});await writeFile(file+'.tmp',JSON.stringify({mode}),{mode:0o600});await rename(file+'.tmp',file);return browserState();}
   stopBrowserTabs();directBrowserTransport?.closeConnections();
   await configureBrowserSession(currentSession);
   await Promise.all(configuredBrowserSessions.values());
@@ -1027,7 +1120,7 @@ ipcMain.handle('workspace:browserSettings', guarded(async mode => {
   await mkdir(app.getPath('userData'),{recursive:true,mode:0o700});
   const file=path.join(app.getPath('userData'),'browser-preferences.json');
   await writeFile(file+'.tmp',JSON.stringify({mode}),{mode:0o600});await rename(file+'.tmp',file);
- }catch(error){browserMode=previous;const configuration=await browserProxyConfiguration();for(const current of configuredBrowserSessions.keys())await current.setProxy(configuration);throw error;}
+ }catch(error){browserMode=previous;if(!useContainerBrowser()){const configuration=await browserProxyConfiguration();for(const current of configuredBrowserSessions.keys())await current.setProxy(configuration);}throw error;}
  finally{browserRoutingChanging=false;publishTabs();}
  return browserState();
 }));
@@ -1040,7 +1133,7 @@ ipcMain.handle('workspace:browser', guarded(async (action, value) => {
     if(tab.id!==activeTabId||owner!==dockerOwner()||environment!==activeContainerId||image.isEmpty())return null;
     return {tabId:tab.id,image:image.toDataURL()};
   }
-  if(action==='open'){if(dockerOwner())await browserFeatures.restore();if(!browserNetworkReady())return browserState();let current=browserTabs.get(activeTabId);if(!current)current=createBrowserTab();if(!current.started || (current.error && !current.privacyError))await navigateBrowserTab(current,current.url || browserHomeUrl);return browserState();}
+  if(action==='open'){if(dockerOwner())await browserFeatures.restore();if(!browserNetworkReady())return browserState();let current=browserTabs.get(activeTabId);if(!current)current=createBrowserTab();if(!current.started || (current.error && !current.privacyError))await navigateBrowserTab(current,current.url==='about:blank'?browserHomeUrl:current.url || browserHomeUrl);return browserState();}
   if (action === 'new') { createBrowserTab(browserNetworkReady() ? browserHomeUrl : undefined); return browserState(); }
   if (action === 'select') { activateBrowserTab(String(value)); return browserState(); }
   if (action === 'close') {
@@ -1053,9 +1146,9 @@ ipcMain.handle('workspace:browser', guarded(async (action, value) => {
   if (!tab?.wc || tab.wc.isDestroyed()) tab = createBrowserTab();
   if(['navigate','back','forward','reload'].includes(action))tab.agentPolicy=null;
   if (action === 'navigate') navigateBrowserTab(tab, String(value));
-  if (action === 'back' && browser.webContents.navigationHistory.canGoBack()) browser.webContents.navigationHistory.goBack();
-  if (action === 'forward' && browser.webContents.navigationHistory.canGoForward()) browser.webContents.navigationHistory.goForward();
-  if (action === 'reload' && tab.started) browser.webContents.reload();
+  if (action === 'back' && tab.wc.navigationHistory.canGoBack()) tab.wc.navigationHistory.goBack();
+  if (action === 'forward' && tab.wc.navigationHistory.canGoForward()) tab.wc.navigationHistory.goForward();
+  if (action === 'reload' && tab.started) {if(tab.remote&&(tab.error||tab.wc.engine?.stopped||!tab.wc.sessionId))navigateBrowserTab(tab,tab.url==='about:blank'?browserHomeUrl:tab.url);else tab.wc.reload();}
   return true;
 }));
 // Use explicit pointer sessions for setup dragging, independent of Chromium app regions.
@@ -1465,7 +1558,7 @@ app.whenReady().then(async () => {
   proxyProfiles=new ProxyProfiles({directory:path.join(app.getPath('userData'),'proxy-profiles'),encrypt:value=>{if(!safeStorage.isEncryptionAvailable())throw new Error('系统凭据加密不可用');return safeStorage.encryptString(value);},decrypt:value=>safeStorage.decryptString(value)});
   dockerEnvs=new DockerEnvironments({defaultLocalEnabled:fixtureMode && !authRequired,directory:path.join(app.getPath('userData'),'docker-environments'),sourceRoot:path.join(here,'..'),encrypt:value=>{if(!safeStorage.isEncryptionAvailable())throw new Error('系统加密不可用');return safeStorage.encryptString(value);},decrypt:value=>safeStorage.decryptString(value)});
   observeEnvironmentOperations(dockerEnvs,environmentEvents,()=>({id:activeContainerId}));
-  browserFeatures=createBrowserFeatures({app,safeStorage,dialog,shell,browserSync:async(s,scope,body)=>{const owner=account?.user?.id,token=account?.token;if(owner!==s.owner)throw Error('账号已变化');const result=await account.request('/v1/me/browser-settings?scope='+encodeURIComponent(scope),{method:body?'PUT':'GET',...(body?{body}:{}),token});if(account?.user?.id!==owner||account?.token!==token)throw Error('账号已变化');return result;},containerDownloads:createContainerDownloads({docker:dockerEnvs,directory:path.join(app.getPath('temp'),'kuneco-download-preview')}),getStorage:()=>session.fromPartition(browserPartition()),getWindow:()=>window,getScope:()=>({owner:dockerOwner(),environmentId:activeContainerId}),getTabs:()=>[...browserTabs.values()],getActive:()=>browserTabs.get(activeTabId),openURL:(url,fresh,extension)=>{const tab=fresh?createBrowserTab():browserTabs.get(activeTabId)||createBrowserTab();tab.agentPolicy=null;if(extension){tab.started=true;tab.url=url;void tab.wc.loadURL(url);publishTabs();}else navigateBrowserTab(tab,url);},emit,valid:()=>!accountChanging&&!containerOperation,importCookies:async(cookies,s)=>{if(browserDataBusy)throw Error('正在处理浏览器数据');browserDataBusy=true;const ctx=cookieContext();try{await ctx.sync.enqueue(async()=>{for(const cookie of cookies){if(s.owner!==dockerOwner()||s.environmentId!==activeContainerId)throw Error('账号或环境已变化');await ctx.sites.storage.cookies.set(cookie);}await ctx.sites.storage.cookies.flushStore();});}finally{browserDataBusy=false;}await ctx.sync.sync().catch(ctx.sync.onError);},clearSites:async kind=>{if(browserDataBusy)throw Error('正在处理浏览器数据');browserDataBusy=browserClearBusy=true;try{const ctx=cookieContext();for(const tab of [...browserTabs.values()])removeBrowserTab(tab,true);await ctx.sites.clear({kind},ctx.sync);}finally{browserDataBusy=browserClearBusy=false;publishTabs();}}});
+  browserFeatures=createBrowserFeatures({app,safeStorage,dialog,shell,browserSync:async(s,scope,body)=>{const owner=account?.user?.id,token=account?.token;if(owner!==s.owner)throw Error('账号已变化');const result=await account.request('/v1/me/browser-settings?scope='+encodeURIComponent(scope),{method:body?'PUT':'GET',...(body?{body}:{}),token});if(account?.user?.id!==owner||account?.token!==token)throw Error('账号已变化');return result;},containerDownloads:createContainerDownloads({docker:dockerEnvs,directory:path.join(app.getPath('temp'),'kuneco-download-preview')}),getStorage:currentBrowserStorage,getWindow:()=>window,getScope:()=>({owner:dockerOwner(),environmentId:activeContainerId}),getTabs:()=>[...browserTabs.values()],getActive:()=>browserTabs.get(activeTabId),openURL:(url,fresh,extension)=>{const tab=fresh?createBrowserTab():browserTabs.get(activeTabId)||createBrowserTab();tab.agentPolicy=null;if(extension){tab.started=true;tab.url=url;void tab.wc.loadURL(url);publishTabs();}else navigateBrowserTab(tab,url);},emit,valid:()=>!accountChanging&&!containerOperation,importCookies:async(cookies,s)=>{if(browserDataBusy)throw Error('正在处理浏览器数据');browserDataBusy=true;const ctx=cookieContext();try{await ctx.sync.enqueue(async()=>{for(const cookie of cookies){if(s.owner!==dockerOwner()||s.environmentId!==activeContainerId)throw Error('账号或环境已变化');await ctx.sites.storage.cookies.set(cookie);}await ctx.sites.storage.cookies.flushStore();});}finally{browserDataBusy=false;}await ctx.sync.sync().catch(ctx.sync.onError);},clearSites:async kind=>{if(browserDataBusy)throw Error('正在处理浏览器数据');browserDataBusy=browserClearBusy=true;try{const ctx=cookieContext();for(const tab of [...browserTabs.values()])removeBrowserTab(tab,true);await ctx.sites.clear({kind},ctx.sync);}finally{browserDataBusy=browserClearBusy=false;publishTabs();}}});
   setInterval(()=>{if(account?.user&&!accountChanging&&!containerOperation)void browserFeatures.refresh().catch(()=>{});},30000).unref();
   await account.restore();await loadUserRuntimes();
   if(account.user){await loadAccountChats(true);const proxy=activeContainerId?(await dockerEnvs.get(dockerOwner(),activeContainerId)).item.proxy:await account.proxy().catch(()=>null);if(proxy)savedConfig=validateProxy(proxy);else savedConfig={protocol:'http',host:'',port:8080,username:'',password:''};}
@@ -1507,7 +1600,7 @@ const shutdown=createShutdownBarrier([
  ()=>{environmentEvents?.stopCleanup();return environmentEvents?.flush();},
  ()=>dockerEnvs?.shutdownTasks(),
  ()=>runs.abortWhere(),
- async()=>{await dockerEnvs?.shutdownTasks();if(gateway){gateway.block('应用退出');await gateway.stop({strict:true});}},
+ async()=>{await closeContainerBrowser();await dockerEnvs?.shutdownTasks();if(gateway){gateway.block('应用退出');await gateway.stop({strict:true});}},
  async()=>{const transport=directBrowserTransport || await directBrowserTransportPromise;await transport?.close();}
 ]);
 const quitConfirmation=createQuitConfirmation({id:randomUUID,enabled:()=>preferenceStore?.get().confirmQuit!==false,tasks:()=>[...[...runs.values()].map(task=>'对话 · '+(aiSessions.get(task.chatId)?.title||'未命名对话')),...[...(learningAutomations?.running.keys()||[])].map(id=>'自动化 · '+(learningAutomations.items.find(item=>item.id===id)?.name||'定时对话'))],prompt:data=>{if(!window||window.isDestroyed())throw Error('主窗口不可用');window.show();window.focus();emit('quitConfirmation',data);},focus:()=>{window?.show();window?.focus();}});

@@ -1,0 +1,4 @@
+import test from 'node:test';import assert from 'node:assert/strict';
+import {validateBrowserNavigationURL,resolveBrowserAddress} from '../../../src/features/browser/browser-address.mjs';
+test('internal blank page remains blank across address entry and main-process validation',()=>{assert.equal(validateBrowserNavigationURL(resolveBrowserAddress('about:blank')),'about:blank');assert.equal(validateBrowserNavigationURL('https://example.com/a'),'https://example.com/a');});
+test('invalid and privileged URLs never escape the web navigation boundary',()=>{for(const value of ['https://about:blank','http://[','file:///etc/passwd','javascript:alert(1)','about:config','https://user:pass@example.com/','0.0.0.0'])assert.throws(()=>validateBrowserNavigationURL(value),error=>error instanceof Error&&!(error instanceof TypeError));});

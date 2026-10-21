@@ -17,3 +17,6 @@ src/features/proxy/*
 
 !src/features/proxy/mihomo-sidecar.mjs
 !src/features/proxy/subscription-node.mjs
+
+!docker/browser/
+!docker/browser/*
