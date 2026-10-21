@@ -2532,3 +2532,10 @@ wa-dropdown-item::part(details){font-size:var(--menu-font-size);font-weight:400;
 .proxy-profile-in-use{display:inline-flex;align-items:center;gap:6px;color:var(--success);white-space:nowrap}
 .proxy-profile-in-use::before{content:"";width:6px;height:6px;flex:none;border-radius:50%;background:currentColor;animation:environment-running-pulse 1.4s ease-in-out infinite}
 @media(prefers-reduced-motion:reduce){.proxy-profile-in-use::before{animation:none}}
+
+/* The connection control and flag share the same trailing column. */
+body:not(.sidebar-collapsed) .proxy-summary{--proxy-trailing-width:24px}
+body:not(.sidebar-collapsed) .sidebar .proxy-detail-line{display:grid;grid-template-columns:16px minmax(0,1fr) var(--proxy-trailing-width);gap:8px;align-items:center}
+body:not(.sidebar-collapsed) #proxyRegion{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+body:not(.sidebar-collapsed) #proxyFlag{width:var(--proxy-trailing-width);text-align:center;justify-self:center}
+body:not(.sidebar-collapsed) .proxy-summary>.proxy-actions{left:calc(13px + var(--sidebar-proxy-content-width,204px) - var(--proxy-trailing-width));right:auto;width:var(--proxy-trailing-width);justify-content:center}

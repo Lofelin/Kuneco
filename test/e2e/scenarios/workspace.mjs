@@ -103,6 +103,7 @@ export async function verifyWorkspace(ctx,verifyBrowser,verifyUI,verifyComponent
   await until(()=>e("(()=>{const r=document.getElementById('proxySummary').getBoundingClientRect(),range=document.createRange();range.selectNodeContents(document.getElementById('proxySummaryIP'));const ip=range.getBoundingClientRect();return ip.left>=r.left-1&&ip.right<=r.right+1})()"));
   const card=await e("(()=>{const rect=id=>document.getElementById(id).getBoundingClientRect(),status=rect('proxyStatusLabel'),region=rect('proxyRegion'),root=rect('proxySummary'),range=document.createRange();range.selectNodeContents(document.getElementById('proxySummaryIP'));const ip=range.getBoundingClientRect();return {stacked:region.top>=status.bottom&&ip.top>=region.bottom,ipSingleLine:document.getElementById('proxySummaryIP').getClientRects().length===1&&ip.height<25,within:ip.left>=root.left-1&&ip.right<=root.right+1,regionSingleLine:region.height<25}})()");
   assert.deepEqual(card,{stacked:true,ipSingleLine:true,within:true,regionSingleLine:true},'sidebar status rows at '+width);
+  const trailing=await e("(()=>{const a=document.getElementById('proxyQuickToggle').getBoundingClientRect(),b=document.getElementById('proxyFlag').getBoundingClientRect();return Math.abs(a.left+a.width/2-b.left-b.width/2)})()");assert.ok(trailing<1,'connection and flag share a column at '+width+': '+trailing);
  }
  await client.call('Emulation.clearDeviceMetricsOverride');
  await click('#toggleSidebar');await e("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
