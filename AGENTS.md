@@ -162,6 +162,7 @@
 - 普通菜单、选项和导航的悬停背景统一使用 `var(--hover)`，禁止另用 soft 或局部灰色；透明操作继续透明，主操作与危险操作保留语义颜色。
 
 ## 分段单选组件
+- 分段单选统一复用 `src/shared/ui/app-segmented.mjs` 的 `createAppSegmented` / `createAppSegmentedOption` 工厂（基于 `wa-radio-group` + `wa-radio`），禁止各设置页重复生成选项结构。每个选项必须提供语义图标，图标到文案实际间距 6px。设置页的分段组统一使用 `--settings-value-width`，与同组下拉框左右边界对齐；选项内边距与图文间距复用全局 tokens，文字必须完整显示。静态分段组复用同一 `.app-segmented` 规则。
 - 主题、语言筛选、时间模式、网络模式和视图模式等互斥分段选择统一使用 `wa-radio-group` + `wa-radio appearance="button"`，复用 `.app-segmented` 全局样式。禁止容器加业务按钮拼装单选状态；由组件管理 value、checked 和键盘导航。多选不得套用单选组。
 
 - 必填标记修复必须保留组件自身 label + required；使用 hint 属性或 hint 插槽承载说明时，必须由全局样式排列为标题、说明、控件，不能恢复组件默认的底部说明。验收同时检查星号同行及说明的上下边界。

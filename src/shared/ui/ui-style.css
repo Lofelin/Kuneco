@@ -2303,8 +2303,8 @@ wa-radio-group.app-segmented{display:inline-block;max-width:100%}
 wa-radio-group.app-segmented::part(form-control-input){display:flex;gap:4px}
 wa-radio-group.app-segmented wa-radio{flex:1;justify-content:center;white-space:nowrap;border-radius:var(--interaction-radius);font-size:var(--menu-font-size);font-weight:400;--wa-form-control-activated-color:var(--hover)}
 wa-radio-group.app-segmented wa-radio:is(:hover,:state(checked)){background:var(--hover);color:var(--ink)}
-#themeSelect{width:230px;min-width:0;max-width:100%;flex:0 1 230px}
-#themeSelect wa-radio{padding-inline:6px}
+.settings-body wa-radio-group.app-segmented{width:var(--settings-value-width,230px);min-width:0;max-width:100%;flex:0 1 var(--settings-value-width,230px)}
+.settings-body wa-radio-group.app-segmented wa-radio{padding-inline:var(--button-padding-inline,6px)}
 
 /* Compact automation editor; weekday toggles share the global button surface. */
 #learningDialog{--width:min(840px,90vw)}
@@ -2331,8 +2331,8 @@ wa-radio-group.app-segmented wa-radio:is(:hover,:state(checked)){background:var(
 :is(wa-input,wa-number-input,wa-textarea,wa-select):is([hint]:not([hint=""]),:has(>[slot="hint"])):not(.git-identity-field,.git-credential-field,.git-connection-field)::part(hint){grid-row:2;margin:4px 0 8px;color:var(--muted);font-weight:400}
 :is(wa-input,wa-number-input,wa-textarea,wa-select):is([hint]:not([hint=""]),:has(>[slot="hint"])):not(.git-identity-field,.git-credential-field,.git-connection-field)::part(base),
 :is(wa-input,wa-number-input,wa-textarea,wa-select):is([hint]:not([hint=""]),:has(>[slot="hint"])):not(.git-identity-field,.git-credential-field,.git-connection-field)::part(combobox){grid-row:3}
-#themeSelect wa-radio::part(label){display:flex;align-items:center;gap:6px}
-#themeSelect wa-icon{font-size:14px;flex:none}
+wa-radio-group.app-segmented wa-radio::part(label){display:flex;align-items:center;gap:var(--button-icon-gap,6px)}
+wa-radio-group.app-segmented wa-icon{font-size:14px;flex:none}
 
 /* Avoid stacking panel spacing with the dialog body inset. */
 #proxyDialog .proxy-method-panel{margin-bottom:0}
