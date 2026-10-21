@@ -3,7 +3,7 @@ export {shortcutFromEvent} from '../../shared/shortcut-keys.mjs';
 export const shortcutDefaults=Object.freeze({newChat:'Mod+N',searchChat:'Mod+F',focusComposer:'Mod+L',stopReply:'Mod+Shift+Escape',toggleSidebar:'Mod+B',settings:'Mod+,',shortcuts:'Mod+Shift+,',nextTab:'Ctrl+Tab',previousTab:'Ctrl+Shift+Tab',closeTab:'Mod+Shift+W',pinTab:'Mod+Shift+P',browser:'Mod+Shift+B',automation:'Mod+Shift+A',runtimes:'Mod+Shift+R',console:'Mod+`'});
 function reserved(binding){
  if(!binding)return false;
- const bits=binding.split('+'),key=bits.at(-1),command=bits.includes('Mod')||bits.includes('Ctrl');
+ const bits=binding.split('+'),key=bits.at(-1),command=bits.includes('Mod')||bits.includes('Meta')||bits.includes('Ctrl');
  return command&&(['C','V','X','A','Z','Q','H','M','0','=','-'].includes(key)&&(!bits.includes('Shift')||key==='Z'))||command&&key==='W'&&!bits.includes('Shift')||bits.includes('Alt')&&key==='Tab';
 }
 export function validateShortcuts(value){

@@ -21,6 +21,8 @@ test('terminal bindings persist, can be cleared, reject conflicts and remain sep
 });
 test('terminal shortcuts respect platform modifiers, IME and unbound shell keys',()=>{
  assert.equal(validateConsoleShortcuts(consoleShortcutDefaults),true);
+ assert.equal(consoleShortcutAction({key:'c',code:'KeyC',metaKey:true},undefined,'darwin'),'copy');
+ assert.equal(consoleShortcutAction({key:'v',code:'KeyV',metaKey:true},undefined,'darwin'),'paste');
  assert.equal(consoleShortcutAction({key:'K',code:'KeyK',metaKey:true},undefined,'darwin'),'clear');
  assert.equal(consoleShortcutAction({key:'K',code:'KeyK',ctrlKey:true},undefined,'win32'),'clear');
  assert.equal(consoleShortcutAction({key:'c',code:'KeyC',ctrlKey:true},undefined,'darwin'),'interrupt');

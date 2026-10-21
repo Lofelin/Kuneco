@@ -32,8 +32,8 @@
 
 | 操作 | 默认组合（macOS 中 Mod 为 Command，其他平台为 Ctrl） |
 | --- | --- |
-| 复制选中内容 | Mod+Shift+C |
-| 粘贴 | Mod+Shift+V |
+| 复制选中内容 | Command+C |
+| 粘贴 | Command+V |
 | 全选终端内容 | Mod+Shift+A |
 | 清空终端显示 | Mod+K |
 | 滚动到顶部 / 底部 | Mod+Home / Mod+End |
