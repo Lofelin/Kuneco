@@ -40,7 +40,7 @@ export async function verifyComponents(context){
   const host=document.getElementById('host');
   return {width:innerWidth,dark:document.body.classList.contains('dark'),button:{gap:rect(label).left-rect(icon).right,left:rect(icon).left-rect(base).left-parseFloat(getComputedStyle(base).borderLeftWidth),right:rect(base).right-rect(label).right-parseFloat(getComputedStyle(base).borderRightWidth),overflow:rect(label).right>rect(base).right},dialog:{radius:getComputedStyle(box).borderRadius,backdrop:backdrop.backgroundColor,filter:backdrop.backdropFilter,header:getComputedStyle(header).borderBottomWidth,footer:getComputedStyle(footer).borderTopWidth,headerLeft:rect(header).left,footerLeft:rect(footer).left,headerWidth:rect(header).width,footerWidth:rect(footer).width,within:bounds.left>=0&&bounds.right<=innerWidth},form:document.getElementById('connect').getForm()?.id,required:host.required&&Boolean(host.shadowRoot.querySelector('label')),modalCount:[...document.querySelectorAll('app-dialog')].filter(el=>el.dialog?.matches(':modal')).length};
  });
- const openProxy=async()=>{await setting('proxy');await click('#openProxyDialog');await until(()=>evaluate(()=>document.getElementById('proxyDialog').dialog.matches(':modal')));await tick();};
+ const openProxy=async()=>{await setting('proxy');await click('#addProxyProfile');await until(()=>evaluate(()=>document.getElementById('proxyDialog').dialog.matches(':modal')));await tick();};
  const setTheme=theme=>evaluate(async theme=>{const control=document.getElementById('themeSelect');control.value=theme;control.dispatchEvent(new Event('change'));await control.updateComplete;},theme);
  try{
   await openAccountMenu();await tick();
@@ -60,6 +60,13 @@ export async function verifyComponents(context){
    });
    assert.equal(select.listbox,'14px');assert.equal(select.radius,'14px');assert.equal(select.font,'12px');assert.equal(select.weight,'400');assert.equal(select.line,'18px');
    await escape();await until(()=>evaluate(()=>!document.getElementById('languageSelect').open));
+   await setting('proxy');await tick();
+   const profiles=await evaluate(()=>{
+    const root=document.getElementById('proxyProfilesSettings'),rect=e=>e.getBoundingClientRect(),heading=root.querySelector('.preference-heading'),description=root.querySelector('.settings-section-description'),toolbar=root.querySelector('.proxy-list-toolbar'),table=root.querySelector('app-table'),add=document.getElementById('addProxyProfile');
+    return {headingGap:rect(description).top-rect(heading).bottom,toolbarGap:rect(toolbar).top-rect(description).bottom,tableGap:rect(table).top-rect(toolbar).bottom,headers:[...table.querySelectorAll('th')].map(e=>e.textContent),within:rect(add).right<=rect(toolbar).right+.5,topActionsHidden:!document.getElementById('proxyPageActions'),empty:table.querySelector('.app-table-empty')?.colSpan};
+   });
+   assert.equal(profiles.headingGap,4);assert.equal(profiles.toolbarGap,8);assert.equal(profiles.tableGap,16);assert.deepEqual(profiles.headers,['名称','代理商','协议','节点','状态','']);assert.equal(profiles.within,true);assert.equal(profiles.topActionsHidden,true);assert.equal(profiles.empty,6);
+   const profileScreenshot=await captureUI();await writeFile(path.join(directory,'proxy-profiles-'+theme+'-'+width+'.png'),Buffer.from(profileScreenshot.data,'base64'));
    await openProxy();const frame=await geometry();
    for(const [key,value] of Object.entries(frame.button))if(key!=='overflow')assert.ok(Math.abs(value-6)<.7,theme+' '+width+' button '+key+' '+value);
    assert.equal(frame.button.overflow,false);assert.equal(frame.dialog.radius,'14px');assert.equal(frame.dialog.backdrop,'rgba(160, 165, 175, 0.18)');assert.equal(frame.dialog.filter,'blur(4px)');assert.equal(frame.dialog.header,'1px');assert.equal(frame.dialog.footer,'1px');assert.equal(frame.dialog.within,true);assert.equal(frame.form,'proxyForm');assert.equal(frame.required,true);assert.equal(frame.modalCount,1);

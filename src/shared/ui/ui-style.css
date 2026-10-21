@@ -694,9 +694,8 @@ app-button.content-tab-pin::part(base),app-button.content-tab-close::part(base){
 #environmentResultBadge::part(badge){font-size:11px;font-weight:500;line-height:18px;padding:2px 7px;border:0;border-radius:4px;background:var(--soft);color:var(--muted);box-shadow:none}
 #environmentResultBadge[variant=success]::part(badge){background:color-mix(in srgb,var(--success) 12%,var(--canvas));color:var(--success)}
 #environmentResultBadge[variant=danger]::part(badge){background:color-mix(in srgb,#d34e4e 12%,var(--canvas));color:#d34e4e}
-.settings-content:has(#verify:not(.hidden)) .settings-page-heading,
-.settings-content:has(#verify:not(.hidden)) .settings-body{max-width:var(--settings-form-max-width);margin-inline:auto}
-.settings-page-heading #verify{margin-left:auto;flex:none}
+.settings-content:has([data-panel=proxy]:not(.hidden)) .settings-page-heading,
+.settings-content:has([data-panel=proxy]:not(.hidden)) .settings-body{max-width:var(--settings-form-max-width);margin-inline:auto}
 .proxy-status-panel{padding:20px 0 24px;margin-bottom:24px;border-bottom:1px solid var(--line)}
 .proxy-status-heading{display:flex;align-items:center;gap:12px}.proxy-status-heading>strong{font-size:14px}
 #connectionState{font-size:11px;padding:3px 8px;border-radius:4px;background:var(--soft);color:var(--muted)}
@@ -1410,7 +1409,6 @@ body{--data-list-header-bg:color-mix(in srgb,var(--surface) 75%,var(--soft))}
 .proxy-config-toolbar{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:16px}
 .proxy-config-toolbar>.preference-heading{display:flex;align-items:center;gap:10px;margin:0}
 .proxy-config-toolbar .import-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0;justify-content:flex-end}
-.proxy-config-toolbar #verify{margin:0;flex:none}
 @media(max-width:850px){.proxy-config-toolbar{flex-wrap:wrap}}
 
 .proxy-config-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
@@ -1421,10 +1419,8 @@ body{--data-list-header-bg:color-mix(in srgb,var(--surface) 75%,var(--soft))}
 #proxyDialog .config-card{padding:0;border:0;background:none;margin:0}
 #proxyConfigInfo{margin:0}
 
-.proxy-methods{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:12px 0 16px}
-.proxy-methods app-button::part(base){width:100%;font-size:12px;min-height:32px;background:var(--surface);border:1px solid var(--line);border-radius:8px}
-.proxy-methods app-button[aria-pressed=true]::part(base){background:var(--soft);border-color:var(--ink);color:var(--ink)}
-.proxy-methods wa-icon{width:14px;height:14px}
+.proxy-methods{margin:12px 0 16px;max-width:100%}
+#importEntries{max-height:280px;overflow:auto}
 .proxy-method-panel{margin-bottom:20px}
 #proxyImportResult{margin-top:16px;font-size:12px}
 #proxyDialog #pastePanel label{margin-bottom:12px}
@@ -2009,7 +2005,7 @@ wa-switch{--wa-form-control-activated-color:var(--ink)}
 :root,.settings-body{--settings-title-description-gap:4px;--settings-section-content-gap:8px}
 .settings-body :is(.preference-heading,.profile-section-heading,.proxy-config-toolbar){margin-bottom:var(--settings-section-content-gap)}
 .settings-body .proxy-config-toolbar>.preference-heading{margin:0}
-.settings-body .preference-heading:has(+.settings-section-description){margin-bottom:0}
+.settings-body :is(.preference-heading,.proxy-config-toolbar):has(+.settings-section-description){margin-bottom:0}
 .settings-body .settings-section-description{font-size:12px;line-height:20px;margin:var(--settings-title-description-gap) 0 var(--settings-section-content-gap)}
 
 /* Settings rows share the compact notification geometry; content may grow. */
@@ -2500,6 +2496,25 @@ wa-tab-group.environment-detail-tabs wa-tab-panel{--padding:16px var(--environme
 .long-message-toggle,.long-message-toggle::part(base){color:inherit!important}
 
 .long-message-body.is-expanded{max-height: min(600px,60vh);overflow:auto;overflow-anchor:none;overscroll-behavior:contain}
+
+.proxy-profile-controls{display:flex;flex-wrap:wrap;align-items:flex-end;gap:8px}.proxy-profile-controls>wa-select,.proxy-profile-controls>wa-input{flex:1;min-width:160px}.proxy-profile-controls+*{margin-top:8px}
+
+/* Saved proxy list uses the shared table and action controls. */
+.proxy-list-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+.proxy-list-toolbar>wa-input{width:360px;max-width:100%;min-width:0}
+.proxy-list-toolbar>wa-select{width:160px;max-width:100%}
+.proxy-list-toolbar>app-button{margin-left:auto;flex:none}
+@container(max-width:650px){.proxy-list-toolbar>wa-input{flex:1 1 100%;width:100%}}
+
+/* Status information opens settings; the connection toggle is a separate action. */
+.proxy-summary{position:relative}
+.proxy-settings-shortcut{display:block;width:100%;min-width:0;text-align:left;color:inherit;cursor:pointer;font:inherit}
+.proxy-settings-shortcut::part(base){font:inherit}
+.proxy-summary>.proxy-actions{position:absolute;right:12px;top:8px;display:flex;align-items:center;color:var(--muted)}
+.sidebar-collapsed .proxy-summary>.proxy-actions{display:none}
+
+.proxy-settings-content{display:block;width:100%;min-width:0;text-align:left}
+
 /* Cascading menus use the same outer panel tokens as root menus. */
 wa-dropdown-item::part(submenu){border-radius:var(--overlay-radius)!important;border:1px solid var(--line)!important;background:var(--surface);color:var(--ink);box-shadow:var(--overlay-shadow);font-size:var(--menu-font-size);font-weight:400;line-height:var(--menu-line-height)}
 /* Flipped submenus must not let the pointer bridge intercept adjacent menu actions. */

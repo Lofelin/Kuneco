@@ -89,18 +89,18 @@ export async function verifyOnboardingControls(ctx){
 
 export async function verifyActionLayoutRegression(ctx){
  const ui=harness(ctx),dialogs={browserSiteRefresh:'browserSiteDataDialog',refreshBrowserCookies:'browserCookiesDialog',environmentRetry:'environmentGate'};
- return measureActions(ctx,['browserSiteRefresh','refreshBrowserCookies','consoleConnect','browserSyncNow','verify','reload','environmentRetry'],async id=>{
+ return measureActions(ctx,['browserSiteRefresh','refreshBrowserCookies','consoleConnect','browserSyncNow','addProxyProfile','reload','environmentRetry'],async id=>{
   if(dialogs[id]){await ui.evaluate(id=>document.getElementById(id).show(),dialogs[id]);await ui.tick();}
   else if(id==='consoleConnect')await ui.click('[data-page="console"]');
   else if(id==='browserSyncNow')await ui.setting('browser');
-  else if(id==='verify')await ui.setting('proxy');
+  else if(id==='addProxyProfile')await ui.setting('proxy');
   else if(id==='reload')await ui.click('[data-page="browser"]');
  },async id=>{if(dialogs[id])await ui.evaluate(id=>document.getElementById(id).hide(),dialogs[id]);});
 }
 
 async function verifyForm(ctx,ui){
  assert.equal(typeof ctx.getExitRequests,'function','A5 requires observed local proxy fixture requests');
- await ui.setting('proxy');await ui.click('#openProxyDialog');await ctx.until(()=>ui.evaluate(()=>document.getElementById('proxyDialog').open));
+ await ui.setting('proxy');await ui.click('#addProxyProfile');await ctx.until(()=>ui.evaluate(()=>document.getElementById('proxyDialog').open));
  const old=await ui.evaluate(()=>({fields:['host','port','username','password'].map(id=>[id,document.getElementById(id).value]),remember:document.getElementById('remember').checked}));
  const before=ctx.getExitRequests();
  try{
@@ -109,10 +109,10 @@ async function verifyForm(ctx,ui){
   // The real proxy form deliberately uses novalidate; its production validator,
   // rather than a replacement form, must reject empty required connection fields.
   await ui.click('#connect');await ui.tick();assert.equal(ctx.getExitRequests(),before,'A5 invalid form reached proxy');
-  await ui.evaluate(async port=>{for(const [id,value] of [['host','127.0.0.1'],['port',String(port)],['username','demo'],['password','secret']]){const field=document.getElementById(id);field.value=value;field.dispatchEvent(new Event('input',{bubbles:true}));await field.updateComplete;}document.getElementById('remember').checked=false;},ctx.proxyPort);
+  await ui.evaluate(async port=>{for(const [id,value] of [['proxyProfileName','Controls proxy'],['host','127.0.0.1'],['port',String(port)],['username','demo'],['password','secret']]){const field=document.getElementById(id);field.value=value;field.dispatchEvent(new Event('input',{bubbles:true}));await field.updateComplete;}document.getElementById('remember').checked=false;},ctx.proxyPort);
   await ctx.until(()=>ui.evaluate(()=>!document.getElementById('connect').disabled));await ui.click('#connect');
   await ctx.until(()=>ui.evaluate(()=>workspace.state().then(s=>s.network.state==='ready')));await ui.closed('proxyDialog');assert.ok(ctx.getExitRequests()>before,'A5 valid form did not reach local proxy');
-  await ui.click('#openProxyDialog');await ctx.until(()=>ui.evaluate(()=>document.getElementById('proxyDialog').open));
+  await ui.click('#addProxyProfile');await ctx.until(()=>ui.evaluate(()=>document.getElementById('proxyDialog').open));
   const validRequests=ctx.getExitRequests();
   for(const state of ['disabled','loading']){
    await ui.evaluate(async state=>{const b=document.getElementById('connect');b[state]=true;await b.updateComplete;},state);
@@ -288,7 +288,7 @@ export async function verifyQuitControlsRegression(ctx){
  assert.equal(metrics.open,true,'Q1');assert.equal(metrics.items,2,'Q1 two actual running tasks');assert.equal(metrics.radius,'14px','Q1');assert.equal(metrics.filter,'blur(4px)','Q1');assert.equal(metrics.header,'1px','Q1');assert.equal(metrics.footer,'1px','Q1');assert.ok(metrics.buttons.every(b=>b.icon&&b.action),'Q1');
  await ui.click('#quitConfirmationDialog [slot=footer] app-button:first-child');await ui.closed('quitConfirmationDialog');assert.equal(await fixture.alive(),true,'Q2 cancel');
  await request();await ui.escape();await ui.closed('quitConfirmationDialog');assert.equal(await fixture.alive(),true,'Q2 Escape');
- await ui.setting('proxy');await ui.click('#openProxyDialog');await ctx.until(()=>ui.evaluate(()=>document.getElementById('proxyDialog').open));await fixture.request();await fixture.settled();
+ await ui.setting('proxy');await ui.click('#addProxyProfile');await ctx.until(()=>ui.evaluate(()=>document.getElementById('proxyDialog').open));await fixture.request();await fixture.settled();
  const blocked=await ui.evaluate(()=>({existing:document.getElementById('proxyDialog').open,quit:document.getElementById('quitConfirmationDialog').open,count:[...document.querySelectorAll('app-dialog')].filter(d=>d.open).length}));assert.deepEqual(blocked,{existing:true,quit:false,count:1},'Q3 existing application modal blocks quit');assert.equal(await fixture.alive(),true,'Q3');await ui.click('#cancelProxyDialog');await ui.closed('proxyDialog');
  await request();await ui.evaluate(()=>{document.querySelector('#quitConfirmationDialog [slot=footer] app-button:last-child').shadowRoot.querySelector('button').click();return true;});await fixture.waitExit();assert.equal(await fixture.alive(),false,'Q4 confirmation exits actual Kuneco');
  assert.deepEqual(fixture.requests(),['window-close','app-quit','window-close','app-quit'],'Q1-Q4 actual native window and application quit entry points');

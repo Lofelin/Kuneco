@@ -10,6 +10,16 @@ export async function verifyWorkspace(ctx,verifyBrowser,verifyUI,verifyComponent
  const state=()=>e('window.workspace.state()');
  const ready=()=>until(()=>e("!document.body.classList.contains('environment-onboarding') && !document.body.classList.contains('auth-required')"));
  await ready();await mkdir('artifacts',{recursive:true});
+ const shortcutBefore=JSON.stringify((await state()).proxy),shortcutRequests=getExitRequests();
+ await click('#proxySettingsShortcut');await until(()=>e("!document.getElementById('page-overview').classList.contains('hidden') && document.querySelector('[data-setting=proxy]').classList.contains('active')"));
+ assert.equal(JSON.stringify((await state()).proxy),shortcutBefore,'status shortcut must not change proxy configuration');assert.equal(getExitRequests(),shortcutRequests,'status shortcut must not connect');
+ assert.equal(await e("document.getElementById('proxySettingsShortcut').contains(document.getElementById('proxyQuickToggle'))"),false,'connection action must not be nested inside navigation');
+ await click('[data-page=cc]');await e("(async()=>{const button=document.getElementById('proxySettingsShortcut');await button.updateComplete;button.shadowRoot.querySelector('button').focus();})()");
+ assert.equal(await e("document.getElementById('proxySettingsShortcut').shadowRoot.activeElement?.localName"),'button','keyboard navigation focuses the actual shared button');
+ await client.call('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter',windowsVirtualKeyCode:13,text:'\r',unmodifiedText:'\r'});await client.call('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});
+ await until(()=>e("!document.getElementById('page-overview').classList.contains('hidden') && document.querySelector('[data-setting=proxy]').classList.contains('active')"));
+ await click('[data-page=cc]');
+
  assert.equal(await e("typeof workspace.notification"),'function','preload bridge loads from new path');
  assert.equal(await e("document.querySelectorAll('button,input:not([type=file][hidden]),select,textarea,dialog').length"),0,'shared controls only');
  assert.ok(await e("customElements.get('app-button') && customElements.get('app-dialog') && customElements.get('app-table')"));
@@ -45,13 +55,10 @@ export async function verifyWorkspace(ctx,verifyBrowser,verifyUI,verifyComponent
   for(const g of gaps){assert.ok(Math.abs(g.gap-(g.description?4:8))<1,key+JSON.stringify(g));if(g.description)assert.equal(g.after,8);}
  }
  await setting('proxy');
- assert.deepEqual(await e("[...document.querySelectorAll('[data-panel=proxy] h2')].map(x=>x.textContent.trim().startsWith('代理配置'))"),[true]);
+ assert.deepEqual(await e("[...document.querySelectorAll('[data-panel=proxy] h2')].map(x=>x.firstChild.textContent.trim())"),['已保存代理']);
+ assert.equal(await e("document.querySelector('[data-panel=proxy] h2').textContent.trim()"),'已保存代理');
  assert.equal(await e("getComputedStyle(document.getElementById('proxyConnectionDetails')).display"),'none');
- await click('#proxyDetailsToggle');
- assert.ok(await e("document.getElementById('proxyDetailsToggle').getAttribute('aria-expanded')==='true' && document.getElementById('proxyConnectionDetails').offsetHeight>0"));
- assert.equal(await e("document.querySelectorAll('.proxy-summary-card dd').length"),13,'merged card preserves all configuration and connection fields');
- await click('#proxyDetailsToggle');
- assert.equal(await e("getComputedStyle(document.getElementById('proxyConnectionDetails')).display"),'none');
+ assert.equal(await e("document.getElementById('proxyProfileDetailsDialog').open"),false);
  await setting('preferences');await e("document.getElementById('themeSelect').value='dark';document.getElementById('themeSelect').dispatchEvent(new Event('change'))");
  assert.ok(await e("document.body.classList.contains('dark') && localStorage.getItem('ui-theme')==='dark'"));
  await e("document.getElementById('themeSelect').value='light';document.getElementById('themeSelect').dispatchEvent(new Event('change'))");
@@ -77,8 +84,8 @@ export async function verifyWorkspace(ctx,verifyBrowser,verifyUI,verifyComponent
  assert.equal((await e("workspace.environmentCheck({timeZone:'America/New_York',languages:['en-US']})")).passed,true);
  await until(()=>e("!document.getElementById('environmentGate').open"));
  // The current import flow lives inside the proxy dialog, with parse/select/connect steps.
- await setting('proxy');await click('#openProxyDialog');await until(()=>e("document.getElementById('proxyDialog').open"));
- await click('[data-proxy-method=paste]');
+ await setting('proxy');await click('#addProxyProfile');await until(()=>e("document.getElementById('proxyDialog').open"));
+ await e("document.getElementById('proxyMethodSelect').value='paste';document.getElementById('proxyMethodSelect').dispatchEvent(new Event('change'));document.getElementById('proxyProfileName').value='Fixture import'");
  const csv=`Host,Port,User,Pass\n127.0.0.1,1,other,hidden\n127.0.0.1,${proxyPort},demo,secret\n`;
  await e(`document.getElementById('importText').value=${JSON.stringify(csv)};document.getElementById('importText').dispatchEvent(new Event('input'))`);
  await click('#connect');await until(()=>e("document.querySelectorAll('#importEntries wa-radio').length===2"));
@@ -90,6 +97,35 @@ export async function verifyWorkspace(ctx,verifyBrowser,verifyUI,verifyComponent
  await click('#connect');await until(async()=>(await state()).network.state==='ready');
  await until(()=>e("!document.getElementById('proxyDialog').open"));
  assert.ok(getExitRequests()>0);assert.equal((await state()).network.ip,'203.0.113.23');
+ for(const width of [1400,1050,800]){
+  await client.call('Emulation.setDeviceMetricsOverride',{width,height:1000,deviceScaleFactor:1,mobile:false});
+  await e("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
+  await until(()=>e("(()=>{const r=document.getElementById('proxySummary').getBoundingClientRect(),range=document.createRange();range.selectNodeContents(document.getElementById('proxySummaryIP'));const ip=range.getBoundingClientRect();return ip.left>=r.left-1&&ip.right<=r.right+1})()"));
+  const card=await e("(()=>{const rect=id=>document.getElementById(id).getBoundingClientRect(),status=rect('proxyStatusLabel'),region=rect('proxyRegion'),root=rect('proxySummary'),range=document.createRange();range.selectNodeContents(document.getElementById('proxySummaryIP'));const ip=range.getBoundingClientRect();return {stacked:region.top>=status.bottom&&ip.top>=region.bottom,ipSingleLine:document.getElementById('proxySummaryIP').getClientRects().length===1&&ip.height<25,within:ip.left>=root.left-1&&ip.right<=root.right+1,regionSingleLine:region.height<25}})()");
+  assert.deepEqual(card,{stacked:true,ipSingleLine:true,within:true,regionSingleLine:true},'sidebar status rows at '+width);
+ }
+ await client.call('Emulation.clearDeviceMetricsOverride');
+ await click('#toggleSidebar');await e("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
+ await until(()=>e("document.body.classList.contains('sidebar-collapsed') && getComputedStyle(document.querySelector('.proxy-detail-line')).visibility==='hidden' && document.getElementById('proxyStatusIcon').getBoundingClientRect().width>0"));
+ await click('#toggleSidebar');
+
+ // Subscription previews and node selection are drafts, never mutations of the saved proxy.
+ const beforeSubscription=JSON.stringify((await state()).proxy),beforeSubscriptionRequests=getExitRequests();
+ await setting('proxy');await click('#addProxyProfile');await e("document.getElementById('proxyMethodSelect').value='subscription';document.getElementById('proxyMethodSelect').dispatchEvent(new Event('change'));document.getElementById('proxyProfileName').value='Fixture import'");
+ await e("document.getElementById('subscriptionURL').value='http://127.0.0.1/private?token=fixture';document.getElementById('subscriptionURL').dispatchEvent(new Event('input'))");
+ await click('#connect');await until(()=>e("!document.getElementById('proxyImportPanel').classList.contains('hidden') && document.getElementById('importError').textContent.length>0"));
+ assert.ok(await e("!document.getElementById('importError').textContent.includes('token=fixture')"));
+ await e("document.getElementById('proxyMethodSelect').value='paste';document.getElementById('proxyMethodSelect').dispatchEvent(new Event('change'));document.getElementById('proxyProfileName').value='Fixture import'");
+ const nodeText='proxies:\n  - {name: Fixture VLESS, type: vless, server: 203.0.113.9, port: 443, uuid: 00000000-0000-4000-8000-000000000001, tls: true}\n  - {name: Unsafe Hy2, type: hysteria2, server: 203.0.113.10, port: 443, password: fixture-secret, skip-cert-verify: true, tls: false}';
+ await e(`document.getElementById('importText').value=${JSON.stringify(nodeText)};document.getElementById('importText').dispatchEvent(new Event('input'))`);
+ await click('#connect');await until(()=>e("document.querySelectorAll('#importEntries wa-radio').length===2"));
+ assert.equal(await e("document.querySelectorAll('#importEntries wa-radio[disabled]').length"),1);
+ assert.ok(await e("!document.getElementById('importEntries').textContent.includes('fixture-secret')"));
+ await click('#connect');await until(()=>e("!document.getElementById('proxyImportResult').classList.contains('hidden')"));
+ assert.equal(JSON.stringify((await state()).proxy),beforeSubscription,'choosing a subscription node must preserve current proxy');
+ assert.equal(getExitRequests(),beforeSubscriptionRequests,'draft selection cannot start network forwarding');
+ await click('#cancelProxyDialog');
+
  await click('[data-page=browser]');await e("document.getElementById('address').value='http://fixture.invalid/page';document.getElementById('navigate').click()");
  await until(()=>getBrowserRequests()>0);
  await verifyBrowser();
@@ -106,12 +142,39 @@ export async function verifyWorkspace(ctx,verifyBrowser,verifyUI,verifyComponent
  // Two fixture accounts exercise isolation without real credentials, Docker or providers.
  const login=async username=>{await runDesktopOperation(ctx,`workspace.accountLogin(${JSON.stringify({username,password:'fixture-password',confirmPassword:'fixture-password'})})`,{name:'fixture account login '+username});await until(()=>e("document.getElementById('accountName').textContent.startsWith('测试用户')"));};
  await login('layout-one');await verifyComponents?.();assert.equal((await state()).aiSessions.length,0,'guest sessions do not leak into account');
+ // A saved alternative must not change the live proxy until explicitly activated.
+ const savedBeforeProfiles=JSON.stringify((await state()).proxy),requestsBeforeProfiles=getExitRequests();
+ const profilePayload={scope:{owner:(await e('workspace.accountState()')).user.id,environment:null},name:'Fixture Sufe',provider:'sufe',config:{protocol:'http',host:'127.0.0.1',port:proxyPort,username:'demo',password:'secret'}};
+ const savedProfile=await e(`workspace.proxyProfiles('save',${JSON.stringify(profilePayload)})`);
+ const secondProfile=await e(`workspace.proxyProfiles('save',${JSON.stringify({...profilePayload,name:'Fixture IPRoyal',provider:'iproyal'})})`);
+ assert.equal(JSON.stringify((await state()).proxy),savedBeforeProfiles);assert.equal(getExitRequests(),requestsBeforeProfiles);
+ assert.ok(!JSON.stringify(savedProfile).includes('secret'));
+ await setting('proxy');await until(()=>e("document.querySelectorAll('#proxyProfilesTable tbody tr:not(:has(.app-table-empty))').length===2"));
+ await e("document.getElementById('proxyProviderFilter').value='sufe';document.getElementById('proxyProviderFilter').dispatchEvent(new Event('change'))");
+ assert.equal(await e("document.querySelectorAll('#proxyProfilesTable tbody tr:not(:has(.app-table-empty))').length"),1);
+ const beforeEdit=JSON.stringify((await state()).proxy),beforeEditRequests=getExitRequests();
+ await e("document.querySelector('#proxyProfilesTable wa-dropdown').open=true");await until(()=>e("document.querySelector('#proxyProfilesTable wa-dropdown').open"));
+ const menuStyle=await e("(()=>{const item=document.querySelector('#proxyProfilesTable wa-dropdown-item'),style=getComputedStyle(item.shadowRoot.querySelector('[part~=label]'));return {font:style.fontSize,weight:style.fontWeight,line:style.lineHeight,radius:getComputedStyle(document.querySelector('#proxyProfilesTable wa-dropdown').shadowRoot.querySelector('[part~=menu]')).borderRadius}})()");
+ assert.deepEqual(menuStyle,{font:'12px',weight:'400',line:'18px',radius:'14px'});
+ await e("[...document.querySelectorAll('#proxyProfilesTable wa-dropdown-item')].find(e=>e.textContent==='编辑配置').click()");await until(()=>e("document.getElementById('proxyDialog').open"));
+ assert.equal(await e("document.getElementById('proxyProfileName').value"),'Fixture Sufe');
+ await click('#saveProxyProfile');await until(()=>e("!document.getElementById('proxyDialog').open"));
+ assert.equal(JSON.stringify((await state()).proxy),beforeEdit,'editing an inactive profile must not switch active proxy');assert.equal(getExitRequests(),beforeEditRequests);
+ await until(()=>e("!document.getElementById('proxyProviderFilter').disabled"));
+ await mkdir('artifacts/subscription-proxy',{recursive:true});const tableImage=await captureUI();await writeFile('artifacts/subscription-proxy/table-populated-fixture.png',Buffer.from(tableImage.data,'base64'));
+
+ await e("document.querySelector('#proxyProfilesTable wa-switch').checked=true;document.querySelector('#proxyProfilesTable wa-switch').dispatchEvent(new Event('change'))");await until(async()=>(await state()).network.state==='ready');
+ assert.equal((await state()).proxy.profileId,savedProfile.id);
+ await click('#proxyProfilesTable tbody tr');await until(()=>e("document.getElementById('proxyProfileDetailsDialog').open"));await click('#proxyDetailsToggle');assert.ok(await e("document.getElementById('proxyConnectionDetails').offsetHeight>0"));await click('#closeProxyProfileDetails');await until(()=>e("!document.getElementById('proxyProfileDetailsDialog').open"));
+ setExitIP('203.0.113.99');await until(()=>e("!document.querySelector('#proxyProfilesTable wa-switch').disabled"));await e("document.querySelector('#proxyProfilesTable wa-switch').checked=true;document.querySelector('#proxyProfilesTable wa-switch').dispatchEvent(new Event('change'))");await until(async()=>(await state()).network.state==='blocked');
+ assert.equal((await state()).proxy.profileId,savedProfile.id,'a failed switch stays locked to the selected profile');
+ setExitIP('203.0.113.23');await until(()=>e("!document.querySelector('#proxyProfilesTable wa-switch').disabled"));await e("document.querySelector('#proxyProfilesTable wa-switch').checked=true;document.querySelector('#proxyProfilesTable wa-switch').dispatchEvent(new Event('change'))");await until(async()=>(await state()).network.state==='ready');
  await setting('notifications');await e("document.querySelector('[data-notification=network]').shadowRoot.querySelector('input').click()");
  assert.equal(await e("document.querySelector('[data-notification=network]').checked"),false);
  await setting('preferences');await e("document.getElementById('languageSelect').value='en-US';document.getElementById('languageSelect').dispatchEvent(new Event('change'))");
  await until(()=>accountProfiles.get('fixture-account-1')?.language==='en-US');
  await e('workspace.accountLogout()');await login('layout-two');
- await setting('notifications');assert.equal(await e("document.querySelector('[data-notification=network]').checked"),true,'account B has independent preferences');
+ await setting('notifications');assert.equal((await e("workspace.proxyProfiles('list')")).profiles.length,0,'account B cannot see account A proxy profiles');assert.equal(await e("document.querySelector('[data-notification=network]').checked"),true,'account B has independent preferences');
  assert.equal((await e('workspace.runtimeInfo()')).runtimes.length,0,'runtime registry does not leak between accounts');
  await e('workspace.accountLogout()');await login('layout-one');await setting('notifications');
  assert.equal(await e("document.querySelector('[data-notification=network]').checked"),false,'account A preference restored');

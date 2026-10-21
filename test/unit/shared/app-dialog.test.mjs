@@ -1,7 +1,7 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {readFileSync} from 'node:fs';import {JSDOM} from 'jsdom';
 const source=readFileSync(new URL('../../../src/index.html',import.meta.url),'utf8');
 test('all static dialogs use shared shell with direct footer slots and no bespoke headers',()=>{
- const d=new JSDOM(source).window.document;assert.equal(d.querySelectorAll('wa-dialog,dialog').length,0);const dialogs=d.querySelectorAll('app-dialog');assert.equal(dialogs.length,18);assert.ok(d.getElementById('gitKeyDialog'));
+ const d=new JSDOM(source).window.document;assert.equal(d.querySelectorAll('wa-dialog,dialog').length,0);const dialogs=d.querySelectorAll('app-dialog');assert.equal(dialogs.length,19);assert.ok(d.getElementById('gitKeyDialog'));
  for(const dialog of dialogs){assert.equal(dialog.hasAttribute('without-header'),false,dialog.id);assert.equal(dialog.querySelector('.dialog-heading,.runtime-add-heading,.form-footer'),null,dialog.id);if(dialog.id!=='projectTransferDialog')assert.ok(dialog.querySelector(':scope > [slot=footer]'),dialog.id);assert.equal(dialog.querySelector('h2[slot=label]'),null,dialog.id);}
  const submit=d.getElementById('connect');assert.equal(submit.getAttribute('form'),'proxyForm');assert.equal(submit.closest('[slot=footer]').parentNode.id,'proxyDialog');
 });

@@ -1,3 +1,4 @@
+import {mountProxyProfiles} from '../features/proxy/proxy-profiles-ui.mjs';
 import {renderPlainMessage} from '../features/chat/plain-message.mjs';
 import {environmentDetailComplete,environmentRefreshDue} from '../features/environments/environment-refresh.mjs';
 import {mountEnvironmentSettings} from '../features/environments/environment-settings.mjs';
@@ -156,9 +157,15 @@ $('browserTabs').addEventListener('wa-tab-show',event=>{if(event.detail.name && 
 let suggestionsOpen = false, suggestionIndex = 0, suggestionItems = [], addressEditing = false;
 let addressHistory = [];
 // Browser history is loaded from the account/environment-scoped main-process library.
-const protocolLabel = value => ({ http: 'HTTP / HTTPS', https: 'HTTPS（TLS 入口）', socks5: 'SOCKS5' })[value] || value;
+const protocolLabel = value => ({ http: 'HTTP / HTTPS', https: 'HTTPS（TLS 入口）', socks5: 'SOCKS5',vless:'VLESS',hysteria2:'Hysteria2',ss:'Shadowsocks' })[value] || value;
 let accountState={user:null,status:'signed-out'},proxySaveTimer,proxySaveVersion=0,loginScreenEnabled=false,credentialBusy=false,credentialMode='choice';
 let dockerEnvironmentState={activeId:null,localEnabled:true,environments:[],engine:{}};
+let network = {state:'blocked'};
+const proxyProfilesUI=mountProxyProfiles({host:$('proxyProfilesSettings'),api,getScope:()=>({owner:accountState.user?.id,environment:dockerEnvironmentState.activeId}),onEdit:profile=>openSavedProxyProfile(profile),onDetails:profile=>openProxyProfileDetails(profile),onReconnect:()=>void action(reconnectCurrentProxy),onDisconnect:disconnectProxy,getConnected:()=>network.state==='ready',onCreate:()=>{openCurrentProxyDialog();editingProxy=false;proxyProfileDraftId=null;$('proxyProfileName').value='';$('proxyProfileProvider').value='custom';selectProxyMethod('manual');$('protocol').value='http';$('proxyDialogTitle').textContent='新增代理配置';$('proxyDialog').label='新增代理配置';$('closeProxyDialog').setAttribute('aria-label','关闭新增代理配置');$('password').placeholder='可选';updateProxyActions();},onActivated:({status,proxy})=>{currentProxyConfig=proxy;restoreCurrentProxyForm();setNetwork(status);toast(status.state==='ready'?'代理已切换，固定出口核验成功':'已选择该配置，出口尚未核验，转发保持锁定','network');},onError:error=>toast(error.message,'errors')});
+let proxyProfileDraftId=null;
+let selectedProxyDetail=null;
+
+
 let setupInProgress=false;
 let runtimeRegistry={runtimes:[]};
 let selectedEngine='cc', runtimeVersions={}, engineChats={}, selectedCodexModel=null, authStates={}, authRequestId=0, chatSessions=[], activeChatId, defaultEngine="cc", defaultModel=null;
@@ -169,7 +176,7 @@ let sidebarCollapsed=false;try{sidebarCollapsed=localStorage.getItem('sidebar-co
 let currentProxyConfig=null,editingProxy=false,importPrepared=false;
 let proxyFileSelection=null,proxyFileVersion=0;
 const chatRuns=new Map();
-let page = 'cc', network = { state: 'blocked' }, hasPassword = false, busy = false, browserTabsState = { tabs: [], activeId: null }, reply, approvals = [];
+let page = 'cc', hasPassword = false, busy = false, browserTabsState = { tabs: [], activeId: null }, reply, approvals = [];
 const browserModeSwitches=mountBrowserModeSwitches({document,getMode:()=>browserTabsState.mode || 'proxy',save:mode=>api.browserSettings(mode),onSaved:renderBrowserTabs});
 let browserNetworkChanging=false;
 for(const item of document.querySelectorAll('[data-browser-network]'))item.addEventListener('click',()=>void action(async()=>{
@@ -274,6 +281,7 @@ $('browserCookiesDialog').addEventListener('wa-after-hide',event=>{if(event.targ
 function openAccountSettings(panel){$('accountMenu').open=false;switchPage('overview');document.querySelector('[data-setting='+panel+']').click();}
 $('accountProfileLink').onclick=()=>void action(()=>openAccountSettings('profile'));
 $('accountSettings').onclick=()=>void action(()=>openAccountSettings('preferences'));
+$('proxySettingsShortcut').onclick=()=>void action(()=>openAccountSettings('proxy'));
 // Native browser views render above the HTML surface; hide them while overlays
 // are open and restore the existing tab after the final overlay closes.
 for(const type of ['wa-show','wa-after-show','wa-reposition','wa-after-hide'])document.addEventListener(type,event=>{if(event.target.matches?.('app-dialog,wa-dropdown'))bounds();});
@@ -589,7 +597,6 @@ $('containerLoginDialog').addEventListener('wa-after-hide',()=>{void api.dockerE
 function updateProxyActions(){
  const saved=currentProxyConfig || {};
  const savedConfigured=Boolean(saved.host) && Number(saved.port)>0;
- $('proxyConfigActionLabel').textContent=savedConfigured?'编辑代理':'新增代理';$('proxyConfigActionIcon').src='assets/icons/'+(savedConfigured?'pencil':'plus')+'.svg';
  const port=Number($('port').value);
  const configured=Boolean(($('host').value || '').trim()) && Number.isInteger(port) && port>0 && port<=65535;
  const connected=network.state==='ready' || Boolean(network.recovering);
@@ -598,16 +605,21 @@ function updateProxyActions(){
  const label=connected?'断开代理':'连接代理';button.setAttribute('aria-label',label);button.title=label;
  button.querySelector('wa-icon').src=`assets/icons/${connected?'unplug':'plug'}.svg`;
  button.disabled=!savedConfigured || proxyActionBusy || network.state==='checking';
- $('verify').disabled=!savedConfigured || proxyActionBusy || network.state==='checking';
- const needsParse=$('proxyDialog').open && proxyMethod!=='manual' && !importPrepared;
- const importReady=Boolean(importPreview?.entries?.length) || (proxyMethod==='paste' && Boolean($('importText').value.trim())) || (proxyMethod==='file' && Boolean(proxyFileSelection));
+ const needsParse=proxyMethod!=='manual' && !importPrepared;
+ const importReady=Boolean(importPreview?.entries?.some(entry=>!entry.unsupported)) || (proxyMethod==='paste' && Boolean($('importText').value.trim())) || (proxyMethod==='file' && Boolean(proxyFileSelection)) || (proxyMethod==='subscription'&&Boolean($('subscriptionURL').value.trim()));
  $('connect').disabled=(needsParse?!importReady:!configured) || proxyActionBusy || network.state==='checking';
+ $('saveProxyProfile').disabled=!accountState.user||needsParse||!configured||proxyActionBusy||network.state==='checking';
  $('connect').classList.remove('hidden');
  $('connectLabel').textContent=proxyActionBusy || network.state==='checking'?'处理中…':needsParse?(importPreview?.entries?.length?'使用所选代理':proxyMethod==='file'?'导入并解析':'解析内容'):editingProxy?'保存并连接':'连接并核验出口';
 
  $('upstreamLabel').textContent=savedConfigured?protocolLabel(saved.protocol)+' · '+saved.host+':'+saved.port:'未配置';
  $('routeEnvironment').textContent=dockerEnvironmentState.activeId?'Docker 环境':'本机环境';
- for(const [id,value] of Object.entries({proxyInfoProtocol:savedConfigured?protocolLabel(saved.protocol):'未配置',proxyInfoHost:saved.host || '—',proxyInfoPort:savedConfigured?String(saved.port):'—',proxyInfoUsername:saved.username || '—',proxyInfoPassword:saved.hasPassword?'已配置':'未配置'}))$(id).textContent=value;
+ const activeDetail=!selectedProxyDetail || selectedProxyDetail.id===(saved.profileId||'legacy');
+ const detail=activeDetail?saved:selectedProxyDetail;
+ $('proxyActiveConnectionDetails').hidden=!activeDetail;
+ $('proxyActiveDiagnostics').hidden=!activeDetail;
+ $('proxyInactiveDescription').hidden=activeDetail;
+ for(const [id,value] of Object.entries({proxyInfoProtocol:detail.host?protocolLabel(detail.protocol):'未配置',proxyInfoHost:detail.host || '—',proxyInfoPort:detail.port?String(detail.port):'—',proxyInfoUsername:detail.username || '—',proxyInfoPassword:detail.hasPassword?'已配置':'未配置'}))$(id).textContent=value;
 
 }
 function renderProxyRegion(status){
@@ -633,6 +645,7 @@ function setNetwork(status) {
   $('proxySummaryIP').textContent=status.ip || '出口尚未核验';
   $('proxySummary').title=[status.reason,code?`IP 地区估计 · ${status.regionSource || '代理检测'}`:null,status.state!=='ready'&&status.ip?'上次核验出口，当前已阻止访问':null].filter(Boolean).join('\n');
   const names = { ready: '已连接', checking: '核验中', blocked: '未连接' };
+  proxyProfilesUI.connectionChanged();
   $('networkPill').textContent = `● ${names[status.state] || '未连接'}`;
   $('networkPill').className = `pill ${status.state}`;
   $('connectionState').textContent = status.recovering?'恢复中':names[status.state] || '未连接';$('connectionState').dataset.state=state;
@@ -644,7 +657,6 @@ function setNetwork(status) {
   $('chatProxyTooltip').disabled=chatNetworkReady();if(chatNetworkReady())$('chatProxyTooltip').open=false;
   $('send').disabled = (!busy && (draftPersistence.loading || !activeChatId));
   $('navigate').disabled = browserTabsState.mode==='proxy' && status.state !== 'ready';
-  $('verify').disabled = !currentProxyConfig?.host || proxyActionBusy || status.state==='checking';
   $('ccState').textContent = !chatNeedsProxy() && !busy?(chatSessions.find(item=>item.id===activeChatId)?.networkMode==='auto'?'自动 · '+(network.state==='ready'?'代理优先':'当前直连'):'当前对话使用直连'):busy ? `${RUNTIME_CATALOG[selectedEngine]?.name || selectedEngine} 正在处理…` : status.state === 'ready' ? (selectedEngine==='codex'?'Codex · 请求通过应用代理':'模型请求通过应用代理') : '等待连接代理';
   if(status.state==='ready' && page==='browser')void action(()=>api.browser('open'));
   bounds();
@@ -686,51 +698,66 @@ $('chat').addEventListener('click',event=>{
 const approvalCards=mountToolApprovalCards({host:$('approval'),scope:()=>[chatOwnerID,chatEnvironmentID,activeChatId],decide:(id,allow)=>api.approval(id,allow),onError:message=>toast(message,'chat')});
 function renderApproval(){approvalCards.render();}
 
-let importPreview = null;
+let importPreview = null,draftSubscriptionNode=null;
+function proxyFormConfig(){return draftSubscriptionNode?{...draftSubscriptionNode}:{protocol:$('protocol').value,host:$('host').value,port:Number($('port').value),username:$('username').value,password:$('password').value,useSavedPassword:hasPassword&&!$('password').value};}
 function closeImport() {
-  $('importText').value = ''; $('importEntries').replaceChildren();
+  $('importText').value = ''; $('importEntries').replaceChildren();$('importRelay').value='';$('importRelayPanel').classList.add('hidden');
   importPreview = null; void api.cancelImport().catch(() => {});
 }
 async function applyImport(index) {
   const preview = importPreview;
   if (!preview) throw new Error('请先解析导出内容');
-  const config = await api.applyIproyal({ batchId: preview.batchId, index });
-  for (const key of ['protocol', 'host', 'port', 'username', 'password']) $(key).value = config[key];
+  const relayIndex=$('importRelayPanel').classList.contains('hidden')||$('importRelay').value===''?undefined:Number($('importRelay').value);
+  const config = await api.applyIproyal({ batchId: preview.batchId, index,relayIndex });
+  draftSubscriptionNode=config.node?config:null;
+  for (const key of ['protocol', 'host', 'port', 'username', 'password']) $(key).value = config[key]||'';
+  for(const key of ['protocol','host','port','username','password'])$(key).disabled=Boolean(config.node);
   hasPassword = false; $('password').placeholder = '已导入凭据';updateProxyActions();
   const status = `已导入 ${protocolLabel(config.protocol)} 代理，请点击“连接并核验出口”。`;
   $('importStatus').textContent = status + (preview.warnings.length ? ` ${preview.warnings.join(' ')}` : '');
   $('importStatus').classList.add('success');
   $('upstreamLabel').textContent = '尚未连接新导入的代理';
-  importPrepared=true;closeImport();$('importSelection').classList.add('hidden');$('proxyImportResult').classList.remove('hidden');$('proxyImportEndpoint').textContent=protocolLabel(config.protocol)+' · '+config.host+':'+config.port;$('proxyImportAuth').textContent=config.username || config.password?'已读取凭据（不展示）':'无凭据';updateProxyActions();
+  importPrepared=true;closeImport();$('importSelection').classList.add('hidden');$('proxyImportResult').classList.remove('hidden');$('proxyImportEndpoint').textContent=protocolLabel(config.protocol)+' · '+config.host+':'+config.port+(config.node?.relay?'（经 '+config.node.relay.name+'）':'');$('proxyImportAuth').textContent=config.username || config.password || config.node?'已读取凭据（不展示）':'无凭据';updateProxyActions();
 }
 async function importFrom(source, filePath) {
   $('importError').textContent = '';
-  const preview = await api.importIproyal({ source, filePath, text: source === 'text' ? $('importText').value : undefined, defaultProtocol: source === 'text' ? $('importProtocol').value : 'http' });
+  const preview = await api.importIproyal({ source, filePath, subscriptionURL:source==='subscription'?$('subscriptionURL').value:undefined,text: source === 'text' ? $('importText').value : undefined, defaultProtocol: source === 'text' ? $('importProtocol').value : 'http' });
   if (preview.canceled) return;
-  importPreview = preview;
+  $('subscriptionURL').value='';
+  importPreview = preview;$('proxyImportPanel').classList.remove('hidden');
   $('importText').value = '';
-  if (preview.entries.length === 1) { await applyImport(0); return; }
-  $('pastePanel').classList.add('hidden'); $('importSelection').classList.remove('hidden');
-  $('importEntries').replaceChildren(); $('importWarnings').textContent = preview.warnings.join(' ');
+  if (preview.entries.length === 1&&!preview.entries[0].unsupported) { await applyImport(0); return; }
+  $('pastePanel').classList.add('hidden');$('subscriptionPanel').classList.add('hidden'); $('importSelection').classList.remove('hidden');
+  $('importEntries').replaceChildren();
+  const warningCounts=new Map();
+  for(const warning of preview.warnings){const message=warning.replace(/^第 \d+ 个节点[：:]\s*/,'').replace(/^第 \d+ 个节点与已有节点相同，已合并$/,'重复节点已合并');warningCounts.set(message,(warningCounts.get(message)||0)+1);}
+  $('importWarnings').textContent=[...warningCounts].map(([message,count])=>message+(count>1?'（'+count+' 项）':'')).join('；');
   for (const entry of preview.entries) {
-    const radio = document.createElement('wa-radio'); radio.className='import-entry';radio.value=String(entry.index);
-    const label = document.createElement('span'); label.textContent = `${protocolLabel(entry.protocol)} · ${entry.host}:${entry.port}`;
-    const detail = document.createElement('small'); detail.textContent = entry.authenticated ? '用户名和密码已读取（不展示）' : '无凭据，请确认已设置 IP 白名单';label.append(detail);
+    const radio = document.createElement('wa-radio'); radio.className='import-entry';radio.value=String(entry.index);radio.disabled=entry.unsupported;
+    const label = document.createElement('span'); label.textContent = `${entry.name?entry.name+' · ':''}${protocolLabel(entry.protocol)}${entry.host?' · '+entry.host+':'+entry.port:''}`;
+    const detail = document.createElement('small'); detail.textContent = entry.unsupported?entry.reason:entry.authenticated ? '用户名和密码已读取（不展示）' : '无凭据，请确认已设置 IP 白名单';label.append(detail);
     radio.append(label);$('importEntries').append(radio);
   }
-  $('importEntries').value='0';
+  $('importRelay').replaceChildren();const direct=document.createElement('wa-option');direct.value='';direct.textContent='直接连接所选节点';$('importRelay').append(direct);
+  for(const entry of preview.entries.filter(entry=>entry.relayEligible)){const option=document.createElement('wa-option');option.value=String(entry.index);option.textContent=entry.name||entry.host;$('importRelay').append(option);}
+  $('importRelay').value='';
+  $('importEntries').value=String(preview.entries.findIndex(entry=>!entry.unsupported));updateImportRelay();
   $('proxyImportResult').classList.add('hidden');updateProxyActions();
 }
+function updateImportRelay(){const entry=importPreview?.entries[Number($('importEntries').value)];const shown=entry&&!entry.unsupported&&['ss','hysteria2'].includes(entry.protocol);$('importRelayPanel').classList.toggle('hidden',!shown);if(!shown)$('importRelay').value='';}
+$('importEntries').addEventListener('change',updateImportRelay);
 $('importText').addEventListener('input',()=>{importPrepared=false;importPreview=null;for(const key of ['host','port','username','password'])$(key).value='';$('proxyImportResult').classList.add('hidden');updateProxyActions();});
 document.querySelectorAll('.nav').forEach(el => el.onclick = () => void action(()=>switchPage(el.dataset.page)));
 for(const el of document.querySelectorAll('.sidebar nav>.nav')){el.id='primary-nav-'+el.dataset.page;const name=el.querySelector('span').textContent.trim();el.setAttribute('aria-label',name);const tip=document.createElement('wa-tooltip');tip.for=el.id;tip.placement='right';tip.textContent=name;tip.className='primary-nav-tooltip';tip.disabled=!sidebarCollapsed;document.body.append(tip);}
 new ResizeObserver(bounds).observe($('browserViewport')); window.addEventListener('resize', bounds); window.addEventListener('offline', () => { void api.networkSignal('offline'); }); window.addEventListener('online', () => { void api.networkSignal('online'); }); document.querySelector('main').addEventListener('scroll', bounds);
+function proxyProfileInfo(){return {id:proxyProfileDraftId||undefined,name:$('proxyProfileName').value,provider:$('proxyProfileProvider').value};}
+$('saveProxyProfile').onclick=()=>{if(proxyActionBusy)return;void action(async()=>{proxyActionBusy=true;updateProxyActions();try{await api.proxyProfiles('save',{scope:{owner:accountState.user?.id,environment:dockerEnvironmentState.activeId},...proxyProfileInfo(),config:proxyFormConfig()});$('proxyDialog').open=false;await proxyProfilesUI.refresh();toast('配置已保存；当前代理连接保持不变','network');}finally{proxyActionBusy=false;updateProxyActions();}});};
 $('proxyForm').onsubmit = event => { event.preventDefault(); if(proxyActionBusy)return;void action(async () => {
   $('proxyValidation').classList.add('hidden');
   if(proxyMethod!=='manual' && !importPrepared){
    proxyActionBusy=true;updateProxyActions();$('importError').textContent='';
-   try{if(importPreview?.entries?.length){const selected=$('importEntries').value;await applyImport(Number(selected));}else if(proxyMethod==='paste')await importFrom('text');else if(proxyMethod==='file' && proxyFileSelection)await importFrom('file',proxyFileSelection);}
-   catch(error){$('importError').textContent=error.message.replace(/^Error invoking remote method '[^']+': Error: /,'');}
+   try{if(importPreview?.entries?.length){const selected=$('importEntries').value;await applyImport(Number(selected));}else if(proxyMethod==='subscription')await importFrom('subscription');else if(proxyMethod==='paste')await importFrom('text');else if(proxyMethod==='file' && proxyFileSelection)await importFrom('file',proxyFileSelection);}
+   catch(error){$('proxyImportPanel').classList.remove('hidden');$('importError').textContent=error.message.replace(/^Error invoking remote method '[^']+': Error: /,'');}
    finally{proxyActionBusy=false;updateProxyActions();}return;
   }
   const port=Number($('port').value);
@@ -738,9 +765,10 @@ $('proxyForm').onsubmit = event => { event.preventDefault(); if(proxyActionBusy)
   if(invalid){$('proxyValidation').textContent=invalid;$('proxyValidation').classList.remove('hidden');( !$('host').value.trim()?$('host'):$('port')).focus();return;}
   proxyActionBusy=true;updateProxyActions();$('connect').disabled = true;
   $('upstreamLabel').textContent = `${protocolLabel($('protocol').value)} · ${$('host').value}:${$('port').value}`;
-  try { const status = await api.connect({ protocol: $('protocol').value, host: $('host').value, port: Number($('port').value), username: $('username').value, password: $('password').value, useSavedPassword: hasPassword && !$('password').value }, $('remember').checked); if (status.state === 'ready') { hasPassword = Boolean($('password').value) || hasPassword; $('password').value = ''; $('password').placeholder = hasPassword ? '已配置（留空沿用）' : '可选'; currentProxyConfig={protocol:$('protocol').value,host:$('host').value,port:Number($('port').value),username:$('username').value,hasPassword};$('proxyDialog').open=false;toast('出口已核验。当前为应用代理原型，系统级保护尚未实现。','network'); } }
+  try { const status = await api.connect({...proxyFormConfig(),profileInfo:proxyProfileInfo()}, $('remember').checked); if (status.state === 'ready') { hasPassword = Boolean($('password').value) || hasPassword; $('password').value = ''; $('password').placeholder = hasPassword ? '已配置（留空沿用）' : '可选'; currentProxyConfig={protocol:$('protocol').value,host:$('host').value,port:Number($('port').value),username:$('username').value,hasPassword,...(draftSubscriptionNode?{hasNode:true,nodeId:draftSubscriptionNode.nodeId,name:draftSubscriptionNode.name}:{})};draftSubscriptionNode=null;currentProxyConfig=(await api.state()).proxy;$('proxyDialog').open=false;await proxyProfilesUI.refresh();toast('固定出口已核验，代理已连接','network'); } }
   finally { proxyActionBusy=false;updateProxyActions(); }
 }); };
+$('subscriptionURL').addEventListener('input',updateProxyActions);
 for (const key of ['protocol', 'host', 'port', 'username']) $(key).addEventListener('input', () => { hasPassword = false; $('password').placeholder = '可选（更换代理后需重新输入）'; });
 async function disconnectProxy(){
  if(proxyActionBusy)return;
@@ -755,11 +783,18 @@ function restoreCurrentProxyForm(){
 async function reconnectCurrentProxy(){
  if(proxyActionBusy || !currentProxyConfig?.host)return;
  proxyActionBusy=true;updateProxyActions();
- try{await api.connect({...currentProxyConfig,password:'',useSavedPassword:Boolean(currentProxyConfig.hasPassword)},$('remember').checked);}
+ try{await api.connect({...currentProxyConfig,password:'',useSavedPassword:!currentProxyConfig.hasNode&&Boolean(currentProxyConfig.hasPassword),useSavedNode:Boolean(currentProxyConfig.hasNode)},$('remember').checked);}
  finally{proxyActionBusy=false;updateProxyActions();}
 }
 
-$('verify').onclick = () => action(reconnectCurrentProxy);
+function openProxyProfileDetails(profile){
+ selectedProxyDetail=profile;
+ if(!profile){$('proxyProfileDetailsDialog').open=false;return;}
+ $('proxyProfileDetailsDialog').label=profile.name+' · 代理详情';
+ updateProxyActions();
+ $('proxyProfileDetailsDialog').open=true;
+}
+$('closeProxyProfileDetails').onclick=()=>{$('proxyProfileDetailsDialog').open=false;};
 $('proxyDetailsToggle').onclick=()=>{
  const expanded=$('proxyDetailsToggle').getAttribute('aria-expanded')!=='true';
  $('proxyDetailsToggle').setAttribute('aria-expanded',String(expanded));
@@ -768,20 +803,28 @@ $('proxyDetailsToggle').onclick=()=>{
 };
 let proxyMethod='manual';
 function selectProxyMethod(method){
- proxyMethod=method;importPrepared=false;closeImport();proxyFileSelection=null;++proxyFileVersion;
+ proxyMethod=method;draftSubscriptionNode=null;for(const key of ['protocol','host','port','username','password'])$(key).disabled=false;importPrepared=false;closeImport();proxyFileSelection=null;++proxyFileVersion;
  for(const key of ['host','port','username','password'])$(key).value='';hasPassword=false;
- document.querySelectorAll('[data-proxy-method]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.proxyMethod===method)));
- $('proxyManualPanel').classList.toggle('hidden',method!=='manual');$('proxyFilePanel').classList.toggle('hidden',method!=='file');$('proxyImportPanel').classList.toggle('hidden',method==='manual');$('pastePanel').classList.toggle('hidden',method!=='paste');$('importSelection').classList.add('hidden');$('proxyImportResult').classList.add('hidden');$('importError').textContent='';$('importStatus').classList.add('hidden');$('proxyValidation').classList.add('hidden');updateProxyActions();$('proxyFileChoose').value='';$('proxyFileError').textContent='';
+ $('proxyMethodSelect').value=method;$('subscriptionPanel').classList.toggle('hidden',method!=='subscription');
+ $('proxyManualPanel').classList.toggle('hidden',method!=='manual');$('proxyFilePanel').classList.toggle('hidden',method!=='file');$('proxyImportPanel').classList.toggle('hidden',method==='manual'||method==='subscription'&&!importPreview);$('pastePanel').classList.toggle('hidden',method!=='paste');$('importSelection').classList.add('hidden');$('proxyImportResult').classList.add('hidden');$('importError').textContent='';$('importStatus').classList.add('hidden');$('proxyValidation').classList.add('hidden');updateProxyActions();$('proxyFileChoose').value='';$('proxyFileError').textContent='';
 }
-for(const button of document.querySelectorAll('[data-proxy-method]'))button.onclick=()=>selectProxyMethod(button.dataset.proxyMethod);
-$('openProxyDialog').onclick=()=>{editingProxy=Boolean(currentProxyConfig?.host);selectProxyMethod('manual');
+$('proxyMethodSelect').addEventListener('change',()=>selectProxyMethod($('proxyMethodSelect').value));
+function openCurrentProxyDialog(){editingProxy=Boolean(currentProxyConfig?.host);const profile=proxyProfilesUI.current();proxyProfileDraftId=profile?.id||(editingProxy?(currentProxyConfig.profileId||'legacy'):null);$('proxyProfileName').value=profile?.name||(editingProxy?'现有代理':'');$('proxyProfileProvider').value=profile?.provider||'custom';selectProxyMethod('manual');
  clearTimeout(proxySaveTimer);++proxySaveVersion;
  for(const key of ['host','username','password'])$(key).value='';$('protocol').value='http';$('port').value='';hasPassword=false;$('password').placeholder='可选';
  $('proxyValidation').classList.add('hidden');$('importStatus').textContent='导入代理列表，或在下方手动填写。';$('importStatus').classList.remove('success');
- if(editingProxy)restoreCurrentProxyForm();
+ if(editingProxy){restoreCurrentProxyForm();if(currentProxyConfig.hasNode){draftSubscriptionNode={...currentProxyConfig,useSavedNode:true};importPrepared=true;for(const key of ['protocol','host','port','username','password'])$(key).disabled=true;}}
  const title=editingProxy?'编辑代理':'新增代理';$('proxyDialogTitle').textContent=title;$('proxyDialog').label=title;$('closeProxyDialog').setAttribute('aria-label','关闭'+title);
  $('proxyDialog').open=true;updateProxyActions();
 };
+function openSavedProxyProfile(profile){
+ openCurrentProxyDialog();proxyProfileDraftId=profile.id;editingProxy=true;selectProxyMethod('manual');
+ $('proxyProfileName').value=profile.name;$('proxyProfileProvider').value=profile.provider;
+ for(const field of ['protocol','host','port','username'])$(field).value=profile[field]??'';
+ hasPassword=Boolean(profile.hasPassword);$('password').value='';$('password').placeholder=hasPassword?'已保存（留空沿用）':'可选';
+ if(profile.hasNode){draftSubscriptionNode={...profile,useSavedNode:true};importPrepared=true;for(const field of ['protocol','host','port','username','password'])$(field).disabled=true;}
+ $('proxyDialogTitle').textContent='编辑代理配置';$('proxyDialog').label='编辑代理配置';$('closeProxyDialog').setAttribute('aria-label','关闭编辑代理配置');updateProxyActions();
+}
 for(const id of ['closeProxyDialog','cancelProxyDialog'])$(id).onclick=()=>{$('proxyDialog').open=false;};
 $('proxyDialog').addEventListener('wa-after-hide',event=>{if(event.target!==$('proxyDialog'))return;++proxyFileVersion;closeImport();restoreCurrentProxyForm();updateProxyActions();});
 function renderBrowserTabs(state) {
@@ -1398,7 +1441,7 @@ $('runtimeInstallConfirm').onclick=()=>void action(async()=>{
  if(owner===accountState.user?.id && id===dockerEnvironmentState.activeId){$('runtimeInstallDialog').open=false;await refreshEnvironmentConfiguration();}
 });
 const settingCopy={containers:['环境与容器','管理本设备的日志保留、自动清理与健康检查。'],console:['控制台','管理终端显示、输入与连接行为。'],git:['Git 管理','管理 Git SSH 公钥与代码仓库认证。'],browser:['浏览器','管理浏览器网络、站点数据和 Cookie 同步。'],profile:['个人资料','管理当前账号的基础信息。'],notifications:['通知','管理当前账号在本设备上的通知。'],shortcuts:['快捷键','配置发送方式和常用操作快捷键，仅保存在本设备。'],preferences:['偏好设置','管理语言、外观、阅读、时间显示和退出行为。'],proxy:['代理与出口','管理应用代理的连接与固定出口。'],environment:['本地系统','查看系统语言、时区与环境提醒，检测结果不限制功能使用。']};
-for(const tab of document.querySelectorAll('[data-setting]'))tab.onclick=()=>{const key=tab.dataset.setting;if(key==='console')void consoleSettings.refresh();if(key==='git')void gitSettings.ensureLoaded();if(key==='browser'){void loadBrowserCookiePreferences();void browserLibrary.refresh();}$('verify').classList.toggle('hidden',key!=='proxy');document.querySelectorAll('[data-setting]').forEach(item=>item.classList.toggle('active',item===tab));document.querySelectorAll('[data-panel]').forEach(panel=>panel.classList.toggle('hidden',panel.dataset.panel!==key));$('settingsTitle').textContent=settingCopy[key][0];$('notificationScopeBadge').classList.toggle('hidden',!['notifications','shortcuts','console','containers'].includes(key));$('notificationScopeBadge').lastChild.textContent=['shortcuts','console','containers'].includes(key)?'仅本设备':'当前账号 · 本设备';$('settingsTitleIcon').src='assets/icons/'+({containers:'boxes',console:'terminal',git:'git-branch',browser:'globe',profile:'user',preferences:'sliders-horizontal',notifications:'bell',shortcuts:'keyboard',proxy:'shield-check',environment:'monitor'})[key]+'.svg';$('settingsDescription').textContent=settingCopy[key][1];};
+for(const tab of document.querySelectorAll('[data-setting]'))tab.onclick=()=>{const key=tab.dataset.setting;if(key==='proxy')void proxyProfilesUI.refresh();if(key==='console')void consoleSettings.refresh();if(key==='git')void gitSettings.ensureLoaded();if(key==='browser'){void loadBrowserCookiePreferences();void browserLibrary.refresh();}$('verify').classList.toggle('hidden',key!=='proxy');document.querySelectorAll('[data-setting]').forEach(item=>item.classList.toggle('active',item===tab));document.querySelectorAll('[data-panel]').forEach(panel=>panel.classList.toggle('hidden',panel.dataset.panel!==key));$('settingsTitle').textContent=settingCopy[key][0];$('notificationScopeBadge').classList.toggle('hidden',!['notifications','shortcuts','console','containers'].includes(key));$('notificationScopeBadge').lastChild.textContent=['shortcuts','console','containers'].includes(key)?'仅本设备':'当前账号 · 本设备';$('settingsTitleIcon').src='assets/icons/'+({containers:'boxes',console:'terminal',git:'git-branch',browser:'globe',profile:'user',preferences:'sliders-horizontal',notifications:'bell',shortcuts:'keyboard',proxy:'shield-check',environment:'monitor'})[key]+'.svg';$('settingsDescription').textContent=settingCopy[key][1];};
 let themePreference='light';try{themePreference=localStorage.getItem('ui-theme') || 'light';}catch{}
 if(!['light','dark','system'].includes(themePreference))themePreference='light';
 const systemTheme=matchMedia('(prefers-color-scheme: dark)');
@@ -1498,7 +1541,7 @@ function renderAccount(state){
  if(showLogin){$('environmentGate').open=false;for(const overlay of document.querySelectorAll('app-dialog[open],wa-dropdown[open]'))overlay.open=false;}else if(wasAuth && displayedEnvironmentStatus)setEnvironment(displayedEnvironmentStatus);
  if(showLogin && !wasAuth && !credentialBusy)credentialMode='choice';renderCredentialMode();
  $('setupAccountLogin').classList.toggle('hidden',Boolean(state.user));$('setupAccountLogout').classList.toggle('hidden',!state.user);
- const changed=accountState.user?.id!==state.user?.id;if(changed){$('renameEnvironmentDialog').open=false;clearBrowserCookies();lastChatSyncNotice='';$('chatStorageStatus').textContent='';}accountState=state;if(changed)notificationSettings.setOwner(state.user?.id);renderProxyStorageScope();if(changed){runtimeRegistry={runtimes:[]};renderChatAvailability();}if(changed && chatOwnerID!==state.user?.id){chatRestoreVersion++;chatOwnerID=null;clearReasoningTimers();chatSessions=[];activeChatId=null;$('chat').replaceChildren();renderSessionList();}
+ const changed=accountState.user?.id!==state.user?.id;if(changed){proxyProfilesUI.invalidate();draftSubscriptionNode=null;closeImport();$('proxyDialog').open=false;$('renameEnvironmentDialog').open=false;clearBrowserCookies();lastChatSyncNotice='';$('chatStorageStatus').textContent='';}accountState=state;if(changed)notificationSettings.setOwner(state.user?.id);renderProxyStorageScope();if(changed){runtimeRegistry={runtimes:[]};renderChatAvailability();}if(changed && chatOwnerID!==state.user?.id){chatRestoreVersion++;chatOwnerID=null;clearReasoningTimers();chatSessions=[];activeChatId=null;$('chat').replaceChildren();renderSessionList();}
  if(changed){setupInProgress=false;setupSessionStarted=false;setupImageConfirmed=false;$('environmentCreatedDialog').open=false;setupPreviewKey='';$('setupRuntimePreviewList').replaceChildren();setupDockerChecked=false;setupDockerError='';$('setupEnvironmentName').value='';validateSetupEnvironment();clearTimeout(proxySaveTimer);proxySaveVersion++;}
  const user=state.user;renderProfile(state);$('accountName').textContent=user?.name || (state.status==='signing-in'?'正在登录…':'未登录');setAccountAvatar($('accountAvatar'),state.avatar,state.avatarFallback || generatedAvatar('kuneco-guest'));$('accountSubtitle').textContent=user?.email || user?.username || '登录后同步代理配置';setAccountAvatar($('accountMenuAvatar'),state.avatar,state.avatarFallback || generatedAvatar('kuneco-guest'));$('accountMenuName').textContent=user?.name || '未登录';
  $('accountLogin').classList.toggle('hidden',Boolean(user) || state.status==='signing-in');$('accountLogout').classList.toggle('hidden',!user);$('accountCancel').classList.toggle('hidden',state.status!=='signing-in');$('accountDetails').classList.toggle('hidden',!user);
@@ -1652,7 +1695,7 @@ async function environmentOperation(action,value={}){
 async function performEnvironmentOperation(action,value={}){
  if(action==='select' && value.id===dockerEnvironmentState.activeId)return dockerEnvironmentState;
  const owner=accountState.user?.id;
- if(action==='select' || action==='delete'){clearTimeout(proxySaveTimer);proxySaveVersion++;}
+ if(action==='select' || action==='delete'){draftSubscriptionNode=null;closeImport();$('proxyDialog').open=false;clearTimeout(proxySaveTimer);proxySaveVersion++;}
  if(action==='select' && chatOwnerID)await api.saveChats(chatViewData(),chatOwnerID,dockerEnvironmentState.activeId);
  const previousEnvironment=dockerEnvironmentState.activeId;if(action==='select' || action==='delete')clearBrowserCookies();
  const state=await api.dockerEnvironments(action,value);if(owner!==accountState.user?.id)throw new Error('操作期间账号已变化，请重新打开环境');dockerEnvironmentState=state;await refreshEnvironments(state);
@@ -1679,7 +1722,7 @@ async function refreshEnvironments(existing){
  let complete=true;
  const version=++environmentLoadVersion,body=document.querySelector('#page-environments>.environments-body');body.classList.add('is-loading');body.setAttribute('aria-busy','true');
  try{
- const owner=accountState.user?.id;const state=existing || await api.dockerEnvironments('state');if(owner!==accountState.user?.id || version!==environmentLoadVersion)return;const gitEnvironmentChanged=dockerEnvironmentState.activeId!==state.activeId || dockerEnvironmentState.localEnabled!==state.localEnabled;dockerEnvironmentState=state;if(gitEnvironmentChanged)gitSettings.invalidate();renderProxyStorageScope();if(!document.querySelector('[data-panel=browser]').classList.contains('hidden'))void loadBrowserCookiePreferences();
+ const owner=accountState.user?.id;const state=existing || await api.dockerEnvironments('state');if(owner!==accountState.user?.id || version!==environmentLoadVersion)return;const gitEnvironmentChanged=dockerEnvironmentState.activeId!==state.activeId || dockerEnvironmentState.localEnabled!==state.localEnabled;dockerEnvironmentState=state;if(gitEnvironmentChanged){gitSettings.invalidate();proxyProfilesUI.invalidate();}renderProxyStorageScope();if(!document.querySelector('[data-panel=proxy]').classList.contains('hidden'))void proxyProfilesUI.refresh();if(!document.querySelector('[data-panel=browser]').classList.contains('hidden'))void loadBrowserCookiePreferences();
  const hasLocal=state.localEnabled!==false,localName=state.localName || '本机环境';
  const noEnvironments=!hasLocal && !state.environments.length;
  if(!accountState.user){setupInProgress=false;setupSessionStarted=false;}

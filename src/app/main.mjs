@@ -1,3 +1,4 @@
+import {ProxyProfiles,profileEgressIdentity} from '../features/proxy/proxy-profiles.mjs';
 import {undoTurnChanges} from '../features/chat/turn-change-undo.mjs';
 import {stageCodexDocuments,originalDocumentPrompt} from '../features/runtimes/codex-documents.mjs';
 import {proxyLogEvent} from '../features/environments/proxy-log-event.mjs';
@@ -72,6 +73,8 @@ import {BrowserCookieSync} from '../features/browser/browser-cookies.mjs';
 import {BrowserSiteData} from '../features/browser/browser-site-data.mjs';
 import {AccountClient} from '../features/account/account-client.mjs';
 import { parseIproyalExport } from '../features/proxy/iproyal-import.mjs';
+import {parseProxyImport} from '../features/proxy/proxy-import.mjs';
+import {publicProxyAddress,fetchProxySubscription,prepareSubscriptionProxy} from '../features/proxy/subscription-source.mjs';
 
 const here = fileURLToPath(new URL('../',import.meta.url));
 let connectionRecords,chatNetworkChanging=false;
@@ -110,7 +113,9 @@ function requireActiveEnvironment(){if(!activeContainerId && !localEnvironmentEn
 let account=null,accountChanging=false,registeredRuntimes=null,runtimeOwner=null,runtimeDetection=null;
 async function loadUserRuntimes(){stopEnvironmentLogs();stopEnvironmentHealth();const owner=account?.user?.id || null;registeredRuntimes=null;runtimeOwner=owner;const data=await dockerEnvs?.load(owner);activeContainerId=data?.activeId || null;localEnvironmentEnabled=data?.localEnabled!==false;const registry=activeContainerId?(await dockerEnvs.get(owner,activeContainerId)).item.registry:localEnvironmentEnabled?await account.runtimes(hostname()).catch(()=>null):null;if(owner===(account?.user?.id || null)){registeredRuntimes=registry;if(registry?.runtimes?.some(item=>!item.auth))await runtimeView(registry).catch(()=>{});startEnvironmentHealth();recordEnvironmentEvent(owner,activeContainerId,'Environment lifecycle','INFO','Current environment loaded');}}
 
-const accountProxyView=()=>({...savedConfig,password:undefined,hasPassword:Boolean(savedConfig.password)});
+const publicProxyView=config=>({protocol:config.protocol,host:config.host,port:config.port,username:config.username||'',name:config.name,profileId:config.profileId,nodeId:config.nodeId,hasNode:Boolean(config.node),relayName:config.node?.relay?.name,hasPassword:Boolean(config.password||config.node)});
+let proxyProfiles;
+const accountProxyView=()=>publicProxyView(savedConfig);
 async function applyAccount(){stopEnvironmentLogs();stopEnvironmentHealth();closeConsole();accountChanging=true;try{containerLogin?.kill();containerLogin=null;await stopGateway();emit('network',{state:'blocked',reason:'账号配置已切换，请连接并核验出口'});await loadUserRuntimes();if(window)resetEnvironmentBrowser();await loadAccountChats(false);savedConfig={protocol:'http',host:'',port:8080,username:'',password:''};if(account.user){const saved=activeContainerId?(await dockerEnvs.get(dockerOwner(),activeContainerId)).item.proxy:await account.proxy();if(saved)savedConfig=validateProxy(saved);}return {...account.state(),proxy:accountProxyView()};}finally{accountChanging=false;if(account?.user){const ctx=cookieContext();await ctx.sync.sync().catch(ctx.sync.onError);}emit('account',{...account.state(),proxy:accountProxyView()});}}
 
 const fixtureMode = process.argv.includes('--test-fixture');
@@ -163,10 +168,10 @@ const browserTabs = new Map();
 let activeTabId, browserBounds = { x: 0, y: 0, width: 1, height: 1 }, browserVisible = false;
 let pendingImport = null;
 let egressPins = {};
-const proxyIdentity = config => createHash('sha256').update(JSON.stringify([config.protocol, config.host, config.port, config.username])).digest('hex');
+const proxyIdentity = (config,scope={owner:dockerOwner(),environment:activeContainerId}) => profileEgressIdentity(config,scope)||createHash('sha256').update(JSON.stringify([config.protocol, config.host, config.port, config.username,...(config.nodeId?[scope.owner,scope.environment,config.nodeId]:[])])).digest('hex');
 let pinWrite = Promise.resolve(), pinsLoadError = false;
-function saveEgressPin(config, ip) {
-  const key = proxyIdentity(config);
+function saveEgressPin(config, ip, scope) {
+  const key = proxyIdentity(config,scope);
   if (egressPins[key] === ip) return Promise.resolve();
   pinWrite = pinWrite.catch(() => {}).then(async () => {
     if (egressPins[key] === ip) return;
@@ -472,18 +477,22 @@ async function loadConfig() {
   try { egressPins = JSON.parse(await readFile(path.join(app.getPath('userData'), 'egress-pins.json'), 'utf8')); if (!egressPins || Array.isArray(egressPins) || Object.values(egressPins).some(ip => !isIP(ip))) throw new Error('Invalid pins'); } catch (error) { if (error.code !== 'ENOENT') pinsLoadError = true; }
   try {
     const raw = JSON.parse(await readFile(path.join(app.getPath('userData'), 'proxy.json'), 'utf8'));
-    savedConfig = { protocol: raw.protocol, host: raw.host, port: raw.port, username: raw.username || '' };
+    savedConfig = { protocol: raw.protocol, host: raw.host, port: raw.port, username: raw.username || '',name:raw.name,nodeId:raw.nodeId,...(raw.profileId?{profileId:raw.profileId}:{}) };
+    if(raw.nodeSecret&&safeStorage.isEncryptionAvailable())savedConfig.node=JSON.parse(safeStorage.decryptString(Buffer.from(raw.nodeSecret,'base64')));
     if (raw.secret && safeStorage.isEncryptionAvailable()) savedConfig.password = safeStorage.decryptString(Buffer.from(raw.secret, 'base64'));
   } catch {}
 }
 async function saveConfig(config, remember) {
+  const owner=dockerOwner(),environment=activeContainerId;
+  const assertSaveScope=()=>{if(owner!==dockerOwner()||environment!==activeContainerId||accountChanging)throw new Error('保存期间账号或环境已变化');};
   if(accountChanging)throw new Error('账号切换中，请稍后');
-  if(activeContainerId){await dockerEnvs.update(dockerOwner(),activeContainerId,{proxy:config});savedConfig={...config};return;}
+  if(environment){await dockerEnvs.update(owner,environment,{proxy:config});assertSaveScope();savedConfig={...config};return;}
   if(account?.token && !account.user)throw new Error('账号服务不可用，无法保存到已登录用户');
-  if(account?.user){if(accountChanging)throw new Error('账号切换中，请稍后');await account.saveProxy(config,account.user.id);savedConfig={...config};return;}
+  if(account?.user){if(accountChanging)throw new Error('账号切换中，请稍后');await account.saveProxy(config,owner);assertSaveScope();savedConfig={...config};return;}
   savedConfig = { ...config };
   if (!remember) { await rm(path.join(app.getPath('userData'), 'proxy.json'), { force: true }); return; }
-  const raw = { protocol: config.protocol, host: config.host, port: config.port, username: config.username };
+  const raw = { protocol: config.protocol, host: config.host, port: config.port, username: config.username,name:config.name,nodeId:config.nodeId,...(config.profileId?{profileId:config.profileId}:{}) };
+  if(config.node){if(!safeStorage.isEncryptionAvailable())throw new Error('系统凭据加密不可用');raw.nodeSecret=safeStorage.encryptString(JSON.stringify(config.node)).toString('base64');}
   if (config.password) {
     if (!safeStorage.isEncryptionAvailable()) throw new Error('系统凭据加密不可用，不能保存密码；请取消保存配置');
     raw.secret = safeStorage.encryptString(config.password).toString('base64');
@@ -502,19 +511,24 @@ async function connect(config, remember, {environmentSwitch=false}={}) {
   requireActiveEnvironment();
   if (connecting) throw new Error('正在连接，请稍候');
   if (pinsLoadError) throw new Error('固定出口记录损坏，已禁止连接；请恢复原记录，不能自动接受新IP');
-  await Promise.all([...browserTabs.values()].map(tab => tab.privacyReady));
-  if ([...browserTabs.values()].some(tab => tab.privacyError)) throw new Error('浏览器隐私防护失效，请重启应用再连接');
-  const validated = validateProxy(config);
-  if (!isIP(validated.host)) throw new Error('DNS保护要求上游主机填写IP地址；目标域名由上游代理解析，不能使用本机DNS启动代理');
-  connecting = true;
-  const logOwner=dockerOwner(),logEnvironment=activeContainerId;
-  recordEnvironmentEvent(logOwner,logEnvironment,'Proxy connection and verification','INFO','Connecting proxy and verifying egress');
+  connecting=true;
+  const scope={owner:dockerOwner(),environment:activeContainerId};
+  const logOwner=scope.owner,logEnvironment=scope.environment;
+  const assertScope=()=>{if(accountChanging||scope.owner!==dockerOwner()||scope.environment!==activeContainerId||shutdown.requested)throw new Error('连接期间账号或环境已变化');};
   try {
-    await stopGateway({preserveDirectChat:true});
+    await Promise.all([...browserTabs.values()].map(tab=>tab.privacyReady));assertScope();
+    if([...browserTabs.values()].some(tab=>tab.privacyError))throw new Error('浏览器隐私防护失效，请重启应用再连接');
+    const validated=validateProxy(config);
+    if(!validated.node&&!isIP(validated.host))throw new Error('DNS保护要求上游主机填写IP地址');
+    const upstream=validated.node?await prepareSubscriptionProxy(validated):validated;assertScope();
+    const expectedIp=egressPins[proxyIdentity(validated,scope)]||null;
+    const onVerified=ip=>{assertScope();return saveEgressPin(validated,ip,scope);};
+    recordEnvironmentEvent(logOwner,logEnvironment,'Proxy connection and verification','INFO','Connecting proxy and verifying egress');
+    await stopGateway({preserveDirectChat:true});assertScope();
     emit('network', { state: 'checking', reason: '正在通过指定代理核验出口' });
-    const externalContainer=activeContainerId && (await dockerEnvs.get(dockerOwner(),activeContainerId)).item.external;
-    const next = activeContainerId && !externalContainer?await dockerEnvs.connect(dockerOwner(),activeContainerId,validated,egressPins[proxyIdentity(validated)] || null,ip=>saveEgressPin(validated,ip)):await new ProxyGateway(validated, { gostBinary:process.env.KUNECO_PROXY_ENGINE==='gost'?path.join(here,'..','vendor','gost',process.platform+'_'+(process.arch==='x64'?'amd64':process.arch),'gost'):null, healthInterval:60000,jitter:0.2, expectedIp: egressPins[proxyIdentity(validated)] || null, onVerified: ip => saveEgressPin(validated, ip) }).start();
-    if(shutdown.requested){await next.stop({strict:true});throw new Error('应用正在退出');}
+    const externalContainer=scope.environment && (await dockerEnvs.get(scope.owner,scope.environment)).item.external;assertScope();
+    const next = scope.environment && !externalContainer?await dockerEnvs.connect(scope.owner,scope.environment,upstream,expectedIp,onVerified):await new ProxyGateway(upstream, { mihomoBinary:validated.node?path.join(here,'..','vendor','mihomo',process.platform+'_'+(process.arch==='x64'?'amd64':process.arch),'mihomo'):null,gostBinary:!validated.node&&process.env.KUNECO_PROXY_ENGINE==='gost'?path.join(here,'..','vendor','gost',process.platform+'_'+(process.arch==='x64'?'amd64':process.arch),'gost'):null, healthInterval:60000,jitter:0.2, expectedIp,onVerified }).start();
+    try{assertScope();}catch(error){await next.stop({strict:true});throw error;}
     gateway = next;
     next.on('requestFailure', failure => { if (gateway === next) emit('requestFailure', failure); });
     next.on('status', status => {
@@ -524,10 +538,10 @@ async function connect(config, remember, {environmentSwitch=false}={}) {
       if (status.state === 'blocked') { if(browserMode==='proxy')stopBrowserTabs(); abortRun(task=>task.networkMode!=='direct'); }
       showBrowserViews();
     });
-    const configuration=await browserProxyConfiguration();
-    for(const current of configuredBrowserSessions.keys()){await current.closeAllConnections();await current.setProxy(configuration);}
-    await saveConfig(validated, remember);
-    const status = await next.verify(probeUrl);
+    const configuration=await browserProxyConfiguration();assertScope();
+    for(const current of configuredBrowserSessions.keys()){await current.closeAllConnections();assertScope();await current.setProxy(configuration);}
+    assertScope();await saveConfig(validated, remember);
+    const status = await next.verify(probeUrl);assertScope();
     if (gateway !== next) throw new Error('连接期间系统环境发生变化');
     next.serviceProbes=!fixtureMode;
     next.startMonitoring(probeUrl);
@@ -557,29 +571,40 @@ app.on('login', (event, contents, _request, authInfo, callback) => {
     event.preventDefault(); callback('workspace', browserMode!=='proxy'?directBrowserTransport.token:gateway.token);
   } else { event.preventDefault(); callback(); }
 });
-ipcMain.handle('workspace:importIproyal', guarded(async ({ source, text, filePath, defaultProtocol = 'http' } = {}) => {
+ipcMain.handle('workspace:importIproyal', guarded(async ({ source, text, filePath, subscriptionURL, defaultProtocol = 'http' } = {}) => {
   pendingImport = null;
+  const importOwner=dockerOwner(),importEnvironment=activeContainerId;
   let content, format = 'auto';
-  if (source === 'clipboard') content = clipboard.readText();
+  if(source==='subscription')content=await fetchProxySubscription(subscriptionURL);
+  else if (source === 'clipboard') content = clipboard.readText();
   else if (source === 'text') content = text;
   else if (source === 'file') {
-    if(typeof filePath!=='string' || !path.isAbsolute(filePath) || !/\.(txt|csv)$/i.test(filePath)) throw new Error('请选择 TXT 或 CSV 文件');
+    if(typeof filePath!=='string' || !path.isAbsolute(filePath) || !/\.(txt|csv|yaml|yml|json)$/i.test(filePath)) throw new Error('请选择 TXT、CSV、YAML 或 JSON 文件');
     const file = filePath;
     const info = await stat(file);
-    if (!info.isFile() || info.size > 1024 * 1024) throw new Error('请选择不超过 1 MB 的 TXT 或 CSV 文件');
+    if (!info.isFile() || info.size > 1024 * 1024) throw new Error('请选择不超过 1 MB 的 TXT、CSV、YAML 或 JSON 文件');
     content = await readFile(file, 'utf8'); format = path.extname(file).toLowerCase() === '.csv' ? 'csv' : 'auto';
   } else throw new Error('请选择剪贴板、粘贴内容或导出文件');
-  const parsed = parseIproyalExport(content, { defaultProtocol: source === 'text' ? defaultProtocol : 'http', format });
-  pendingImport = { id: randomUUID(), entries: parsed.entries, expires: Date.now() + 5 * 60 * 1000 };
-  return { batchId: pendingImport.id, format: parsed.format, warnings: parsed.warnings, entries: parsed.entries.map((entry, index) => ({ index, protocol: entry.protocol, host: entry.host, port: entry.port, authenticated: Boolean(entry.username || entry.password) })) };
+  if(importOwner!==dockerOwner()||importEnvironment!==activeContainerId)throw new Error('导入期间账号或环境已变化');
+  const parsed=parseProxyImport(content,{subscription:source==='subscription',defaultProtocol:source==='text'?defaultProtocol:'http',format});
+  pendingImport = { id: randomUUID(), entries: parsed.entries, owner:importOwner,environment:importEnvironment, expires: Date.now() + 5 * 60 * 1000 };
+  return { batchId: pendingImport.id, format: parsed.format, warnings: parsed.warnings, entries: parsed.entries.map((entry, index) => ({index,protocol:entry.protocol,host:entry.host,port:entry.port,name:entry.name,unsupported:Boolean(entry.unsupported),reason:entry.reason,relayEligible:entry.protocol==='vless'&&entry.node?.tls===true,authenticated:Boolean(entry.username||entry.password||entry.node)})) };
 }));
-ipcMain.handle('workspace:applyIproyal', guarded(async ({ batchId, index } = {}) => {
+ipcMain.handle('workspace:applyIproyal', guarded(async ({ batchId, index, relayIndex } = {}) => {
   if (connecting) throw new Error('正在连接，请完成后再导入');
   if (!pendingImport || pendingImport.id !== batchId || pendingImport.expires < Date.now()) throw new Error('导入预览已过期，请重新导入');
   if (!Number.isInteger(index) || !pendingImport.entries[index]) throw new Error('请选择一条有效代理');
-  const entry = pendingImport.entries[index]; pendingImport = null;
+  if(pendingImport.owner!==dockerOwner()||pendingImport.environment!==activeContainerId)throw new Error('账号或环境已变化，请重新导入');
+  let entry = pendingImport.entries[index];if(entry.unsupported)throw new Error(entry.reason||'该节点不可用');
+  if(relayIndex!==undefined){
+    if(!Number.isInteger(relayIndex)||relayIndex===index)throw new Error('请选择其他可用 VLESS 前置节点');
+    const relay=pendingImport.entries[relayIndex];
+    if(!entry.node||!['hysteria2','ss'].includes(entry.protocol)||!relay||relay.unsupported||relay.protocol!=='vless'||!relay.node?.tls||relay.node.relay)throw new Error('前置节点必须是同一批订阅中启用 TLS 的 VLESS 节点');
+    entry={...entry,node:{...entry.node,relay:relay.node}};
+  }
+  const validated=validateProxy(entry);pendingImport = null;
   // Import selects a draft only; connecting commits it to the current environment.
-  return { protocol: entry.protocol, host: entry.host, port: entry.port, username: entry.username, password: entry.password };
+  return {...validated,importScope:{owner:dockerOwner(),environment:activeContainerId}};
 }));
 ipcMain.handle('workspace:cancelImport', guarded(async () => { pendingImport = null; return true; }));
 function resetEnvironmentBrowser(){
@@ -623,7 +648,7 @@ ipcMain.handle('workspace:dockerEnvironments',guarded(async(action='state',value
  }
 
  if(action==='rename' || action==='icon'){
-  if(browserDataBusy || accountChanging || containerOperation)throw new Error('正在处理浏览器数据或切换账号、环境');
+  if(connecting || browserDataBusy || accountChanging || containerOperation)throw new Error('正在连接代理或切换账号、环境');
   const owner=dockerOwner();if(!owner || value.owner!==owner || value.id!==activeContainerId)throw new Error('账号或环境已变化，请重新打开弹窗');
   containerOperation=true;try{if(action==='icon')await dockerEnvs.changeEnvironmentIcon(owner,value.id,value.icon);else await dockerEnvs.renameEnvironment(owner,value.id,value.name);if(owner!==dockerOwner())throw new Error('账号已变化');return await dockerEnvs.state(owner);}finally{containerOperation=false;}
  }
@@ -740,7 +765,7 @@ ipcMain.handle('workspace:quitConfirmation',guarded(value=>quitConfirmation.answ
 ipcMain.handle('workspace:state', guarded(async () => ({
   containerId:activeContainerId,account:account?.state(),runtimeRegistry:runtimeOwner===(account?.user?.id || null)?registeredRuntimes:null,chatViews:chatViews.filter(v=>(aiSessions.get(v.id)?.environmentId || null)===activeContainerId),chatImportLegacy,chatOwner,
   environment: environmentStatus,
-  proxy: { ...savedConfig, password: undefined, hasPassword: Boolean(savedConfig.password) },
+  proxy: publicProxyView(savedConfig),
   network: gateway?.status || { state: 'blocked', reason: '请先连接代理' },
   claudePath: await findClaude(), codexPath: codexPath=await findExecutable('codex'), selectedEngine, codexModel, defaultEngine, defaultCodexModel:activeContainerId?null:defaultCodexModel, activeAISessionId, aiSessions:[...aiSessions.values()].filter(item=>(item.environmentId || null)===activeContainerId), project, strictProtection: false, browser: browserState(),
 })));
@@ -757,7 +782,7 @@ ipcMain.handle('workspace:saveChats',guarded(async(views,owner,environmentId=nul
 ipcMain.handle('workspace:archiveSession',guarded(async(id,archived)=>{if(accountChanging || containerOperation || chatNetworkChanging)throw new Error('正在处理环境或连接方式切换，请稍候');if(runs.has(id))throw new Error('请先停止此对话的回复');const item=aiSessions.get(id);if(!item || (item.environmentId || null)!==activeContainerId)throw new Error('会话不存在');item.archived=Boolean(archived);await persistAISessions();return {...item};}));
 ipcMain.handle('workspace:accountProfileSave',guarded(async value=>account.updateProfile(value)));
 async function validateProxyFile(file){
- if(typeof file!=='string' || !file || !['.txt','.csv'].includes(path.extname(file).toLowerCase()))throw new Error('请选择 TXT 或 CSV 文件');
+ if(typeof file!=='string' || !file || !['.txt','.csv','.yaml','.yml','.json'].includes(path.extname(file).toLowerCase()))throw new Error('请选择 TXT、CSV、YAML 或 JSON 文件');
  const info=await stat(file);if(!info.isFile())throw new Error('请选择文件，不能选择文件夹');
  if(info.size>1024*1024)throw new Error('文件不能超过 1 MB');
  return {path:file,name:path.basename(file)};
@@ -765,7 +790,7 @@ async function validateProxyFile(file){
 ipcMain.handle('workspace:proxyFileValidate',guarded(async(file)=>validateProxyFile(file)));
 ipcMain.handle('workspace:proxyFilePick',guarded(async()=>{
  const {dialog}=await import('electron');
- const result=await dialog.showOpenDialog(window,{title:'选择代理文件',properties:['openFile'],filters:[{name:'代理文件',extensions:['txt','csv']}]});
+ const result=await dialog.showOpenDialog(window,{title:'选择代理文件',properties:['openFile'],filters:[{name:'代理文件',extensions:['txt','csv','yaml','yml','json']}]});
  if(result.canceled || !result.filePaths.length)return null;
  return validateProxyFile(result.filePaths[0]);
 }));
@@ -842,14 +867,14 @@ ipcMain.handle('workspace:runtimeInfo',guarded(async(options={})=>{
 }));
 ipcMain.handle('workspace:connectionRecords',guarded(async()=>{if(accountChanging || !account?.user)throw new Error('请先登录');const owner=account.user.id,environmentId=activeContainerId;const entries=await connectionRecords.list(owner,environmentId);if(owner!==account?.user?.id || environmentId!==activeContainerId)throw new Error('环境已变化');return entries;}));
 ipcMain.handle('workspace:accountState',guarded(async()=>({...account.state(),authRequired,proxy:accountProxyView()})));
-ipcMain.handle('workspace:accountLogin',guarded(async(credentials)=>{if(browserDataBusy || accountChanging || containerOperation)throw new Error('正在处理浏览器数据或切换账号、环境');accountChanging=true;let prepared=false;try{await prepareChatAccountChange();prepared=true;await stopGateway();emit('network',{state:'blocked',reason:'账号登录中，代理已断开'});await account.login(credentials);if(window){window.show();window.focus();}return {...await applyAccount(),authRequired};}catch(error){if(prepared)await applyAccount().catch(()=>{});throw error;}finally{accountChanging=false;}}));
+ipcMain.handle('workspace:accountLogin',guarded(async(credentials)=>{if(connecting || browserDataBusy || accountChanging || containerOperation)throw new Error('正在连接代理或切换账号、环境');accountChanging=true;let prepared=false;try{await prepareChatAccountChange();prepared=true;await stopGateway();emit('network',{state:'blocked',reason:'账号登录中，代理已断开'});await account.login(credentials);if(window){window.show();window.focus();}return {...await applyAccount(),authRequired};}catch(error){if(prepared)await applyAccount().catch(()=>{});throw error;}finally{accountChanging=false;}}));
 ipcMain.handle('workspace:accountCancel',guarded(async()=>{account.cancel();return true;}));
-ipcMain.handle('workspace:accountLogout',guarded(async()=>{if(browserDataBusy || accountChanging || containerOperation)throw new Error('正在处理浏览器数据或切换账号、环境');accountChanging=true;try{await prepareChatAccountChange();await stopGateway();const result=await account.logout();const state=await applyAccount();return {...state,...result};}finally{accountChanging=false;}}));
+ipcMain.handle('workspace:accountLogout',guarded(async()=>{if(connecting || browserDataBusy || accountChanging || containerOperation)throw new Error('正在连接代理或切换账号、环境');accountChanging=true;try{await prepareChatAccountChange();await stopGateway();const result=await account.logout();const state=await applyAccount();return {...state,...result};}finally{accountChanging=false;}}));
 ipcMain.handle('workspace:accountProxySave',guarded(async(config,userId,environmentId=null)=>{
  if(accountChanging || containerOperation || chatNetworkChanging)throw new Error('正在处理环境或连接方式切换，请稍候');
  if(environmentId!==activeContainerId)throw new Error('代理环境已变化，请重新填写');
  if(accountChanging || !account.user)throw new Error('请先登录并等待账号就绪');
- const validated=validateProxy(config);if(!isIP(validated.host))throw new Error('上游代理必须填写 IP 地址');
+ const validated=validateProxy(config);if(!validated.node&&!isIP(validated.host))throw new Error('上游代理必须填写 IP 地址');
  if(config.useSavedPassword){if(['protocol','host','port','username'].some(key=>String(config[key])!==String(savedConfig[key])))throw new Error('代理变化后请重新输入密码');validated.password=savedConfig.password || '';}
  if(userId!==dockerOwner())throw new Error('账号已变化');
  if(activeContainerId){await dockerEnvs.update(dockerOwner(),activeContainerId,{proxy:validated});savedConfig={...validated};return{saved:true};}
@@ -860,11 +885,34 @@ ipcMain.handle('workspace:environmentCheck', guarded(async sample => {
   return checkEnvironment();
 }));
 ipcMain.handle('workspace:connect', guarded(async (config, remember) => {
-  if (config.useSavedPassword) {
-    if (['protocol', 'host', 'port', 'username'].some(key => String(config[key]) !== String(savedConfig[key]))) throw new Error('代理已变更，请重新输入密码');
-    config.password = savedConfig.password || '';
+  if(config.importScope&&(config.importScope.owner!==dockerOwner()||config.importScope.environment!==activeContainerId))throw new Error('节点导入环境已变化，请重新选择');
+  const credentialScope={owner:dockerOwner(),environment:activeContainerId};
+  config=await proxyProfiles.resolve(credentialScope,savedConfig,config,config.profileInfo?.id);
+  if(accountChanging||containerOperation||credentialScope.owner!==dockerOwner()||credentialScope.environment!==activeContainerId)throw new Error('账号或环境已变化');
+  if(config.profileInfo&&dockerOwner()){
+    const scope={owner:dockerOwner(),environment:activeContainerId};
+    const assertCurrent=()=>{if(accountChanging||containerOperation||connecting||scope.owner!==dockerOwner()||scope.environment!==activeContainerId)throw new Error('账号或环境已变化');};
+    const profile=await proxyProfiles.save(scope,savedConfig,{...config.profileInfo,config},assertCurrent);assertCurrent();config=profile.config;
   }
   return connect(config, remember);
+}));
+ipcMain.handle('workspace:proxyProfiles',guarded(async(action,payload={})=>{
+ const scope={owner:dockerOwner(),environment:activeContainerId};
+ const assertCurrent=()=>{if(accountChanging||containerOperation||scope.owner!==dockerOwner()||scope.environment!==activeContainerId)throw new Error('账号或环境已变化，请重新选择代理配置');};
+ assertCurrent();
+ if(payload.scope&&(payload.scope.owner!==scope.owner||payload.scope.environment!==scope.environment))throw new Error('代理配置不属于当前账号与环境');
+ const view=p=>({...publicProxyView(p.config),id:p.id,name:p.name,provider:p.provider});
+ if(action==='list'){const state=await proxyProfiles.list(scope,savedConfig);assertCurrent();return {scope,activeId:state.activeId,profiles:state.profiles.map(view)};}
+ if(!payload.scope)throw new Error('缺少代理配置的账号与环境范围');
+ if(connecting)throw new Error('正在连接，请稍候');
+ if(action==='save'){
+  let config=payload.config;
+  if(config?.importScope&&(config.importScope.owner!==scope.owner||config.importScope.environment!==scope.environment))throw new Error('节点导入环境已变化');
+  config=await proxyProfiles.resolve(scope,savedConfig,config,payload.id);assertCurrent();
+  const profile=await proxyProfiles.save(scope,savedConfig,{...payload,config},()=>{assertCurrent();if(connecting)throw new Error('正在连接，请稍候');});assertCurrent();return view(profile);
+ }
+ if(action==='activate'){const profile=await proxyProfiles.get(scope,savedConfig,payload.id);assertCurrent();const status=await connect(profile.config,true);assertCurrent();return {status,proxy:publicProxyView(savedConfig)};}
+ throw new Error('不支持的代理配置操作');
 }));
 ipcMain.handle('workspace:disconnect', guarded(async () => { await stopGateway({preserveDirectChat:true}); emit('network', { state: 'blocked', reason: '已断开，使用代理的浏览器和对话请求已停止' }); return true; }));
 ipcMain.handle('workspace:verify', guarded(async () => { if (!gateway) throw new Error('请先连接代理'); return gateway.checkNow(); }));
@@ -889,7 +937,7 @@ ipcMain.handle('workspace:browseFiles', guarded(async ({directory,kind}={}) => {
   const requested=directory?.startsWith('~/')?path.join(app.getPath('home'),directory.slice(2)):directory;
   const current=path.resolve(requested || (kind==='file'?app.getPath('downloads'):(!activeContainerId && project) || app.getPath('home')));
   if(!(await stat(current)).isDirectory()) throw new Error('请选择目录');
-  const entries=(await readdir(current,{withFileTypes:true})).filter(item=>!item.name.startsWith('.') && (item.isDirectory() || (kind==='file' && item.isFile() && /\.(txt|csv)$/i.test(item.name)))).sort((a,b)=>Number(b.isDirectory())-Number(a.isDirectory()) || a.name.localeCompare(b.name)).slice(0,2000).map(item=>({name:item.name,path:path.join(current,item.name),directory:item.isDirectory()}));
+  const entries=(await readdir(current,{withFileTypes:true})).filter(item=>!item.name.startsWith('.') && (item.isDirectory() || (kind==='file' && item.isFile() && /\.(txt|csv|yaml|yml|json)$/i.test(item.name)))).sort((a,b)=>Number(b.isDirectory())-Number(a.isDirectory()) || a.name.localeCompare(b.name)).slice(0,2000).map(item=>({name:item.name,path:path.join(current,item.name),directory:item.isDirectory()}));
   return {directory:current,parent:path.dirname(current),entries};
 }));
 ipcMain.handle('workspace:project', guarded(async selected => {
@@ -1414,6 +1462,7 @@ app.whenReady().then(async () => {
   connectionRecords=new ConnectionRecords({directory:path.join(app.getPath('userData'),'connection-records'),encrypt:value=>{if(!safeStorage.isEncryptionAvailable())throw new Error('系统加密不可用');return safeStorage.encryptString(value);},decrypt:value=>safeStorage.decryptString(value)});
   environmentEvents=new EnvironmentEvents({getPreferences:()=>preferenceStore?.get()||{},directory:path.join(app.getPath('userData'),'environment-events'),encrypt:value=>{if(!safeStorage.isEncryptionAvailable())throw new Error('系统加密不可用');return safeStorage.encryptString(value);},decrypt:value=>safeStorage.decryptString(value)});
   environmentEvents.startCleanup();
+  proxyProfiles=new ProxyProfiles({directory:path.join(app.getPath('userData'),'proxy-profiles'),encrypt:value=>{if(!safeStorage.isEncryptionAvailable())throw new Error('系统凭据加密不可用');return safeStorage.encryptString(value);},decrypt:value=>safeStorage.decryptString(value)});
   dockerEnvs=new DockerEnvironments({defaultLocalEnabled:fixtureMode && !authRequired,directory:path.join(app.getPath('userData'),'docker-environments'),sourceRoot:path.join(here,'..'),encrypt:value=>{if(!safeStorage.isEncryptionAvailable())throw new Error('系统加密不可用');return safeStorage.encryptString(value);},decrypt:value=>safeStorage.decryptString(value)});
   observeEnvironmentOperations(dockerEnvs,environmentEvents,()=>({id:activeContainerId}));
   browserFeatures=createBrowserFeatures({app,safeStorage,dialog,shell,browserSync:async(s,scope,body)=>{const owner=account?.user?.id,token=account?.token;if(owner!==s.owner)throw Error('账号已变化');const result=await account.request('/v1/me/browser-settings?scope='+encodeURIComponent(scope),{method:body?'PUT':'GET',...(body?{body}:{}),token});if(account?.user?.id!==owner||account?.token!==token)throw Error('账号已变化');return result;},containerDownloads:createContainerDownloads({docker:dockerEnvs,directory:path.join(app.getPath('temp'),'kuneco-download-preview')}),getStorage:()=>session.fromPartition(browserPartition()),getWindow:()=>window,getScope:()=>({owner:dockerOwner(),environmentId:activeContainerId}),getTabs:()=>[...browserTabs.values()],getActive:()=>browserTabs.get(activeTabId),openURL:(url,fresh,extension)=>{const tab=fresh?createBrowserTab():browserTabs.get(activeTabId)||createBrowserTab();tab.agentPolicy=null;if(extension){tab.started=true;tab.url=url;void tab.wc.loadURL(url);publishTabs();}else navigateBrowserTab(tab,url);},emit,valid:()=>!accountChanging&&!containerOperation,importCookies:async(cookies,s)=>{if(browserDataBusy)throw Error('正在处理浏览器数据');browserDataBusy=true;const ctx=cookieContext();try{await ctx.sync.enqueue(async()=>{for(const cookie of cookies){if(s.owner!==dockerOwner()||s.environmentId!==activeContainerId)throw Error('账号或环境已变化');await ctx.sites.storage.cookies.set(cookie);}await ctx.sites.storage.cookies.flushStore();});}finally{browserDataBusy=false;}await ctx.sync.sync().catch(ctx.sync.onError);},clearSites:async kind=>{if(browserDataBusy)throw Error('正在处理浏览器数据');browserDataBusy=browserClearBusy=true;try{const ctx=cookieContext();for(const tab of [...browserTabs.values()])removeBrowserTab(tab,true);await ctx.sites.clear({kind},ctx.sync);}finally{browserDataBusy=browserClearBusy=false;publishTabs();}}});
