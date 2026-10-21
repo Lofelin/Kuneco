@@ -43,6 +43,7 @@ import {removeCLIRuntime} from '../features/runtimes/runtime-removal.mjs';
 import {ConnectionRecords} from '../features/proxy/connection-records.mjs';
 import {runDeepSeek} from '../features/runtimes/deepseek-runner.mjs';
 import {normalizeDeepSeekInput} from '../features/runtimes/deepseek-runtime.mjs';
+import {LocalTerminal} from '../features/terminal/local-terminal.mjs';
 import {ContainerTerminal} from '../features/terminal/container-terminal.mjs';
 import {createDesktopReturn} from './desktop-return.mjs';
 import {restoredChat} from '../features/chat/chat-selection.mjs';
@@ -1027,34 +1028,37 @@ ipcMain.handle('workspace:windowDrag',guarded(({phase,x,y}={})=>{
 }));
 ipcMain.handle('workspace:console',guarded(async(action,value={})=>{
  if(action==='close'){if(value.token===consoleSession?.token)closeConsole();return true;}
- if(!dockerOwner() || !activeContainerId){closeConsole();if(['status','directory'].includes(action))return {available:false,message:'请选择 Docker 容器环境后使用控制台。'};throw new Error('控制台仅连接当前账号的 Docker 容器');}
+ if(!dockerOwner()){closeConsole();if(['status','directory'].includes(action))return {available:false,message:'请先登录后使用控制台。'};throw new Error('请先登录后使用控制台');}
  if(accountChanging || containerOperation)throw new Error('环境正在切换，请稍后重试');
  if(action==='directory-browse'){
   const owner=dockerOwner(),id=activeContainerId;
   if(value.scope!==JSON.stringify([owner,id]))throw new Error('当前环境已变化，请重新选择');
-  const result=await browseEnvironmentProject(dockerEnvs,owner,id,value.path,{containerRoot:true});
+  let result;
+  if(id)result=await browseEnvironmentProject(dockerEnvs,owner,id,value.path,{containerRoot:true});
+  else{const directory=path.resolve(value.path||app.getPath('home'));if(!(await stat(directory)).isDirectory())throw new Error('请选择目录');result={directory,parent:path.dirname(directory),entries:(await readdir(directory,{withFileTypes:true})).filter(item=>item.isDirectory()&&!item.name.startsWith('.')).sort((a,b)=>a.name.localeCompare(b.name)).map(item=>({name:item.name,path:path.join(directory,item.name),directory:true}))};}
   if(owner!==dockerOwner()||id!==activeContainerId||accountChanging||containerOperation)throw new Error('当前环境已变化，请重新选择');
   return result;
  }
  if(action==='directory'||action==='directory-save'){
   const owner=dockerOwner(),id=activeContainerId,scope=JSON.stringify([owner,id]);
-  const {item}=await dockerEnvs.get(owner,id);
+  const item=id?(await dockerEnvs.get(owner,id)).item:{name:'本机环境'};
   if(action==='directory-save'){
    if(value.scope!==scope)throw new Error('当前环境已变化，请重新打开设置');
-   if(!validConsoleDirectory(value.path))throw new Error('请填写容器内绝对路径，不支持换行或控制字符');
-   if(value.path)try{await dockerEnvs.exec(owner,id,['sh','-c','test -d "$1" && test -x "$1"','console-directory',value.path],{timeout:5000});}catch{throw new Error('目录不存在或当前容器用户无法访问');}
+   if(!validConsoleDirectory(value.path))throw new Error('请填写绝对路径，不支持换行或控制字符');
+   if(value.path)try{if(!id){if(!(await stat(value.path)).isDirectory())throw new Error('请选择目录');await access(value.path,1);}else await dockerEnvs.exec(owner,id,['sh','-c','test -d "$1" && test -x "$1"','console-directory',value.path],{timeout:5000});}catch{throw new Error('目录不存在或当前用户无法访问');}
    if(owner!==dockerOwner()||id!==activeContainerId)throw new Error('当前环境已变化');
    if(!preferenceStore||preferenceLoadError)throw new Error(preferenceLoadError||'偏好设置尚未就绪');
    const next=await preferenceStore.save({consoleDirectories:{...preferenceStore.get().consoleDirectories,[scope]:value.path}});emit('preferences',next);
   }
-  return {available:true,scope,name:item.name,defaultPath:item.external?.workingDirectory||'/workspace',path:preferenceStore?.get().consoleDirectories?.[scope]||''};
+  return {available:true,scope,name:item.name,local:!id,defaultPath:id?(item.external?.workingDirectory||'/workspace'):app.getPath('home'),path:preferenceStore?.get().consoleDirectories?.[scope]||''};
  }
+ if(action==='status'&&!activeContainerId)return {available:true,id:null,name:'本机环境',local:true};
  if(action==='status'){const {item}=await dockerEnvs.get(dockerOwner(),activeContainerId);return {available:true,id:activeContainerId,name:item.name,external:Boolean(item.external),codexAuth:item.registry?.runtimes?.some(entry=>entry.id==='codex')?await containerAuth('codex'):null};}
  if(action==='open'){
   if(value.loginEngine!==undefined && !['cc','codex'].includes(value.loginEngine))throw new Error('未知运行时');
   if(value.loginEngine && gateway?.status.state!=='ready')throw new Error('请先连接当前环境的代理');
   if(consoleOpening)throw new Error('终端正在连接');consoleOpening=true;closeConsole();
-  const connection=new ContainerTerminal(dockerEnvs,dockerOwner(),activeContainerId);consoleSession=connection;
+  const connection=activeContainerId?new ContainerTerminal(dockerEnvs,dockerOwner(),activeContainerId):new LocalTerminal(dockerOwner());consoleSession=connection;
   const current=()=>consoleSession===connection && connection.owner===dockerOwner() && connection.id===activeContainerId;
   connection.on('data',text=>{if(current())emit('console',{token:connection.token,type:'data',text});});
   connection.on('open-url',url=>{if(current())emit('console',{token:connection.token,type:'open-url',url});});
