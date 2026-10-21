@@ -4,37 +4,58 @@
 
 # Kuneco
 
-**Use Claude Code, Codex, and DeepSeek in one desktop workspace, with conversations, browsing, and connections organized by account and environment.**
+**One desktop workspace for AI conversations, memory, browsing, and environments.**
 
-Working across several AI tools and environments? [Star Kuneco](https://github.com/Lofelin/Kuneco) to keep it close at hand.
+Work with Claude Code, Codex, and DeepSeek across local and container environments, with shared memories of your preferences and project decisions.
 
-[Version 0.1.0](package.json) · macOS · In development · [Issues](https://github.com/Lofelin/Kuneco/issues)
+[Star Kuneco](https://github.com/Lofelin/Kuneco) · [Report an issue](https://github.com/Lofelin/Kuneco/issues) · [Version 0.1.0](package.json)
 
-Working with several AI tools also means managing project directories, sign-ins, browser sessions, and network routes. Kuneco puts these in one desktop app: select an environment, choose a runtime, then work with its conversations, browser, and connection settings together.
+[![GitHub Stars](https://img.shields.io/github/stars/Lofelin/Kuneco?style=flat)](https://github.com/Lofelin/Kuneco)
+[![GitHub Forks](https://img.shields.io/github/forks/Lofelin/Kuneco?style=flat)](https://github.com/Lofelin/Kuneco/forks)
+[![GitHub Issues](https://img.shields.io/github/issues/Lofelin/Kuneco?style=flat)](https://github.com/Lofelin/Kuneco/issues)
 
-It is intended for developers comfortable running from source who use multiple AI tools and want separate local and container workspaces.
+![Kuneco runtime selection](docs/operations/media/runtimes.jpg)
 
-> Active development. This README describes the current working tree. The development launch workflow targets macOS; packaged releases and Windows/Linux support are not yet validated. Kuneco sign-in is separate from AI provider authentication.
+[Automation setup](docs/operations/media/automation.jpg) · [Preferences](docs/operations/media/preferences.jpg)
 
-## One environment, one working context
+*Actual desktop interface captures.*
 
-- **Work across runtimes.** Use Claude Code and Codex, or configure the DeepSeek API in managed containers. Runtime availability depends on installation and authentication in the selected environment.
-- **Keep browsing with its environment.** Local environments use the desktop browser. Managed Docker environments run pages in a separate Chromium container, with uploads and downloads kept inside that environment's `/workspace`.
-- **Carry sourced memories across runtimes.** The shared memory library supports extraction from completed conversations, recall before requests, source inspection, and conflict resolution. It is scoped by account and environment, encrypted locally, and does not sync across devices. Extraction and recall can each be disabled.
-- **Control the connection explicitly.** Import proxies and subscription nodes, and save multiple configurations per environment. Proxy forwarding opens after exit verification and blocks on failure; managed container browsing does not fall back to direct access.
-- **Resume your work.** Conversations are organized by account and environment, with local recovery and account-service synchronization. The memory library and saved proxy lists have their own local storage boundaries; synchronization does not cover every kind of data.
+## Features
 
-## Get started
+| Capability | What you can do |
+| --- | --- |
+| Multiple AI runtimes | Use Claude Code and Codex, or configure the DeepSeek API in managed containers. Organize conversations by account and environment. |
+| Memory library | Extract preferences, facts, and project decisions, then recall them across runtimes with sources and revision history. |
+| Separate environments | Manage local and Docker workspaces with their own runtimes, sign-ins, and working data. |
+| Built-in browser | Browse within the workspace. Managed environments use a separate Chromium container and keep uploads and downloads inside the environment. |
+| Proxy management | Import proxies and subscription nodes, save multiple configurations per environment, and verify the exit before connecting. |
+| Scheduled conversations | Send preset questions on a schedule, choose a runtime, save replies, and inspect execution status. |
 
-### Prerequisites
+Runtime availability depends on installation and authentication in the selected environment. An entry in the picker does not mean it is ready to use.
 
-- macOS for the current desktop workflow.
-- Node.js and npm compatible with the dependencies in `package-lock.json`.
-- macOS Command Line Tools for native integration builds during startup.
-- For the local account service: Go 1.26 and PostgreSQL. Google sign-in uses the bundled OAuth client by default.
-- A configured AI runtime or API key for the provider you want to use. Runtime authentication is separate from signing in to Kuneco.
+### Shared memory across runtimes
 
-### Run from source
+Open the memory library to manage information worth keeping from your conversations. For example, once a project's documentation language has been successfully extracted as a memory, another runtime can recall that decision in a later conversation within the same account, environment, and applicable project.
+
+- **Automatic extraction**: collect memories from successfully completed conversations, retain user excerpts as sources, and merge sources for duplicate content.
+- **Relevant recall**: select related, enabled memories before a request. Mark important entries to always be read.
+- **Traceable and editable**: search, filter, edit, enable or disable entries, and inspect revisions. Sources start collapsed; expand one to read the original excerpt or open its conversation.
+- **Your decisions stay in control**: resolve conflicts between automatic extraction and manually maintained content, and restore removed memories when needed.
+
+Memories are scoped by account and environment; project-specific entries also match the project path. Extraction and recall can be disabled independently. See the [memory library guide](docs/operations/memory-library.md).
+
+## Everyday workflow
+
+1. **Choose an environment**: work locally or in managed Docker. Initialize the container engine when prompted on first use.
+2. **Prepare a runtime**: detect, install, or configure an AI tool, then complete provider sign-in or API setup. Kuneco sign-in and runtime authentication are separate.
+3. **Start working**: choose a connection mode and switch between conversations, browsing, and the console. Proxy mode requires exit verification first.
+4. **Pick up where you left off**: resume conversations, review extracted memories, or schedule recurring questions.
+
+Scheduled conversations require the app to keep running. Closing it stops execution without catch-up runs; switching accounts or environments pauses tasks until their original environment returns.
+
+## Run from source
+
+The current development workflow targets **macOS**. Packaged releases and Windows/Linux support are not yet validated. You need dependency-compatible Node.js / npm and macOS Command Line Tools, plus Go 1.26 and PostgreSQL for the local account service.
 
 ```bash
 git clone https://github.com/Lofelin/Kuneco.git
@@ -44,77 +65,36 @@ cp -n backend/.env.example backend/.env
 chmod 600 backend/.env
 ```
 
-Create a PostgreSQL database and update `DATABASE_URL` in `backend/.env`. Google sign-in uses the shared OAuth client committed with the source; no credentials need to be copied from another computer. To use your own client, set both `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`, and register this callback URL:
-
-```text
-http://localhost:8787/v1/auth/google/callback
-```
-
-Then start the app:
+Create a PostgreSQL database, set `DATABASE_URL` in `backend/.env`, then launch:
 
 ```bash
 npm start
 ```
 
-The launcher builds the UI and starts or reuses the local account service before opening Kuneco. The account service continues running after the desktop window closes. To use an existing remote service instead, set `WORKSPACE_ACCOUNT_SERVER_URL`.
+The launcher builds the UI and starts or reuses the account service, which continues running after the desktop window closes. Set `WORKSPACE_ACCOUNT_SERVER_URL` to use an existing remote service. See the [account service guide](backend/README.md) for database configuration and Google sign-in details.
 
-See the [account service guide (Chinese)](backend/README.md) for configuration, database setup, and deployment details. Keep database passwords, encryption keys, and user tokens local. The shared Google OAuth client is in `backend/internal/server/google-oauth.json` and embedded in the server. If the Google Cloud app is in testing mode, new accounts must be added as test users; its maintainer controls publishing status, redirect URLs, and quotas.
+## Data and connection boundaries
 
-### Set up your workspace
+- **Local memory storage**: memories are encrypted on this device and do not sync across devices. Extraction makes additional model requests, and recalled content is sent to the selected runtime with your conversation.
+- **Environment-specific credentials**: runtime credentials stay in their environment; host sign-ins are not copied automatically. CLIs launched directly in the console do not automatically use the shared memory service.
+- **Proxy failures block forwarding**: proxy mode does not fall back to direct access. Direct and automatic modes, where supported locally, are explicit choices; managed container browsing does not fall back to direct access. These controls are not a system-wide firewall, and the account service uses a separate connection.
 
-1. Sign in to Kuneco and select or create an environment.
-2. Open **Runtimes** to detect, install, or configure a supported AI tool, then complete its sign-in or API setup.
-3. Choose the connection mode for your work. For proxy mode, add your proxy and verify its exit IP before starting.
-4. Start a conversation or open a browser tab.
+## Documentation and development
 
-For managed Docker environments, initialize the container engine when prompted. Runtime credentials stay in that environment; host-machine logins are not copied automatically.
-
-## Connection and data boundaries
-
-Proxy mode checks the upstream exit IP and blocks forwarding when verification fails. It does not silently fall back to a direct connection. Direct and automatic modes are separate, explicit choices; automatic routing can use a direct connection.
-
-These controls apply to the app's managed requests and supported runtime environments. They are not a system-wide firewall, and a fixed proxy address does not guarantee that the provider will always use the same exit IP. The account service has its own connection path, separate from the workspace proxy.
-
-Container browsing does not yet support folder uploads, selecting multiple upload files at once, or download pause/resume. Automatic memory extraction makes an additional request through the runtime and model used for the completed turn; it is not offline extraction. Recalled content is also sent to the selected runtime with the conversation request. CLIs launched directly in the console do not automatically use the shared memory service.
-
-Details (Chinese): [container browser isolation](docs/architecture/container-browser.md) · [memory library](docs/operations/memory-library.md) · [subscription proxies](docs/operations/subscription-proxies.md) · [browser settings](docs/operations/browser-settings.md).
-
-## Development
-
-Kuneco uses Electron and JavaScript for the desktop app, Web Awesome for UI components, a Go/PostgreSQL account service, and Docker/Colima/Lima for managed containers.
+The desktop app uses Electron, JavaScript, and Web Awesome. The account service uses Go and PostgreSQL; managed environments use Docker / Colima / Lima.
 
 | Command | Purpose |
 | --- | --- |
-| `npm start` | Build the UI and launch the desktop app |
-| `npm run check` | Build UI assets and check JavaScript syntax |
-| `npm test` | Run the Node.js test suite |
-| `npm run test:desktop` | Run the Kuneco desktop acceptance test |
-| `npm run backend:test` | Run Go tests with the race detector |
-| `npm run test:docker` | Exercise container environments and networking |
-| `npm run validate` | Run checks, Node tests, desktop smoke tests, and CLI handshakes |
+| `npm run check` | Build assets and check JavaScript syntax |
+| `npm test` | Unit and contract tests |
+| `npm run test:desktop` | Desktop acceptance; requires a graphical session |
+| `npm run backend:test` | Go tests with race detection |
+| `npm run test:docker` | Container and network integration checks; requires the container engine |
 
-Desktop tests need a graphical session; container tests need the container engine. Backend integration tests need a test database configuration. CLI handshake checks do not establish that a real model request will succeed.
+Backend integration tests need database configuration. Passing builds and unit tests does not establish that real model requests or provider sign-in work.
 
-```text
-src/        Desktop app, browser, runtime integrations, shared UI
-backend/    Account service, authentication, and persistence
-docker/     Container runtime, proxy gateway, and isolated browser
-scripts/    Build, setup, maintenance, and benchmark utilities
-test/       Automated tests and acceptance scripts
-```
+[Memory library](docs/operations/memory-library.md) · [Container browser](docs/architecture/container-browser.md) · [Proxy configuration](docs/operations/subscription-proxies.md) · [Repository layout](docs/architecture/repository-layout.md) · [Development conventions](AGENTS.md)
 
-Read [AGENTS.md](AGENTS.md) before changing shared components or application behavior. Earlier implementation details and acceptance notes are preserved in [historical notes (Chinese)](docs/archive/legacy-notes.zh-CN.md); they describe work at different stages, not a current release guarantee.
+[Open an issue](https://github.com/Lofelin/Kuneco/issues) with your environment and reproduction steps. Remove credentials and private content from logs before sharing them.
 
-## Where this is heading
-
-Kuneco is growing toward a shared workspace for AI agents across platforms. Cross-agent collaboration remains a direction for the project, rather than a promise that every integration is available today.
-
-If you find a bug or have an idea, [open an issue](https://github.com/Lofelin/Kuneco/issues) with what you were trying to do, your environment, and what happened. Please remove credentials and private conversation data from logs before sharing them.
-
-See [repository layout and dependency rules](docs/architecture/repository-layout.md) for directory responsibilities.
-
-## License
-
-The repository currently has no project-level `LICENSE` file. Dependencies and third-party assets retain their respective licenses.
-
-If Kuneco fits the way you work, [Star it](https://github.com/Lofelin/Kuneco) for later or share what needs improving in an [issue](https://github.com/Lofelin/Kuneco/issues).
+Active development. The repository has no project-level `LICENSE`; dependencies and third-party assets retain their respective licenses.
