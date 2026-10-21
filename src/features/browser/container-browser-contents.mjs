@@ -24,7 +24,7 @@ export class ContainerBrowserContents extends EventEmitter {
   this.listener=event=>{void this.handle(event).catch(()=>this.emit('did-fail-load',{},-2,'容器浏览器连接失败',this.url,true));};
  }
  initializeOnce(){if(this.initialized&&this.engine?.stopped)this.initialized=null;return this.initialized ||= this.initialize().catch(error=>{this.initialized=null;throw error;});}
- async initialize(){this.engine?.off('event',this.listener);this.engine=await this.ready();this.sessionId=null;this.targetId=null;this.frames.clear();this.loadingFrames.clear();if(this.destroyed)throw Error('标签已关闭');this.engine.on('event',this.listener);const {targetId}=await this.engine.command('Target.createTarget',{url:'about:blank'});this.targetId=targetId;if(this.destroyed){await this.engine.command('Target.closeTarget',{targetId});throw Error('标签已关闭');}const {sessionId}=await this.engine.command('Target.attachToTarget',{targetId,flatten:true});this.sessionId=sessionId;if(this.destroyed){await this.engine.command('Target.closeTarget',{targetId});throw Error('标签已关闭');}
+ async initialize(){this.engine?.off('event',this.listener);this.engine=await this.ready();this.sessionId=null;this.targetId=null;this.frameCommitted=false;this.frames.clear();this.loadingFrames.clear();if(this.destroyed)throw Error('标签已关闭');this.engine.on('event',this.listener);const {targetId}=await this.engine.command('Target.createTarget',{url:'about:blank'});this.targetId=targetId;if(this.destroyed){await this.engine.command('Target.closeTarget',{targetId});throw Error('标签已关闭');}const {sessionId}=await this.engine.command('Target.attachToTarget',{targetId,flatten:true});this.sessionId=sessionId;if(this.destroyed){await this.engine.command('Target.closeTarget',{targetId});throw Error('标签已关闭');}
   await this.engine.command('Page.enable',{},sessionId);await this.engine.command('Runtime.enable',{},sessionId);
   // Request interception prevents local/private URLs and agent-disallowed navigation,
   // including redirects. Firewall remains authoritative even if interception fails.
@@ -34,12 +34,12 @@ export class ContainerBrowserContents extends EventEmitter {
  async handle({method,params:p,sessionId}){
   if(this.destroyed)return;
   if(sessionId!==this.sessionId){if(method==='Page.fileChooserOpened'&&this.engine.policySession(sessionId)===this.sessionId)await this.onFileChooser({...p,cdpSessionId:sessionId},this);return;}
-  if(method==='Page.screencastFrame'){await this.engine.command('Page.screencastFrameAck',{sessionId:p.sessionId},sessionId);if(this.visible&&!this.viewer.isDestroyed())this.viewer.send('container-browser:frame',p.data);}
+  if(method==='Page.screencastFrame'){await this.engine.command('Page.screencastFrameAck',{sessionId:p.sessionId},sessionId);if(this.frameCommitted&&this.visible&&!this.viewer.isDestroyed())this.viewer.send('container-browser:frame',p.data);}
   if(method==='Page.frameNavigated'&&!p.frame.parentId&&p.frame.url==='about:blank'&&this.requestedURL&&this.requestedURL!=='about:blank')return;
   if(method==='Page.frameNavigated'){this.frames.add(p.frame.id);this.onNavigate(p.frame.url);}
   if(method==='Page.frameAttached')this.frames.add(p.frameId);
   if(method==='Page.frameDetached')this.frames.delete(p.frameId);
-  if(method==='Page.frameNavigated'&&!p.frame.parentId){this.url=p.frame.url;this.faviconVersion=(this.faviconVersion||0)+1;this.emit('page-favicon-updated',{},[]);this.emit('did-navigate',{},this.url);}
+  if(method==='Page.frameNavigated'&&!p.frame.parentId){this.url=p.frame.url;this.frameCommitted=true;this.faviconVersion=(this.faviconVersion||0)+1;this.emit('page-favicon-updated',{},[]);this.emit('did-navigate',{},this.url);}
   if(method==='Page.navigatedWithinDocument'){this.url=p.url;this.emit('did-navigate-in-page',{},this.url);}
   if(method==='Page.frameStartedLoading'){this.loadingFrames.add(p.frameId);this.emit('did-start-loading');}
   if(method==='Page.frameStoppedLoading'){this.loadingFrames.delete(p.frameId);if(!this.loadingFrames.size)this.emit('did-stop-loading');}
@@ -65,7 +65,7 @@ export class ContainerBrowserContents extends EventEmitter {
  getZoomFactor(){return this.zoom;}
  async loadURL(url){this.requestedURL=url;await this.initializeOnce();if(this.destroyed)throw Error('标签已关闭');if(!this.allowed(url))throw Error('容器浏览器禁止访问此地址');this.url=url;const result=await this.engine.command('Page.navigate',{url},this.sessionId);if(result.errorText){const error=Error(result.errorText);if(result.errorText==='net::ERR_ABORTED')error.code='ERR_ABORTED';throw error;}}
  async executeJavaScript(expression,userGesture=false){await this.initializeOnce();const result=await this.engine.command('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true,userGesture},this.sessionId);if(result.exceptionDetails)throw Error(result.exceptionDetails.text||'网页脚本执行失败');return result.result.value;}
- async refreshFrame(){if(!this.visible||this.destroyed||!this.sessionId)return;const engine=this.engine,sessionId=this.sessionId;const {data}=await engine.command('Page.captureScreenshot',{format:'jpeg',quality:95,captureBeyondViewport:false},sessionId);if(data&&this.visible&&!this.destroyed&&this.engine===engine&&this.sessionId===sessionId&&!this.viewer.isDestroyed())this.viewer.send('container-browser:frame',data);}
+ async refreshFrame(){if(!this.frameCommitted||!this.visible||this.destroyed||!this.sessionId)return;const engine=this.engine,sessionId=this.sessionId;const {data}=await engine.command('Page.captureScreenshot',{format:'jpeg',quality:95,captureBeyondViewport:false},sessionId);if(data&&this.visible&&!this.destroyed&&this.engine===engine&&this.sessionId===sessionId&&!this.viewer.isDestroyed())this.viewer.send('container-browser:frame',data);}
  async capturePage(){await this.initializeOnce();const {data}=await this.engine.command('Page.captureScreenshot',{format:'png'},this.sessionId);return this.nativeImage.createFromBuffer(Buffer.from(data,'base64'));}
  setZoomFactor(value){this.zoom=value;void this.initializeOnce().then(()=>this.resize(this.size,true)).catch(()=>{});}
  async resize(size,force=false){if(!force&&this.size.width===size.width&&this.size.height===size.height)return;this.size={width:Math.max(1,Math.round(size.width)),height:Math.max(1,Math.round(size.height))};if(!this.sessionId)return;

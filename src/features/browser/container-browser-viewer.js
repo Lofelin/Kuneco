@@ -1,5 +1,8 @@
 const screen=document.getElementById('screen'),typing=document.getElementById('typing');
-window.containerBrowser.onFrame(data=>{screen.src='data:image/jpeg;base64,'+data;});
+const state=document.getElementById('viewerState');
+screen.addEventListener('load',()=>{screen.hidden=false;state.hidden=true;});
+screen.addEventListener('error',()=>{screen.hidden=true;state.hidden=false;document.getElementById('viewerStateTitle').textContent='暂未收到网页画面';document.getElementById('viewerStateDescription').textContent='请重新加载网页后再试。';});
+window.containerBrowser.onFrame(data=>{if(typeof data==='string'&&data)screen.src='data:image/jpeg;base64,'+data;});
 const send=value=>window.containerBrowser.input(value);
 const buttons=['left','middle','right'];
 for(const [name,event] of [['pointerdown','mousePressed'],['pointerup','mouseReleased'],['pointermove','mouseMoved']])screen.addEventListener(name,e=>{e.preventDefault();if(name==='pointerdown'){typing.focus();screen.setPointerCapture(e.pointerId);}send({type:'mouse',event,x:e.clientX,y:e.clientY,button:name==='pointermove'?'none':buttons[e.button]||'none',buttons:e.buttons,clickCount:name==='pointermove'?0:e.detail||1});});
