@@ -1,14 +1,31 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
-import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,existsSync,rmSync} from 'node:fs';
+import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,existsSync,rmSync,symlinkSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
-import {migrationHelper,prepareKeychainMigration,verifyKeychainMigration} from '../../../src/app/keychain-migration.mjs';
+import {configureKeychainAccess,migrationHelper,prepareKeychainMigration,verifyKeychainMigration} from '../../../src/app/keychain-migration.mjs';
 
 const marker = 'kuneco-keychain-migration-v1.json';
 const fixture = fn => { const root=mkdtempSync(path.join(tmpdir(),'kuneco-keychain-test-'));try{return fn(root);}finally{rmSync(root,{recursive:true,force:true});} };
 const storage = {isEncryptionAvailable:()=>true,encryptString:text=>Buffer.from('encrypted:'+text),decryptString:bytes=>{const text=bytes.toString();if(!text.startsWith('encrypted:'))throw new Error('bad key');return text.slice(10);}};
+
+test('real application retains native keychain access even if test environment variables are present',()=>{
+ const calls=[],app={setName:name=>calls.push(name),setPath:()=>assert.fail('must retain real profile'),commandLine:{appendSwitch:()=>assert.fail('must retain native keychain')}};
+ assert.equal(configureKeychainAccess({app,directory:'/tmp/ignored',platform:'darwin'}),'Kuneco');
+ assert.deepEqual(calls,['Kuneco']);
+});
+
+test('test keychain is restricted to an explicit temporary profile and stable test identity',()=>fixture(root=>{
+ const directory=path.join(root,'profile');mkdirSync(directory);const calls=[];
+ const app={setName:name=>calls.push(['name',name]),setPath:(key,value)=>calls.push([key,value]),commandLine:{appendSwitch:key=>calls.push(['switch',key])}};
+ assert.equal(configureKeychainAccess({app,fixtureMode:true,directory,platform:'darwin',temporaryRoot:root}),'Kuneco Test');
+ assert.deepEqual(calls,[['userData',directory],['switch','use-mock-keychain'],['name','Kuneco Test']]);
+ for(const unsafe of [undefined,'relative',root,path.dirname(root)])assert.throws(()=>configureKeychainAccess({app,fixtureMode:true,directory:unsafe,temporaryRoot:root}));
+ const escape=path.join(root,'outside');symlinkSync(path.dirname(root),escape);
+ assert.throws(()=>configureKeychainAccess({app,fixtureMode:true,directory:escape,temporaryRoot:root}));
+ assert.equal(calls.length,3,'rejected profiles must not change the app');
+}));
 
 test('native migration uses an isolated keychain: copy, retry, conflict and source preservation', {skip:process.platform!=='darwin'},()=>fixture(root=>{
   const output=execFileSync(migrationHelper(),['--self-test',root],{encoding:'utf8',timeout:30000});

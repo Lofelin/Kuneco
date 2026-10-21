@@ -1428,7 +1428,7 @@ async function reloadAccountChats(){if(chatReloading){chatReloadPending=true;ret
 let contentTabsScope=null;const environmentContentTabs=new Map();
 async function restoreChats(state){
  const scope=JSON.stringify([state.chatOwner || null,state.containerId || null]);
- if(scope!==contentTabsScope){const active=contentTabState.tabs.find(tab=>tab.id===contentTabState.activeId && tab.page==='cc');if(active)active.draft=$('prompt').value;if(contentTabsScope)environmentContentTabs.set(contentTabsScope,contentTabState);contentTabState=environmentContentTabs.get(scope) || {tabs:[],activeId:null};contentTabsScope=scope;$('prompt').value='';renderContentTabs();}
+ if(scope!==contentTabsScope){const active=contentTabState.tabs.find(tab=>tab.id===contentTabState.activeId && tab.page==='cc');if(active)active.draft=$('prompt').value;if(contentTabsScope)environmentContentTabs.set(contentTabsScope,contentTabState);contentTabState=environmentContentTabs.get(scope) || openContentTab({tabs:[],activeId:null},{id:'cc',page:'cc',title:'对话',pinned:pinnedContentPages.has('cc')});contentTabsScope=scope;$('prompt').value='';renderContentTabs();}
  const version=++chatRestoreVersion;
  chatRestoring=false;defaultModel=state.defaultCodexModel || null;chatOwnerID=state.chatOwner || null;chatEnvironmentID=state.containerId || null;clearReasoningTimers();chatSessions=[];activeChatId=null;$('chat').replaceChildren();runtimeRegistry=state.runtimeRegistry || {runtimes:[]};
  if(!runtimeRegistry.runtimes.some(item=>supportsChat(item.id))){renderSessionList();renderChatAvailability();switchPage('cc');return;}

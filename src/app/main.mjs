@@ -28,7 +28,7 @@ import {createClaudeActivityAdapter} from '../features/runtimes/claude-activity.
 import {ChatRuns} from '../features/chat/chat-runs.mjs';
 import {rewindPrefix,replayPrompt,deepSeekPrefix} from '../features/chat/message-rewind.mjs';
 import {connectEnvironmentProxy,restoreSelectedEnvironment} from '../features/environments/environment-proxy.mjs';
-import {prepareKeychainMigration,verifyKeychainMigration} from './keychain-migration.mjs';
+import {configureKeychainAccess,prepareKeychainMigration,verifyKeychainMigration} from './keychain-migration.mjs';
 import {mountLocalProject} from '../features/projects/project-mount.mjs';
 import {browseEnvironmentProject,selectEnvironmentProject,importEnvironmentProject} from '../features/projects/project-files.mjs';
 import {normalizeCodexInput} from '../features/runtimes/codex-images.mjs';
@@ -114,6 +114,7 @@ const accountProxyView=()=>({...savedConfig,password:undefined,hasPassword:Boole
 async function applyAccount(){stopEnvironmentLogs();stopEnvironmentHealth();closeConsole();accountChanging=true;try{containerLogin?.kill();containerLogin=null;await stopGateway();emit('network',{state:'blocked',reason:'账号配置已切换，请连接并核验出口'});await loadUserRuntimes();if(window)resetEnvironmentBrowser();await loadAccountChats(false);savedConfig={protocol:'http',host:'',port:8080,username:'',password:''};if(account.user){const saved=activeContainerId?(await dockerEnvs.get(dockerOwner(),activeContainerId)).item.proxy:await account.proxy();if(saved)savedConfig=validateProxy(saved);}return {...account.state(),proxy:accountProxyView()};}finally{accountChanging=false;if(account?.user){const ctx=cookieContext();await ctx.sync.sync().catch(ctx.sync.onError);}emit('account',{...account.state(),proxy:accountProxyView()});}}
 
 const fixtureMode = process.argv.includes('--test-fixture');
+const desktopName=configureKeychainAccess({app,fixtureMode,directory:process.env.WORKSPACE_TEST_DATA_DIR});
 if(fixtureMode && process.env.WORKSPACE_TEST_DATA_DIR){
  const {installNativeDialogFixture}=await import('../../test/e2e/fixtures/native-dialog.mjs');installNativeDialogFixture(dialog,process.env.WORKSPACE_TEST_DATA_DIR);
  const {installNativeAppFixture}=await import('../../test/e2e/fixtures/native-app.mjs');installNativeAppFixture(app,()=>window,process.env.WORKSPACE_TEST_DATA_DIR);
@@ -129,14 +130,13 @@ function syncAccountWindow(){
 
 const probeUrl = fixtureMode ? process.env.WORKSPACE_TEST_PROBE_URL : undefined;
 const browserHomeUrl = fixtureMode ? process.env.WORKSPACE_TEST_HOME_URL || 'https://www.google.com/?hl=en' : 'https://www.google.com/?hl=en';
-if (fixtureMode && process.env.WORKSPACE_TEST_DATA_DIR) app.setPath('userData', process.env.WORKSPACE_TEST_DATA_DIR);
 protocol.registerSchemesAsPrivileged([{scheme:'kuneco-artifact',privileges:{standard:true,secure:true}}]);
 const artifactPages=new Map();
 function serveArtifact(result,owner,environment){if(result.kind!=='html')return result;const id=randomUUID();artifactPages.set(id,{owner,environment,html:sandboxHTML(result.text)});while(artifactPages.size>64)artifactPages.delete(artifactPages.keys().next().value);return {...result,url:'kuneco-artifact://preview/'+id};}
 const exec = promisify(execFile);
 // Keep the profile path stable; only the Keychain identity is migrated.
 const legacyProfileName = '定途工作空间';
-app.setName(fixtureMode ? 'Kuneco Test' : 'Kuneco');
+app.setName(desktopName);
 if (!fixtureMode) app.setPath('userData', path.join(app.getPath('appData'), legacyProfileName));
 if(!fixtureMode){
  if(!app.requestSingleInstanceLock())app.exit(0);
@@ -1403,7 +1403,7 @@ app.whenReady().then(async () => {
   catch(error){console.error(error.message);app.exit(1);return;}
   preferenceStore=createPreferenceStore(path.join(app.getPath('userData'),'ui-preferences.json'));
   try{await preferenceStore.load();}catch(error){preferenceLoadError=error.message;}
-  app.setName('Kuneco');
+  app.setName(desktopName);
   if(process.platform==='darwin')app.dock.setIcon(path.join(here,'assets/brand/kuneco-macos.png'));
   Menu.setApplicationMenu(Menu.buildFromTemplate([...(process.platform==='darwin'?[{label:'Kuneco',role:'appMenu'}]:[]),{role:'fileMenu'},{role:'editMenu'},{label:'显示',submenu:[{role:'resetZoom'},{role:'zoomIn'},{role:'zoomOut'},{type:'separator'},{role:'togglefullscreen'}]},{role:'windowMenu'}]));
   app.configureHostResolver({ enableBuiltInResolver: false, secureDnsMode: 'off' });

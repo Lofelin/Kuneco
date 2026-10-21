@@ -1,12 +1,28 @@
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
-import {existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, writeFileSync} from 'node:fs';
+import {existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, writeFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 
 const root = fileURLToPath(new URL('../..', import.meta.url));
 const markerName = 'kuneco-keychain-migration-v1.json';
 const options = {encoding: 'utf8', maxBuffer: 1024 * 1024};
+
+// Test windows must not request the real user's keychain, including Chromium's
+// cookie encryption. Enable its test keychain only for isolated temporary data.
+export function configureKeychainAccess({app, fixtureMode=false, directory, platform=process.platform, temporaryRoot=tmpdir()}) {
+  const name = fixtureMode ? 'Kuneco Test' : 'Kuneco';
+  if (fixtureMode) {
+    if (!directory || !path.isAbsolute(directory)) throw new Error('测试模式需要独立的临时资料目录');
+    const relative = path.relative(realpathSync(temporaryRoot), realpathSync(directory));
+    if (!relative || relative === '..' || relative.startsWith('..'+path.sep) || path.isAbsolute(relative)) throw new Error('测试资料目录必须位于系统临时目录内');
+    app.setPath('userData', directory);
+    if (platform === 'darwin') app.commandLine.appendSwitch('use-mock-keychain');
+  }
+  app.setName(name);
+  return name;
+}
 
 export function migrationHelper() {
   const source = path.join(root, 'native/macos/keychain-migrate.m');
