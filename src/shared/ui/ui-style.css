@@ -2523,3 +2523,8 @@ wa-dropdown-item::part(submenu)::before{pointer-events:none}
 wa-dropdown-item::part(details){font-size:var(--menu-font-size);font-weight:400;line-height:var(--menu-line-height)}
 
 .preference-save-status:empty{display:none}
+
+.browser-access-choice{display:flex;flex-direction:column;gap:2px;max-width:300px;white-space:normal}
+.browser-access-hint{color:var(--muted)}
+#browserAccessTrigger[data-access=full]{color:var(--warning)}
+@container chat-column (max-width:480px){.chat-column .compose-footer{display:flex;flex-wrap:wrap}.chat-column .compose-footer>.compose-actions{flex:1 1 100%}.chat-column .compose-footer>.compose-send-actions{flex:1 1 100%;max-width:none}.chat-column .compose-footer>.compose-actions #browserAccessMenu{flex:none}}

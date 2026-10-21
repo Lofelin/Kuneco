@@ -1,3 +1,4 @@
+import {browserAccessMode} from '../features/browser/browser-agent.mjs';
 import {MemoryHistoryTasks} from '../features/memory/memory-history-tasks.mjs';
 import {createContainerBrowserNetwork} from '../features/browser/container-browser-network.mjs';
 import {ContainerBrowserFiles} from '../features/browser/container-browser-files.mjs';
@@ -1326,6 +1327,11 @@ ipcMain.handle('workspace:learningAutomation',guarded(async(action='list',value=
 }));
 
 ipcMain.handle('workspace:cancel', guarded(async (id=activeAISessionId) => { if(!aiSessions.has(id))throw new Error('会话不存在');abortRun(task=>task.chatId===id); return true; }));
+ipcMain.handle('workspace:sessionBrowserAccess',guarded(async value=>{
+ const item=insightSession(value);if(runs.has(item.id))throw Error('请等待当前回复结束后切换访问权限');
+ if(!['ask','auto','full'].includes(value.mode))throw Error('请选择有效的浏览器访问权限');
+ const previous=item.browserAccessMode;item.browserAccessMode=value.mode;try{await persistAISessions();}catch(error){item.browserAccessMode=previous;throw error;}insightSession(value);return {mode:item.browserAccessMode};
+}));
 ipcMain.handle('workspace:sessionEffort',guarded(async value=>{
  const item=insightSession(value);if(runs.has(item.id))throw new Error('请先等待当前回复完成');
  if(item.engine!=='codex')throw new Error('当前运行时未提供可验证的推理强度选项');
@@ -1535,7 +1541,7 @@ ipcMain.handle('workspace:cc', guarded(async (prompt,rewind,chatId=activeAISessi
   emitChat('ccStart', {updatedAt:currentChat?.updatedAt,model:currentChat?.model,turnId:fileChangeTurn.id});
   void (async () => {
     try {
-      const browserTool=createBrowserAgentTool({features:browserFeatures,scope:{owner:requestOwner,environmentId},signal:controller.signal,getScope:()=>({owner:dockerOwner(),environmentId:activeContainerId}),getTabs:()=>[...browserTabs.values()],getActive:()=>browserTabs.get(activeTabId),openURL:url=>createBrowserTab(url),navigate:navigateBrowserTab,networkReady:browserNetworkReady});
+      const browserTool=createBrowserAgentTool({features:browserFeatures,scope:{owner:requestOwner,environmentId},signal:controller.signal,getScope:()=>({owner:dockerOwner(),environmentId:activeContainerId}),getTabs:()=>[...browserTabs.values()],getActive:()=>browserTabs.get(activeTabId),openURL:url=>createBrowserTab(url),navigate:navigateBrowserTab,networkReady:browserNetworkReady,getAccessMode:()=>browserAccessMode(preparedChat.browserAccessMode),isRunning:()=>runs.get(chatId)===controller});
       if(engine==='deepseek'){
         if(!containerSpawn)throw new Error('DeepSeek 仅在当前容器环境可用');
         const usage=await runDeepSeek({browserTool,onUsage:usage=>{latestUsage=Number.isSafeInteger(usage?.total_tokens)?usage.total_tokens:null;latestUsageDetails=usageDetails('deepseek',usage);},onCompaction:record=>{delete currentChat.contextPrefix;currentChat.compression=record;if(Number.isSafeInteger(record.usage?.total_tokens)){const entry={at:record.at,totalTokens:record.usage.total_tokens,purpose:'compaction',details:usageDetails('deepseek',record.usage)};(currentChat.tokenUsage||=[]).push(entry);emitChat('ccUsage',{sessionId:currentChat.id,entry});}void persistAISessions();},project:workingDirectory,onActivity:activity=>emitChat('ccActivity',activity),networkMode:requiresProxy?'proxy':'direct',spawnProcess:launch,sessionId:currentChat.deepseekSessionId || chatId,history:currentChat.contextPrefix?deepSeekPrefix(currentChat.contextPrefix):undefined,model:model,prompt:withMemory(prompt,memorySnapshot),signal:controller.signal,onText:text=>emitChat('ccText',text),onReasoning:text=>emitChat('ccReasoning',text),onFinish:reason=>{if(reason==='length')emitChat('ccNotice','回复达到长度限制，可继续追问。');}});latestUsage=Number.isSafeInteger(usage?.total_tokens)?usage.total_tokens:null;latestUsageDetails=usageDetails('deepseek',usage);

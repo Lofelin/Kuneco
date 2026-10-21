@@ -1,3 +1,4 @@
+import {mountBrowserAccessControl} from '../features/browser/browser-access-ui.mjs';
 import {mountMemoryHistoryNotifications} from '../features/memory/memory-history-notifications.mjs';
 import {mountProxyProfiles} from '../features/proxy/proxy-profiles-ui.mjs';
 import {renderPlainMessage} from '../features/chat/plain-message.mjs';
@@ -179,6 +180,7 @@ let sidebarCollapsed=false;try{sidebarCollapsed=localStorage.getItem('sidebar-co
 let currentProxyConfig=null,editingProxy=false,importPrepared=false;
 let proxyFileSelection=null,proxyFileVersion=0;
 const chatRuns=new Map();
+let browserAccessControl;
 let page = 'cc', hasPassword = false, busy = false, browserTabsState = { tabs: [], activeId: null }, reply, approvals = [];
 const browserModeSwitches=mountBrowserModeSwitches({document,getMode:()=>browserTabsState.mode || 'proxy',save:mode=>api.browserSettings(mode),onSaved:renderBrowserTabs});
 let browserNetworkChanging=false;
@@ -1023,9 +1025,11 @@ $('sessionNetworkMode').addEventListener('change',()=>void action(async()=>{
 function updateRuntimeSelectIcon(){
  const select=$('runtimeEngine');let icon=select.querySelector(':scope > wa-icon[slot="start"]');if(!icon){icon=createIcon(runtimeIcon(select.value));icon.slot='start';select.prepend(icon);}icon.src='assets/icons/'+runtimeIcon(select.value)+'.svg';
 }
+browserAccessControl=mountBrowserAccessControl({anchor:$('composeMenu'),api,getSession:()=>chatSessions.find(v=>v.id===activeChatId),getScope:()=>({owner:chatOwnerID,environmentId:chatEnvironmentID}),isBusy:()=>busy,onError:error=>toast(error.message,'errors')});
 const effortSelect=document.createElement('wa-select');effortSelect.id='sessionEffort';effortSelect.size='s';effortSelect.setAttribute('aria-label','推理强度');$('sessionModel').before(effortSelect);
 effortSelect.addEventListener('change',()=>void action(async()=>{const scope={owner:chatOwnerID,environmentId:chatEnvironmentID,chatId:activeChatId};effortSelect.disabled=true;try{const result=await api.sessionEffort({...scope,effort:effortSelect.value||null});const item=chatSessions.find(v=>v.id===scope.chatId);if(item)item.reasoningEffort=result.reasoningEffort;}finally{renderSessionModel();}}));
 function renderSessionModel(){
+ browserAccessControl?.render();
  const select=$('sessionModel'),runtime=runtimeRegistry.runtimes.find(item=>item.id===selectedEngine),models=runtime?.models || [];
  const item=chatSessions.find(v=>v.id===activeChatId),capability=models.find(v=>v.model===(selectedCodexModel||runtime?.model))||models.find(v=>v.isDefault),levels=capability?.supportedReasoningEfforts||[];
  effortSelect.hidden=selectedEngine!=='codex'||!levels.length;effortSelect.disabled=busy||!levels.length;
@@ -1054,6 +1058,7 @@ function fillSessionModels(){
  $('codexModelSelect').value=models.some(item=>item.model===suggested)?suggested:'local';
 }
 function renderChatAvailability(){
+ browserAccessControl?.render();
  const detected=runtimeRegistry.runtimes.some(item=>supportsChat(item.id));
  $('railNewSession').disabled=chatRestoring || !detected;$('createNewSession').disabled=chatRestoring || !detected;
  const add=$('newContentTab');if(add)add.disabled=false;

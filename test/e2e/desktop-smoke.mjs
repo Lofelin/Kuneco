@@ -1,3 +1,4 @@
+import {verifyAgentPermission} from './scenarios/browser-agent-permission.mjs';
 import {verifyMemoryLibrary} from './scenarios/memory-library.mjs';
 import {verifyWorkspace} from './scenarios/workspace.mjs';
 import {verifyBrowserSecurity} from './scenarios/browser-security.mjs';
@@ -110,10 +111,12 @@ if(process.argv.includes('--version')){console.log('codex fixture 1.0');process.
 if(process.argv[2]==='login'){console.log('Logged in using ChatGPT');process.exit(0);}
 if(process.argv[2]==='app-server'){let cwd;require('readline').createInterface({input:process.stdin}).on('line',line=>{
  const m=JSON.parse(line);if(m.id===undefined)return;
+ if(m.id==='browser-permission-call'){console.log(JSON.stringify({method:'item/completed',params:{threadId:'turn-card-fixture-thread',item:{id:'permission-answer',type:'agentMessage',text:m.result?.success?'Permission fixture allowed':'Permission fixture denied'}}}));console.log(JSON.stringify({method:'turn/completed',params:{threadId:'turn-card-fixture-thread',turn:{id:'permission-turn',status:'completed'}}}));return;}
  if(m.method==='initialize')console.log(JSON.stringify({id:m.id,result:{userAgent:'kuneco-desktop-fixture'}}));
  else if(m.method==='model/list'){const fs=require('fs'),config=JSON.parse(fs.readFileSync(process.env.WORKSPACE_TEST_MODEL_CONTROL,'utf8'));fs.appendFileSync(process.env.WORKSPACE_TEST_MODEL_CONTROL+'.requests','model/list\\n');setTimeout(()=>console.log(JSON.stringify({id:m.id,result:{data:config.catalog||[{id:'desktop-fixture-model',model:'desktop-fixture-model',displayName:'Desktop fixture model',hidden:false,isDefault:true,supportedReasoningEfforts:[{reasoningEffort:'medium',description:'Fixture default'},{reasoningEffort:'high',description:'Fixture high'}],defaultReasoningEffort:'medium'}],nextCursor:null}})),config.delayMs||0);}
  else if(m.method==='thread/start'||m.method==='thread/resume'){cwd=m.params.cwd;console.log(JSON.stringify({id:m.id,result:{thread:{id:'turn-card-fixture-thread'}}}));}
  else if(m.method==='turn/start'){
+  if(m.params.input.some(i=>i.type==='text'&&i.text.includes('KUNECO_BROWSER_PERMISSION_E2E'))){console.log(JSON.stringify({id:m.id,result:{turn:{id:'permission-turn'}}}));setTimeout(()=>console.log(JSON.stringify({id:'browser-permission-call',method:'item/tool/call',params:{threadId:'turn-card-fixture-thread',turnId:'permission-turn',tool:'KunecoBrowser',arguments:{action:'navigate',url:'http://fixture.invalid/page'}}})),50);return;}
   if(require(${JSON.stringify(path.join(root,'test/e2e/scenarios/chat-regression-cli.cjs'))})({message:m,cwd,threadId:'turn-card-fixture-thread',emit:value=>console.log(JSON.stringify(value))}))return;
   if(JSON.parse(require('fs').readFileSync(process.env.WORKSPACE_TEST_MODEL_CONTROL,'utf8')).holdAll){console.log(JSON.stringify({id:m.id,result:{turn:{id:'held-turn'}}}));setInterval(()=>{},1000);return;}
   const threadId='turn-card-fixture-thread',turnId='turn-card-fixture-turn';console.log(JSON.stringify({id:m.id,result:{turn:{id:turnId}}}));
@@ -137,7 +140,8 @@ else {process.stdin.resume();process.stdin.on('end',()=>{let control={};try{cont
  client=await connectCDP(page.webSocketDebuggerUrl);
  await until(()=>evaluate("performance.getEntriesByName('chat-records-ready').length>0"));
  const context={evaluate,until,client,temp,proxyPort:proxy.address().port,fixtureClient,debugPort,realmProbe,stun,acceptLanguages,getStderr:()=>stderr,getStunPackets:()=>stunPackets,getPopupPost:()=>popupPost,getBrowserRequests:()=>browserRequests,getExitRequests:()=>exitRequests,setExitIP:value=>fixtureExitIp=value,accountProfiles,accountChats,accountChatObjects,captureUI,browserRegressionFixture:browserFixture.api};
- if(process.argv.includes('--scenario=memory')){
+ if(process.argv.includes('--scenario=browser-permission')){await verifyAgentPermission(context);}
+ else if(process.argv.includes('--scenario=memory')){
   await evaluate("workspace.accountLogin({username:'layout-one',password:'fixture-password',confirmPassword:'fixture-password'})");
   await verifyMemoryLibrary(context,{headers:true});
  }else{
@@ -161,7 +165,7 @@ else {process.stdin.resume();process.stdin.on('end',()=>{let control={};try{cont
  assert.doesNotMatch(stderr,/UnhandledPromiseRejection|uncaughtException/);
  await writeFile(path.join(root,'artifacts/legacy-migration.json'),JSON.stringify({passed:true,at:new Date().toISOString(),chat:chatRegressionMapping,controls:controlsRegressionCoverage,quitEvidence,dialogs:'dialog-regression.mjs all real mounted dialogs',browser:'browser-regression.mjs BL-01..10, BS-01..06, BL-03-container-ui + IPC'},null,2));
  }
- console.log(process.argv.includes('--scenario=memory')?'PASS 记忆库专项桌面验收（独立账号与临时数据，未调用真实模型）':'PASS 完整桌面验收：组件与布局、运行时与会话、通知持久化、代理导入与固定出口、浏览器隔离/导航/弹窗/断网、账号隔离。仅本地夹具，未调用真实账号或模型。');
+ console.log(process.argv.includes('--scenario=browser-permission')?'PASS 浏览器权限专项桌面验收（独立临时账号，未调用真实模型）':process.argv.includes('--scenario=memory')?'PASS 记忆库专项桌面验收（独立账号与临时数据，未调用真实模型）':'PASS 完整桌面验收：组件与布局、运行时与会话、通知持久化、代理导入与固定出口、浏览器隔离/导航/弹窗/断网、账号隔离。仅本地夹具，未调用真实账号或模型。');
 } catch(error){
  console.error('Desktop application diagnostics:\n'+stderr);
  if(client){try{const screenshot=await client.call('Page.captureScreenshot');await mkdir(path.join(root,'artifacts'),{recursive:true});await writeFile(path.join(root,'artifacts/desktop-failure.png'),Buffer.from(screenshot.data,'base64'));}catch{}}

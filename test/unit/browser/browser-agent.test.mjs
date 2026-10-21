@@ -5,14 +5,14 @@ const deferred = () => { let resolve; const promise = new Promise(r => { resolve
 function fixture() {
   const scope = { owner: 'owner', environmentId: 'environment' };
   const controller = new AbortController();
-  let currentScope = { ...scope };
+  let accessMode='ask',running=true;let currentScope = { ...scope };
   const settings = { agentEnabled: true, siteTools: true, historyAccess: 'allow' };
   const data = { settings, agentRules: [{ pattern: '*', browse: 'allow', download: 'allow' }], history: [{ url: 'https://example.com' }] };
   const calls = { scripts: [], asks: [], downloads: [], navigations: [], opens: [] };
   const tab = { id: 'tab1', url: 'https://example.com/', title: 'Example', started: true, wc: { isDestroyed: () => false, getURL: () => tab.url, executeJavaScript: async code => { calls.scripts.push(code); return { ok: true }; }, downloadURL: url => calls.downloads.push(url), navigationHistory: { canGoBack: () => true, goBack: () => {} } } };
   const features = { preferences: () => settings, library: { get: async () => data }, ask: async (...args) => { calls.asks.push(args); return true; } };
-  const tool = createBrowserAgentTool({ features, scope, signal: controller.signal, getScope: () => currentScope, getTabs: () => [tab], getActive: () => tab, openURL: url => { const created = { id: 'created', url }; calls.opens.push(created); return created; }, navigate: (target, url) => { calls.navigations.push(url); target.url = url; }, networkReady: () => true });
-  return { scope, controller, settings, data, calls, tab, features, tool, setScope: scope => { currentScope = scope; } };
+  const tool = createBrowserAgentTool({ features, scope, signal: controller.signal, getScope: () => currentScope, getTabs: () => [tab], getActive: () => tab, openURL: url => { const created = { id: 'created', url }; calls.opens.push(created); return created; }, navigate: (target, url) => { calls.navigations.push(url); target.url = url; }, networkReady: () => true,getAccessMode:()=>accessMode,isRunning:()=>running });
+  return { scope, controller, settings, data, calls, tab, features, tool, setScope: scope => { currentScope = scope; },setAccess:mode=>{accessMode=mode;},finish:()=>{running=false;} };
 }
 test('ruleFor respects exact, subdomain and default origins including ports and protocols', () => {
   const rules = [{ pattern: '*', browse: 'ask' }, { pattern: 'https://*.example.com', browse: 'allow' }, { pattern: 'https://example.com', browse: 'block' }, { pattern: 'https://private.example.com', browse: 'block' }];
@@ -84,3 +84,9 @@ test('navigation retains agent policy marker with scope, signal and authorized o
   assert.equal(f.calls.opens[0].agentPolicy.grants.has('browse|https://other.example'), true);
   assert.equal(f.tab.agentPolicy.grants, f.calls.opens[0].agentPolicy.grants);
 });
+test('full composer access skips browser prompts for this task, respects blocks and expires after completion',async()=>{
+ const f=fixture();f.setAccess('full');f.data.agentRules=[{pattern:'*',browse:'ask',download:'ask'}];f.settings.historyAccess='ask';f.features.ask=async()=>{assert.fail('full mode must not prompt');};
+ await f.tool.execute({action:'navigate',tabId:'tab1',url:'https://example.com/next'});await f.tool.execute({action:'history'});await f.tool.execute({action:'download',url:'https://files.example/file'});
+ assert.equal(f.tab.agentPolicy.getAccessMode(),'full');f.data.agentRules.push({pattern:'https://blocked.example',browse:'block'});await assert.rejects(f.tool.execute({action:'navigate',url:'https://blocked.example/'}),/禁止/);f.finish();await assert.rejects(f.tool.execute({action:'history'}),/已结束/);
+});
+test('automatic composer approval covers browsing but still asks for downloads',async()=>{const f=fixture();f.setAccess('auto');f.data.agentRules=[{pattern:'*',browse:'ask',download:'ask'}];await f.tool.execute({action:'read'});assert.equal(f.calls.asks.length,0);await f.tool.execute({action:'download',url:'https://files.example/file'});assert.equal(f.calls.asks.length,2);});
