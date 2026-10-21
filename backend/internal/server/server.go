@@ -190,6 +190,8 @@ func (s *Server) Handler() http.Handler {
 	}))
 	mux.HandleFunc("GET /v1/me/chat-objects/{environment}/{id}", s.authorized(s.chatObjectRead))
 	mux.HandleFunc("PUT /v1/me/chat-objects/{environment}/{id}", s.authorized(s.chatObjectWrite))
+	mux.HandleFunc("GET /v1/me/memories", s.authorized(s.memoryRead))
+	mux.HandleFunc("PUT /v1/me/memories", s.authorized(s.memoryWrite))
 	mux.HandleFunc("GET /v1/me/chats", s.authorized(s.chatRead))
 	mux.HandleFunc("PUT /v1/me/chats", s.authorized(s.chatWrite))
 	mux.HandleFunc("GET /v1/me/avatar", s.authorized(s.avatar))

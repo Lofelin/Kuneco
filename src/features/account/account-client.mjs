@@ -15,7 +15,7 @@ export function accountServerURL(value) {
   return url.origin;
 }
 // Explicit agents do not inherit HTTP_PROXY/HTTPS_PROXY or the app gateway.
-export async function directRequest(url,{method='GET',body,token,signal,agent:pooledAgent,timeouts}={}) {
+export async function directRequest(url,{method='GET',body,token,signal,agent:pooledAgent,timeouts,maxResponseBytes=2*1024*1024}={}) {
   const target=new URL(url),client=target.protocol==='https:'?https:http;
   if(!['https:','http:'].includes(target.protocol))throw new Error('不支持的账号接口');
   const agent=pooledAgent || (target.protocol==='https:'?new https.Agent({keepAlive:false}):new http.Agent({keepAlive:false}));
@@ -26,7 +26,7 @@ export async function directRequest(url,{method='GET',body,token,signal,agent:po
     const headers={'user-agent':'FixedEgressWorkspace/0.1','accept':'application/json'};
     if(data){headers['content-type']='application/json';headers['content-length']=data.length;}if(token)headers.authorization='Bearer '+token;
     const req=client.request(target,{method,headers,agent,signal:life.signal},res=>{
-      const chunks=[];let size=0;res.on('data',chunk=>{size+=chunk.length;if(size>2*1024*1024)req.destroy(new Error('账号响应过大'));else chunks.push(chunk);});
+      const chunks=[];let size=0;res.on('data',chunk=>{size+=chunk.length;if(size>Math.min(maxResponseBytes,32*1024*1024))req.destroy(new Error('账号响应过大'));else chunks.push(chunk);});
       res.on('error',reject);res.on('end',()=>resolve({status:res.statusCode,type:res.headers['content-type'] || '',data:Buffer.concat(chunks)}));
     });life.bind(req);req.on('error',error=>reject(life.signal.aborted?life.signal.reason:error));req.end(data);
   });}finally{life.finish();if(!pooledAgent)agent.destroy();}
@@ -125,6 +125,12 @@ export class AccountClient extends EventEmitter {
   }
   async updateProfile(value){if(!this.user)throw new Error("请先登录");const owner=this.user.id,version=this.version;await this.request("/v1/me/profile",{method:"PUT",body:value});if(this.user?.id!==owner||this.version!==version)throw new Error("保存时账号已变化");return this.profile();}
   async chats(){if(!this.user)throw new Error('请先登录');const owner=this.user.id,version=this.version,token=this.token;const result=await this.request('/v1/me/chats');result.payload=await decodeChatPayload(result.payload,async(id,environment)=>{if(this.user?.id!==owner || this.version!==version)throw new Error('对话账号已变化');return this.request('/v1/me/chat-objects/'+encodeURIComponent(environment)+'/'+id);});if(this.user?.id!==owner || this.version!==version || this.token!==token)throw new Error('对话账号已变化');return result;}
+  async memorySnapshot(scope,snapshot){
+    if(!this.user||this.user.id!==scope.owner)throw Object.assign(new Error('记忆账号已变化'),{status:401});
+    const owner=this.user.id,version=this.version,token=this.token,route='/v1/me/memories?environment='+encodeURIComponent(scope.environmentId??'local');
+    const result=await this.request(route,{...(snapshot?{method:'PUT',body:snapshot}:{}),maxResponseBytes:32*1024*1024});
+    if(this.user?.id!==owner||this.version!==version||this.token!==token)throw Object.assign(new Error('记忆账号已变化'),{status:401});return result;
+  }
   async runtimes(host){if(!this.user)return null;return (await this.request('/v1/me/runtimes?host='+encodeURIComponent(host))).registry;}
   async deleteLocalEnvironment(host){if(!this.user)throw new Error('请先登录');return this.request('/v1/me/local-environment?host='+encodeURIComponent(host),{method:'DELETE'});}
   async saveRuntimes(registry,owner){if(!this.user || this.user.id!==owner)throw new Error('运行时账号已变化');await this.request('/v1/me/runtimes',{method:'PUT',body:registry});if(this.user?.id!==owner)throw new Error('运行时账号已变化');}

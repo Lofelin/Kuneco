@@ -324,7 +324,7 @@ func TestSQLiteMigrationPreservesRecords(t *testing.T) {
 		}
 		rows.Close()
 	}
-	if _, err = s.store.DB.Exec("TRUNCATE chat_objects,browser_cookies,password_credentials,users,sessions,login_events,proxies,chat_states,user_settings,runtime_registries"); err != nil {
+	if _, err = s.store.DB.Exec("TRUNCATE memory_states,chat_objects,browser_cookies,password_credentials,users,sessions,login_events,proxies,chat_states,user_settings,runtime_registries"); err != nil {
 		t.Fatal(err)
 	}
 	if err = migration.Import(context.Background(), s.store.DB, sourcePath); err != nil {
@@ -351,7 +351,7 @@ func TestSQLiteMigrationPreservesRecords(t *testing.T) {
 	if _, err = source.Exec("UPDATE sessions SET user_id='missing-user'"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.store.DB.Exec("TRUNCATE chat_objects,browser_cookies,password_credentials,users,sessions,login_events,proxies,chat_states,user_settings,runtime_registries"); err != nil {
+	if _, err = s.store.DB.Exec("TRUNCATE memory_states,chat_objects,browser_cookies,password_credentials,users,sessions,login_events,proxies,chat_states,user_settings,runtime_registries"); err != nil {
 		t.Fatal(err)
 	}
 	if err = migration.Import(context.Background(), s.store.DB, sourcePath); err == nil {
