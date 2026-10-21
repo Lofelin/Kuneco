@@ -1,3 +1,4 @@
+import {verifyMemoryLibrary} from './scenarios/memory-library.mjs';
 import {verifyWorkspace} from './scenarios/workspace.mjs';
 import {verifyBrowserSecurity} from './scenarios/browser-security.mjs';
 import {verifyBrowserNavigation} from './scenarios/browser-navigation.mjs';
@@ -26,7 +27,7 @@ const root=fileURLToPath(new URL('../..',import.meta.url));
 const legacyMode = Object.keys(process.env).find(key => /^WORKSPACE_TEST_.*_ONLY$/.test(key) && process.env[key]);
 if (legacyMode) throw new Error(`${legacyMode} 已停用；运行 npm run test:desktop，真实容器使用 npm run test:docker / test:console。`);
 const passwordUsers=new Map(),passwordTokens=new Map();let passwordRound=0;
-let accountRound=0,accountChallenge,accountRevoked=new Set();const accountProxies=new Map();const accountChats=new Map();const accountChatObjects=new Map();const accountProfiles=new Map();const accountRuntimes=new Map();
+let accountRound=0,accountChallenge,accountRevoked=new Set();const accountProxies=new Map();const accountChats=new Map();const accountChatObjects=new Map();const accountMemories=new Map();const accountProfiles=new Map();const accountRuntimes=new Map();
 let browserFixture;
 const accountFixture=http.createServer(async(req,res)=>{
  let body='';for await(const chunk of req)body+=chunk;res.setHeader('content-type','application/json');
@@ -42,6 +43,7 @@ const accountFixture=http.createServer(async(req,res)=>{
  else if(req.url==='/v1/me/proxy'){if(req.method==='PUT'){accountProxies.set(token,JSON.parse(body));res.end('{"saved":true}');}else res.end(JSON.stringify({proxy:accountProxies.get(token) || null}));}
  else if(req.url.startsWith('/v1/me/local-environment') && req.method==='DELETE'){accountProxies.delete(token);accountRuntimes.delete(token+':'+new URL(req.url,'http://fixture.test').searchParams.get('host'));res.end('{"deleted":true}');}
  else if(req.url.startsWith('/v1/me/runtimes')){if(req.method==='PUT'){const registry=JSON.parse(body);accountRuntimes.set(token+':'+registry.hostName,registry);res.end('{"saved":true}');}else{const host=new URL(req.url,'http://fixture.test').searchParams.get('host');res.end(JSON.stringify({registry:accountRuntimes.get(token+':'+host)||null}));}}
+ else if(req.url.startsWith('/v1/me/memories?')){const key=token+':'+new URL(req.url,'http://fixture.test').searchParams.get('environment'),current=accountMemories.get(key)||{revision:0,payload:null};if(req.method==='PUT'){const next=JSON.parse(body);if(next.revision!==current.revision){res.writeHead(409);res.end('{"error":"memory conflict"}');}else{accountMemories.set(key,{revision:next.revision+1,payload:next.payload});res.end(JSON.stringify({revision:next.revision+1,serverTime:Date.now()}));}}else res.end(JSON.stringify({...current,serverTime:Date.now()}));}
  else if(req.url.startsWith('/v1/me/chat-objects/')){const key=token+':'+req.url;if(req.method==='PUT'){accountChatObjects.set(key,JSON.parse(body));res.end('{}');}else if(accountChatObjects.has(key))res.end(JSON.stringify(accountChatObjects.get(key)));else{res.writeHead(404);res.end('{"error":"missing fixture object"}');}}
  else if(req.url==='/v1/me/chats'){if(req.method==='PUT'){const next=JSON.parse(body),old=accountChats.get(token) || {revision:0};if(old.revision!==next.revision){res.writeHead(409);res.end('{"error":"conflict"}');}else{accountChats.set(token,{revision:old.revision+1,payload:next.payload});res.end(JSON.stringify({revision:old.revision+1}));}}else res.end(JSON.stringify(accountChats.get(token) || {revision:0,payload:null}));}
  else if(req.url==='/v1/auth/logout'){accountRevoked.add(rawToken);res.end('{"ok":true}');}
@@ -135,7 +137,12 @@ else {process.stdin.resume();process.stdin.on('end',()=>{let control={};try{cont
  client=await connectCDP(page.webSocketDebuggerUrl);
  await until(()=>evaluate("performance.getEntriesByName('chat-records-ready').length>0"));
  const context={evaluate,until,client,temp,proxyPort:proxy.address().port,fixtureClient,debugPort,realmProbe,stun,acceptLanguages,getStderr:()=>stderr,getStunPackets:()=>stunPackets,getPopupPost:()=>popupPost,getBrowserRequests:()=>browserRequests,getExitRequests:()=>exitRequests,setExitIP:value=>fixtureExitIp=value,accountProfiles,accountChats,accountChatObjects,captureUI,browserRegressionFixture:browserFixture.api};
+ if(process.argv.includes('--scenario=memory')){
+  await evaluate("workspace.accountLogin({username:'layout-one',password:'fixture-password',confirmPassword:'fixture-password'})");
+  await verifyMemoryLibrary(context,{headers:true});
+ }else{
  await verifyWorkspace(context,async()=>{await verifyBrowserSecurity(context);await verifyBrowserNavigation(context);},async()=>verifyChatInteraction(context),async()=>verifyComponents(context));
+ await verifyMemoryLibrary(context);
  await verifyTurnChangeCard(context);
  context.controlsFixture={models:{
   async configure(value){await writeFile(modelControl,JSON.stringify({catalog:value.models,delayMs:value.delayMs}));},
@@ -153,7 +160,8 @@ else {process.stdin.resume();process.stdin.on('end',()=>{let control={};try{cont
  console.log('Regression stage: final real quit guard');const quitEvidence=await verifyQuitControlsRegression(context);
  assert.doesNotMatch(stderr,/UnhandledPromiseRejection|uncaughtException/);
  await writeFile(path.join(root,'artifacts/legacy-migration.json'),JSON.stringify({passed:true,at:new Date().toISOString(),chat:chatRegressionMapping,controls:controlsRegressionCoverage,quitEvidence,dialogs:'dialog-regression.mjs all real mounted dialogs',browser:'browser-regression.mjs BL-01..10, BS-01..06, BL-03-container-ui + IPC'},null,2));
- console.log('PASS 完整桌面验收：组件与布局、运行时与会话、通知持久化、代理导入与固定出口、浏览器隔离/导航/弹窗/断网、账号隔离。仅本地夹具，未调用真实账号或模型。');
+ }
+ console.log(process.argv.includes('--scenario=memory')?'PASS 记忆库专项桌面验收（独立账号与临时数据，未调用真实模型）':'PASS 完整桌面验收：组件与布局、运行时与会话、通知持久化、代理导入与固定出口、浏览器隔离/导航/弹窗/断网、账号隔离。仅本地夹具，未调用真实账号或模型。');
 } catch(error){
  console.error('Desktop application diagnostics:\n'+stderr);
  if(client){try{const screenshot=await client.call('Page.captureScreenshot');await mkdir(path.join(root,'artifacts'),{recursive:true});await writeFile(path.join(root,'artifacts/desktop-failure.png'),Buffer.from(screenshot.data,'base64'));}catch{}}

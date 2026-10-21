@@ -1,0 +1,28 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {mkdtemp,rm,readFile} from 'node:fs/promises';import {tmpdir} from 'node:os';import path from 'node:path';
+import {MemoryStore} from '../../../src/features/memory/memory-store.mjs';import {MemoryHistoryTasks} from '../../../src/features/memory/memory-history-tasks.mjs';
+import {mountMemoryHistoryNotifications,memoryHistoryMessage} from '../../../src/features/memory/memory-history-notifications.mjs';
+const scope={owner:'a',environmentId:'e'},turn=id=>({turnId:id,chatId:'chat',engine:'codex',userText:'只回答你好',assistantText:'你好'});
+async function fixture(t){const dir=await mkdtemp(path.join(tmpdir(),'kuneco-history-tasks-'));t.after(()=>rm(dir,{recursive:true,force:true}));const store=new MemoryStore({file:path.join(dir,'mem')});await store.load();store.storageMode=()=> 'local';let current=scope,turns=[turn('one'),turn('two')],ready=true,scans=0;const delivered=[];const options={file:path.join(dir,'tasks'),store,getScope:()=>current,getTurns:()=>{scans++;return turns;},ready:()=>ready,recordTurn:(s,t)=>store.enqueue(s,t),completed:t=>delivered.push(t)};const tasks=new MemoryHistoryTasks(options);await tasks.load();tasks.stopped=false;return {tasks,store,options,delivered,get scans(){return scans;},set current(v){current=v;},set turns(v){turns=v;},set ready(v){ready=v;}};}
+test('history request returns before scanning or queueing, is idempotent and retains no raw conversation text',async t=>{
+ const f=await fixture(t);const task=await f.tasks.request(scope);assert.equal(task.state,'scanning');assert.equal(f.scans,0);assert.equal(f.store.jobs.length,0);assert.equal((await f.tasks.request(scope)).id,task.id);await f.tasks.tick();assert.equal(f.scans,2);assert.equal(f.store.jobs.length,2);assert.equal(f.tasks.latest(scope).remaining,2);assert.doesNotMatch(await readFile(f.options.file,'utf8'),/只回答|你好/);
+});
+test('completion notification is durable, scoped, acknowledges once, and includes failures',async t=>{
+ const f=await fixture(t),task=await f.tasks.request(scope);await f.tasks.tick();await f.store.jobState(scope,f.store.jobs[0].id,'failed','invalid model result');await f.store.apply(scope,f.store.jobs[1].id,[]);await f.tasks.tick();assert.equal(f.delivered[0].state,'completed_with_errors');assert.equal(f.delivered[0].failed,1);assert.equal(f.delivered[0].completed,1);
+ const next=new MemoryHistoryTasks(f.options);await next.load();next.stopped=false;f.current={owner:'b',environmentId:'e'};await next.tick();assert.equal(f.delivered.length,1);f.current=scope;await next.tick();assert.equal(f.delivered.length,2);await next.acknowledge(scope,task.id);await next.tick();assert.equal(f.delivered.length,2);assert.deepEqual(next.notifications(scope),[]);
+});
+test('restart resumes partial queueing without duplicating accepted jobs or crossing storage modes',async t=>{
+ const f=await fixture(t);await f.tasks.request(scope);let count=0;f.tasks.recordTurn=async(s,source)=>{if(count++)throw Error('disk failed');return f.store.enqueue(s,source);};await f.tasks.tick();assert.equal(f.store.jobs.length,1);assert.equal(f.tasks.latest(scope).state,'paused');
+ const next=new MemoryHistoryTasks(f.options);await next.load();next.stopped=false;f.store.storageMode=()=> 'remote';await next.tick();assert.equal(f.store.jobs.length,1);f.store.storageMode=()=> 'local';await next.tick();assert.equal(f.store.jobs.length,2);assert.equal(new Set(f.store.jobs.map(j=>j.id)).size,2);
+});
+test('missing historical sources pause rather than falsely reporting completion',async t=>{
+ const f=await fixture(t);await f.tasks.request(scope,[turn('missing')]);f.turns=[];await f.tasks.tick();assert.equal(f.tasks.latest(scope).state,'paused');assert.equal(f.tasks.latest(scope).remaining,1);assert.equal(f.delivered.length,0);f.turns=[turn('missing')];await f.tasks.tick();assert.equal(f.store.jobs.length,1);
+});
+test('empty batch finishes in background with truthful zero counts',async t=>{
+ const f=await fixture(t);f.turns=[];const task=await f.tasks.request(scope);assert.equal(task.state,'scanning');await f.tasks.tick();assert.equal(f.delivered[0].total,0);assert.equal(f.delivered[0].state,'completed');assert.match(memoryHistoryMessage(f.delivered[0]),/0 轮成功/);
+});
+test('frontend delivers outside settings, retries acknowledgement without duplicate toast, and ignores other scopes',async()=>{
+ let listener,acks=0;const shown=[],value={id:'batch',...scope,storage:'local',state:'completed',completed:2,failed:0,cancelled:0};let current=scope;const api={onEvent:fn=>listener=fn,memoryLibrary:async action=>{if(action==='list')return {scope:{...scope,storage:'local'},status:{historyNotifications:[value]}};if(++acks===1)throw Error('transient acknowledgement error');return {ok:true};}};const controller=mountMemoryHistoryNotifications({api,getScope:()=>current,show:s=>shown.push(s)});await new Promise(r=>setTimeout(r,0));await controller.refresh();assert.equal(shown.length,1);assert.equal(acks,2);current={owner:'b',environmentId:'e'};listener({type:'memoryHistoryCompleted',data:value});await controller.refresh();assert.equal(shown.length,1);
+});
+test('corrupt task manifests remain intact and cannot be overwritten by a new request',async t=>{
+ const f=await fixture(t);const {writeFile}=await import('node:fs/promises');const corrupt=JSON.stringify({version:1,tasks:[{id:'bad',...scope,storage:'local',state:'completed',turns:[{}]}]});await writeFile(f.options.file,corrupt);const next=new MemoryHistoryTasks(f.options);await assert.rejects(next.load(),/原文件已保留/);await assert.rejects(next.request(scope),/尚未就绪/);assert.equal(await readFile(f.options.file,'utf8'),corrupt);
+});

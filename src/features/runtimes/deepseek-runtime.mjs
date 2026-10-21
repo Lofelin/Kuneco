@@ -128,6 +128,13 @@ export async function runDeepSeekCLI(command,input,{directory=path.join(homedir(
  const config=JSON.parse(await readFile(path.join(directory,'credentials.json'),'utf8'));
  if(command==='info')return {id:'deepseek',name:'DeepSeek',version:'API · '+config.model,model:config.model,models:config.models};
  if(command==='auth')return {state:config.apiKey?'signed-in':'signed-out',method:'API Key'};
+ if(command==='extract-memory'){
+  if(typeof input.prompt!=='string'||!input.prompt.trim()||input.prompt.length>45000)throw Error('记忆提取输入无效');
+  const model=input.model||config.model;if(!config.models.some(m=>m.model===model))throw Error('记忆提取模型不可用');
+  const result=await request(process.env.HTTP_PROXY,config.apiKey,'/chat/completions',{model,messages:[{role:'system',content:'你是只处理所提供文本的记忆提取器，只输出JSON，不调用工具。'},{role:'user',content:input.prompt}],max_tokens:6000,stream:true,stream_options:{include_usage:true},thinking:{type:'disabled'}},{direct:input.networkMode==='direct',signal,onText,onReasoning:()=>{}});
+  const choice=result.choices?.[0];if(choice?.finish_reason!=='stop'||choice.message?.tool_calls?.length||typeof choice.message?.content!=='string')throw Error('记忆提取未完整返回');
+  if(result.usage)onUsage(result.usage);return {text:choice.message.content,usage:result.usage};
+ }
  if(['compact','restore'].includes(command)){
   if(!/^[a-f0-9-]{36}$/.test(input.sessionId))throw new Error('会话无效');
   const file=path.join(directory,input.sessionId+'.json');

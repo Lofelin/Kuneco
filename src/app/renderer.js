@@ -1,3 +1,4 @@
+import {mountMemoryHistoryNotifications} from '../features/memory/memory-history-notifications.mjs';
 import {mountProxyProfiles} from '../features/proxy/proxy-profiles-ui.mjs';
 import {renderPlainMessage} from '../features/chat/plain-message.mjs';
 import {environmentDetailComplete,environmentRefreshDue} from '../features/environments/environment-refresh.mjs';
@@ -40,6 +41,8 @@ import {mountAssistantImagePreviews} from '../features/chat/assistant-image-prev
 import {chatViewSnapshot} from '../features/chat/chat-view-state.mjs';
 import {reasoningView,finishReasoning,clearReasoningTimers} from '../features/chat/reasoning-view.mjs';
 import {mountDeepSeekComposer} from '../features/runtimes/deepseek-composer.mjs';
+import {mountMemorySettings} from '../features/memory/memory-settings.mjs';
+import {mountMemoryLibrary} from '../features/memory/memory-ui.mjs';
 import {mountLearningAutomation} from '../features/automation/learning-ui.mjs';
 import {updateChatMessage} from '../vendor/chat-markdown.js';
 import {mergeChatPayload} from '../features/chat/chat-sync.mjs';
@@ -169,7 +172,7 @@ let selectedProxyDetail=null;
 let setupInProgress=false;
 let runtimeRegistry={runtimes:[]};
 let selectedEngine='cc', runtimeVersions={}, engineChats={}, selectedCodexModel=null, authStates={}, authRequestId=0, chatSessions=[], activeChatId, defaultEngine="cc", defaultModel=null;
-let pinnedContentPages=new Set();try{pinnedContentPages=new Set(JSON.parse(localStorage.getItem('pinned-content-pages') || '[]').filter(id=>['cc','browser','overview','automation'].includes(id)));}catch{}
+let pinnedContentPages=new Set();try{pinnedContentPages=new Set(JSON.parse(localStorage.getItem('pinned-content-pages') || '[]').filter(id=>['cc','browser','overview','automation','memory'].includes(id)));}catch{}
 let chatRestoring=true,chatRestoreVersion=0;
 let contentTabState={tabs:[],activeId:null},navigationHistory=[],navigationIndex=-1,historyRestoring=false,chatOwnerID=null,chatEnvironmentID=null,chatReloading=false,chatReloadPending=false;
 let sidebarCollapsed=false;try{sidebarCollapsed=localStorage.getItem('sidebar-collapsed')==='true';}catch{}document.body.classList.toggle('sidebar-collapsed',sidebarCollapsed);
@@ -289,7 +292,7 @@ for(const type of ['wa-show','wa-after-show','wa-reposition','wa-after-hide'])do
 function contentTabFor(next) {
  if(next==='insights')return contentTabState.tabs.find(tab=>tab.id===contentTabState.activeId && tab.page==='insights') || contentTabState.tabs.find(tab=>tab.page==='insights');
  if(next==='cc'){const current=contentTabState.tabs.find(tab=>tab.id===contentTabState.activeId && tab.page==='cc') || contentTabState.tabs.find(tab=>tab.page==='cc');if(current)return current;}
- return {id:next,page:next,pinned:pinnedContentPages.has(next),title:next==='environments'?'环境':next==='cc'?'对话':next==='overview'?'设置':next==='automation'?'自动化':next==='runtime'?'运行时':next==='console'?'控制台':'浏览器'};
+ return {id:next,page:next,pinned:pinnedContentPages.has(next),title:next==='environments'?'环境':next==='cc'?'对话':next==='overview'?'设置':next==='memory'?'记忆库':next==='automation'?'自动化':next==='runtime'?'运行时':next==='console'?'控制台':'浏览器'};
 }
 function assertContentTabAvailable(tab){openContentTab(contentTabState,tab);}
 let contextContentTabId=null;
@@ -336,7 +339,7 @@ function renderContentTabs(){
   const item=document.createElement('div');item.className='content-tab'+(tab.id===contentTabState.activeId?' active':'');item.dataset.tabId=tab.id;item.oncontextmenu=event=>openContentTabMenu(event,tab);item.addEventListener('keydown',event=>{if(event.key==='ContextMenu' || event.shiftKey && event.key==='F10')openContentTabMenu(event,tab);});
   const divider=document.createElement('span');divider.className='content-tab-divider';divider.setAttribute('aria-hidden','true');item.append(divider);
   const select=createUI('app-button');select.className='content-tab-select';select.setAttribute('role','tab');select.setAttribute('aria-selected',String(tab.id===contentTabState.activeId));select.setAttribute('aria-controls',`page-${tab.page}`);select.title=tab.title;
-  const label=document.createElement('span');label.className='content-tab-title';label.textContent=tab.title;select.append(createIcon(tab.page==='insights'?(tab.insightView==='changes'?'file-text':'folder'):tab.page==='cc'?'messages-square':tab.page==='overview'?'settings':tab.page==='automation'?'zap':tab.page==='console'?'terminal':tab.page==='runtime'?'monitor':tab.page==='environments'?'boxes':'globe'),label);
+  const label=document.createElement('span');label.className='content-tab-title';label.textContent=tab.title;select.append(createIcon(tab.page==='insights'?(tab.insightView==='changes'?'file-text':'folder'):tab.page==='cc'?'messages-square':tab.page==='overview'?'settings':tab.page==='memory'?'book-open':tab.page==='automation'?'zap':tab.page==='console'?'terminal':tab.page==='runtime'?'monitor':tab.page==='environments'?'boxes':'globe'),label);
   select.onclick=()=>void action(()=>activateContentTab(tab));
   select.onkeydown=event=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;event.preventDefault();const index=contentTabState.tabs.findIndex(item=>item.id===tab.id);const next=event.key==='Home'?0:event.key==='End'?contentTabState.tabs.length-1:(index+(event.key==='ArrowRight'?1:-1)+contentTabState.tabs.length)%contentTabState.tabs.length;void action(()=>activateContentTab(contentTabState.tabs[next]));};
   const close=createUI('app-button');close.className='content-tab-close';close.setAttribute('icon-action-exempt','');close.append(createIcon('x'));close.setAttribute('aria-label',`${copy.close} ${tab.title}`);close.onclick=()=>void action(()=>closeContentTabView(tab.id));const pin=createUI('app-button');pin.className='content-tab-pin';pin.setAttribute('icon-action-exempt','');pin.append(createIcon(tab.pinned?'pin-off':'pin'));pin.setAttribute('aria-label',tab.pinned?copy.unpin:copy.pin);pin.setAttribute('aria-pressed',String(Boolean(tab.pinned)));pin.onclick=()=>toggleContentTabPin(tab.id);if(tab.pinned)item.classList.add('pinned');item.append(select,pin);if(!tab.pinned && contentTabState.tabs.length>1)item.append(close);$('contentTabs').append(item);
@@ -1445,8 +1448,9 @@ $('runtimeInstallConfirm').onclick=()=>void action(async()=>{
  finally{setRuntimeInstallLoading(false);environmentConfigBusy=false;$('runtimeInstallConfirm').loading=false;$('runtimeInstallCancel').disabled=false;$('runtimeDisplayName').disabled=false;$('runtimeDescription').disabled=false;$('runtimeInstallBack').disabled=false;$('runtimeInstallClose').disabled=false;$('deepseekApiKey').disabled=false;updateConfigurationActions();}
  if(owner===accountState.user?.id && id===dockerEnvironmentState.activeId){$('runtimeInstallDialog').open=false;await refreshEnvironmentConfiguration();}
 });
-const settingCopy={containers:['环境与容器','管理本设备的日志保留、自动清理与健康检查。'],console:['控制台','管理终端显示、输入与连接行为。'],git:['Git 管理','管理 Git SSH 公钥与代码仓库认证。'],browser:['浏览器','管理浏览器网络、站点数据和 Cookie 同步。'],profile:['个人资料','管理当前账号的基础信息。'],notifications:['通知','管理当前账号在本设备上的通知。'],shortcuts:['快捷键','配置发送方式和常用操作快捷键，仅保存在本设备。'],preferences:['偏好设置','管理语言、外观、阅读、时间显示和退出行为。'],proxy:['代理与出口','管理应用代理的连接与固定出口。'],environment:['本地系统','查看系统语言、时区与环境提醒，检测结果不限制功能使用。']};
-for(const tab of document.querySelectorAll('[data-setting]'))tab.onclick=()=>{const key=tab.dataset.setting;if(key==='proxy')void proxyProfilesUI.refresh();if(key==='console')void consoleSettings.refresh();if(key==='git')void gitSettings.ensureLoaded();if(key==='browser'){void loadBrowserCookiePreferences();void browserLibrary.refresh();}$('verify').classList.toggle('hidden',key!=='proxy');document.querySelectorAll('[data-setting]').forEach(item=>item.classList.toggle('active',item===tab));document.querySelectorAll('[data-panel]').forEach(panel=>panel.classList.toggle('hidden',panel.dataset.panel!==key));$('settingsTitle').textContent=settingCopy[key][0];$('notificationScopeBadge').classList.toggle('hidden',!['notifications','shortcuts','console','containers'].includes(key));$('notificationScopeBadge').lastChild.textContent=['shortcuts','console','containers'].includes(key)?'仅本设备':'当前账号 · 本设备';$('settingsTitleIcon').src='assets/icons/'+({containers:'boxes',console:'terminal',git:'git-branch',browser:'globe',profile:'user',preferences:'sliders-horizontal',notifications:'bell',shortcuts:'keyboard',proxy:'shield-check',environment:'monitor'})[key]+'.svg';$('settingsDescription').textContent=settingCopy[key][1];};
+const memorySettings=mountMemorySettings({host:$('memorySettings'),api});
+const settingCopy={memory:['记忆','管理记忆提取、召回与维护。'],containers:['环境与容器','管理本设备的日志保留、自动清理与健康检查。'],console:['控制台','管理终端显示、输入与连接行为。'],git:['Git 管理','管理 Git SSH 公钥与代码仓库认证。'],browser:['浏览器','管理浏览器网络、站点数据和 Cookie 同步。'],profile:['个人资料','管理当前账号的基础信息。'],notifications:['通知','管理当前账号在本设备上的通知。'],shortcuts:['快捷键','配置发送方式和常用操作快捷键，仅保存在本设备。'],preferences:['偏好设置','管理语言、外观、阅读、时间显示和退出行为。'],proxy:['代理与出口','管理应用代理的连接与固定出口。'],environment:['本地系统','查看系统语言、时区与环境提醒，检测结果不限制功能使用。']};
+for(const tab of document.querySelectorAll('[data-setting]'))tab.onclick=()=>{const key=tab.dataset.setting;if(key==='memory')void memorySettings.refresh();if(key==='proxy')void proxyProfilesUI.refresh();if(key==='console')void consoleSettings.refresh();if(key==='git')void gitSettings.ensureLoaded();if(key==='browser'){void loadBrowserCookiePreferences();void browserLibrary.refresh();}document.querySelectorAll('[data-setting]').forEach(item=>item.classList.toggle('active',item===tab));document.querySelectorAll('[data-panel]').forEach(panel=>panel.classList.toggle('hidden',panel.dataset.panel!==key));$('settingsTitle').textContent=settingCopy[key][0];$('notificationScopeBadge').classList.toggle('hidden',!['notifications','shortcuts','console','containers'].includes(key));$('notificationScopeBadge').lastChild.textContent=['shortcuts','console','containers'].includes(key)?'仅本设备':'当前账号 · 本设备';$('settingsTitleIcon').src='assets/icons/'+({memory:'book-open',containers:'boxes',console:'terminal',git:'git-branch',browser:'globe',profile:'user',preferences:'sliders-horizontal',notifications:'bell',shortcuts:'keyboard',proxy:'shield-check',environment:'monitor'})[key]+'.svg';$('settingsDescription').textContent=settingCopy[key][1];};
 let themePreference='light';try{themePreference=localStorage.getItem('ui-theme') || 'light';}catch{}
 if(!['light','dark','system'].includes(themePreference))themePreference='light';
 const systemTheme=matchMedia('(prefers-color-scheme: dark)');
@@ -1840,6 +1844,8 @@ function refreshDisplayedTimes(){
 
 setInterval(()=>{refreshTimeElements(document);for(const element of document.querySelectorAll('[data-environment-date]'))element.textContent=displayEnvironmentDate(element.dataset.environmentDate,element.dataset.environmentRecent==='true');},30000);
 
+mountMemoryHistoryNotifications({api,getScope:()=>({owner:accountState.user?.id,environmentId:dockerEnvironmentState.activeId}),show:message=>toast(message,'operations')});
+mountMemoryLibrary(api,{language:uiLocale,openSource:id=>void action(async()=>{const item=chatSessions.find(v=>v.id===id);if(!item)throw Error('来源对话当前不可用');saveChatView();applySession(await api.selectSession(id,{deferAuth:true,viewed:true}),item);})});
 mountLearningAutomation(api,()=>({runtimes:runtimeRegistry.runtimes,refreshRuntimes:refreshRuntimeRegistry,language:uiLocale(),name:dockerEnvironmentState.environments.find(e=>e.id===dockerEnvironmentState.activeId)?.name || '当前环境'}));
 
 mountShortcuts({document,platform:api.platform,getBindings:()=>preferences.shortcuts,onError:error=>toast(error.message),actions:{

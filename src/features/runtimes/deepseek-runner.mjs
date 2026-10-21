@@ -1,6 +1,6 @@
-export function runDeepSeek({spawnProcess,sessionId,model,prompt,history,project,networkMode='proxy',signal,onText,onReasoning=()=>{},onFinish=()=>{},onActivity=()=>{},onCompaction=()=>{},onUsage=()=>{},browserTool}){
+export function runDeepSeek({operation='chat',spawnProcess,sessionId,model,prompt,history,project,networkMode='proxy',signal,onText,onReasoning=()=>{},onFinish=()=>{},onActivity=()=>{},onCompaction=()=>{},onUsage=()=>{},browserTool}){
  return new Promise((resolve,reject)=>{
-  const child=spawnProcess({command:'node',args:['/home/node/.local/lib/dingtu/deepseek.mjs','chat'],signal});
+  const child=spawnProcess({command:'node',args:['/home/node/.local/lib/dingtu/deepseek.mjs',operation],signal});
   let closed=false;const pendingTools=new Set();
   const abort=()=>{closed=true;child.stdin.end();child.kill();};signal?.addEventListener('abort',abort,{once:true});
   const browserRequest=event=>{

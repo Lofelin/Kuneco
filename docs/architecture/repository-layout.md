@@ -13,6 +13,7 @@ Kuneco 采用单仓库、按能力组织的目录。参考字节公开项目 [Fl
 | `src/features/proxy/` | 代理内核、出口、连接记录与代理导入 |
 | `src/features/chat/` | 对话状态、同步、消息、网络与内容渲染 |
 | `src/features/runtimes/` | AI 运行时安装、认证、执行和提供方协议 |
+| `src/features/memory/` | 账号与环境隔离的记忆库、分层摘要、本机加密持久化、语义索引及跨运行时上下文 |
 | `src/features/automation/` | 自动化调度、题库及界面 |
 | `src/features/preferences/` | 本设备偏好持久化、快捷键配置、阅读与动态效果、退出确认 |
 | `src/features/notifications/` | 通知偏好、投递控制及设置界面 |

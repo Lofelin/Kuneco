@@ -1,3 +1,4 @@
+import {MemoryHistoryTasks} from '../features/memory/memory-history-tasks.mjs';
 import {createContainerBrowserNetwork} from '../features/browser/container-browser-network.mjs';
 import {ContainerBrowserFiles} from '../features/browser/container-browser-files.mjs';
 import {ContainerBrowserEngine,ensureContainerBrowserImage} from '../features/browser/container-browser-engine.mjs';
@@ -39,6 +40,14 @@ import {mountLocalProject} from '../features/projects/project-mount.mjs';
 import {browseEnvironmentProject,selectEnvironmentProject,importEnvironmentProject} from '../features/projects/project-files.mjs';
 import {normalizeCodexInput} from '../features/runtimes/codex-images.mjs';
 import {recoverDeepSeekMessages} from '../features/runtimes/deepseek-history-recovery.mjs';
+import {MemoryStore,withMemory,memoryScope} from '../features/memory/memory-store.mjs';
+import {historicalMemoryTurns,unprocessedHistory} from '../features/memory/memory-history.mjs';
+import {SyncedMemoryStore} from '../features/memory/memory-sync-store.mjs';
+import {LocalMemoryEmbeddings} from '../features/memory/memory-embeddings.mjs';
+import {MemoryRetriever} from '../features/memory/memory-retriever.mjs';
+import {MemoryRepository} from '../features/memory/memory-repository.mjs';
+import {MemoryService} from '../features/memory/memory-service.mjs';
+import {runMemoryExtraction} from '../features/memory/memory-runtime.mjs';
 import {LearningAutomations} from '../features/automation/learning-automation.mjs';
 import {mergeChatPayload,saveChatSnapshot} from '../features/chat/chat-sync.mjs';
 import {chatRuntimeEnvironment,chatRequestRoute,chatNetworkMode,directChatEnvironment,createDirectChatSpawner} from '../features/chat/chat-network.mjs';
@@ -61,7 +70,7 @@ import {validateSessionOptions} from '../features/chat/session-options.mjs';
 import { app, protocol, Menu, Notification, BrowserWindow, WebContentsView, ipcMain, safeStorage, clipboard, powerMonitor, session, shell, nativeImage, dialog, webContents } from 'electron';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
-import { readFile, writeFile, mkdir, access, rm, stat, rename, readdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, mkdtemp, access, rm, stat, rename, readdir } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import path from 'node:path';
 import { isIP } from 'node:net';
@@ -1220,7 +1229,55 @@ ipcMain.handle('workspace:bounds', guarded(async ({ x, y, width, height, visible
   if ([x, y, width, height].every(Number.isFinite)) browserBounds = { x: Math.max(0, Math.round(x)), y: Math.max(0, Math.round(y)), width: Math.max(1, Math.round(width)), height: Math.max(1, Math.round(height)) };
   showBrowserViews();
 }));
-let learningAutomations;
+let learningAutomations,memoryLibrary,memoryService,memoryHistoryTasks,memoryRetriever,memoryLocationChanging=false;
+const currentMemoryScope=()=>memoryScope({owner:account?.user?.id,environmentId:activeContainerId});
+const memoryHistoryTurns=scope=>chatOwner!==scope.owner?[]:unprocessedHistory(historicalMemoryTurns([...aiSessions.values()],chatViews,{environmentId:scope.environmentId,running:new Set(runs.keys())}),memoryLibrary.status(scope).jobs);
+ipcMain.handle('workspace:memoryLibrary',guarded(async(action='list',value={})=>{
+ const scope=currentMemoryScope();if(!memoryLibrary)throw Error('记忆库尚未就绪');
+ const history=()=>memoryHistoryTurns(scope);
+ const response=(includeHistory=true)=>({hierarchy:memoryLibrary.hierarchy(scope),historyPending:includeHistory?history().length:null,scope:{...scope,storage:memoryLibrary.storageMode(scope)},items:memoryLibrary.list(scope,{includeDeleted:Boolean(value.includeDeleted)}),status:{...memoryLibrary.status(scope),historyBatch:memoryHistoryTasks?.latest(scope),historyNotifications:memoryHistoryTasks?.notifications(scope)||[]}});
+ if(action==='list'){await memoryLibrary.sync(scope,{force:true}).catch(()=>{});return response();}
+ if(value.scope?.owner!==scope.owner||value.scope?.environmentId!==scope.environmentId)throw Error('账号或环境已变化，请重新打开记忆库');
+ if(action!=='storage'&&value.scope.storage!==memoryLibrary.storageMode(scope))throw Error('记忆存储位置已变化，请重新打开后操作');
+ if(action==='detail'){await memoryLibrary.sync(scope,{force:true}).catch(()=>{});return memoryLibrary.detail(scope,value.id);}
+ if(accountChanging||containerOperation)throw Error('正在切换账号或环境，请稍候');
+ if(memoryLocationChanging)throw Error('正在切换记忆存储位置，请稍候');
+ if(action==='installSemantic'){void memoryRetriever.embeddings.install().catch(()=>{});return response();}
+ if(action==='storage'||action==='uploadLocal'){
+  memoryLocationChanging=true;
+  try{await memoryService.stop();if(action==='storage')await memoryLibrary.setStorage(scope,value.storage);else await memoryLibrary.uploadLocal(scope);}
+  finally{memoryLocationChanging=false;memoryService.start();}
+  await memoryLibrary.sync(scope,{force:true}).catch(()=>{});return response();
+ }
+ if(action==='extractHistory'){
+  if(!memoryLibrary.status(scope).automatic)throw Error('请先启用自动提取');
+  const task=await memoryHistoryTasks.request(scope);return {...response(false),historyQueued:0,historyTask:task};
+ }
+ if(action==='ackHistoryNotification'){await memoryHistoryTasks.acknowledge(scope,value.id);return {ok:true};}
+ if(action==='retryFailed'){for(const job of memoryLibrary.status(scope).jobs.filter(j=>j.status==='failed'))await memoryService.retry(scope,job.id);}else if(action==='retry')await memoryService.retry(scope,value.id);else await memoryLibrary.change(scope,action,value);
+ const current=currentMemoryScope();if(current.owner!==scope.owner||current.environmentId!==scope.environmentId)throw Error('账号或环境已变化，已保存到原环境');
+ return response();
+}));
+async function extractMemoryTurn({job,prompt,schema,signal,canStart}){
+ const {owner,environmentId,source}=job,requiresProxy=source.networkMode!=='direct',engine=source.engine;
+ const proxy=requiresProxy?gateway:{status:{state:'ready',mode:'direct'}};
+ const valid=()=>canStart()&&!signal.aborted&&account?.user?.id===owner&&activeContainerId===environmentId&&(!requiresProxy||gateway===proxy&&proxy?.status.state==='ready');
+ if(!valid())throw Error('记忆提取等待当前环境恢复可用连接');
+ if(!registeredRuntimes?.runtimes.some(i=>i.id===engine))throw Error('提取所用运行时当前不可用，请检测后重试');
+ const baseLaunch=environmentId?await (requiresProxy?dockerEnvs.spawner(owner,environmentId):dockerEnvs.directChatSpawner(owner,environmentId)):(requiresProxy?createRestrictedCCSpawner({port:proxy.port,canStart:valid}):createDirectChatSpawner(valid));
+ if(engine==='deepseek'&&environmentId)await dockerEnvs.syncDeepSeekSource(owner,environmentId);
+ const directory=environmentId?'/tmp/kuneco-memory-'+randomUUID():await mkdtemp(path.join(app.getPath('temp'),'kuneco-memory-'));
+ if(environmentId)await dockerEnvs.exec(owner,environmentId,['mkdir','-p','--',directory]);
+ try{
+  const executable=engine==='deepseek'?'node':environmentId?(engine==='cc'?'claude':'codex'):engine==='cc'?await findClaude():await findExecutable('codex');if(!executable)throw Error('提取所用运行时未安装');
+  const env=chatRuntimeEnvironment(requiresProxy?proxyEnvironment(process.env,proxy.url):directChatEnvironment(process.env));
+  delete env.OPENAI_BASE_URL;delete env.OPENAI_API_KEY;delete env.CODEX_API_KEY;env.KUNECO_MEMORY_NETWORK_MODE=requiresProxy?'proxy':'direct';
+  const launch=observeRuntimeLaunch(options=>{if(!valid())throw Error('记忆提取作用域已变化');return baseLaunch({...options,env:environmentId?options.env:localGitEnvironment(options.env||env,owner,requiresProxy?proxy.url:'')});},{journal:environmentEvents,owner,id:environmentId,engine,signal});
+  return await runMemoryExtraction({engine,model:source.model,prompt,schema,directory,prepareDirectory:Boolean(environmentId),executable,spawnProcess:launch,env,signal,query});
+ }finally{
+  if(environmentId)await dockerEnvs.exec(owner,environmentId,['rmdir','--',directory]).catch(()=>{});else await rm(directory,{recursive:true,force:true});
+ }
+}
 async function runLearningAutomation(item,question,controller){
  const ownerId=item.owner,environmentId=item.environmentId,requiresProxy=item.networkMode!=='direct';
  if(ownerId!==account?.user?.id || environmentId!==activeContainerId || accountChanging || containerOperation)throw new Error('账号或环境已变化');
@@ -1236,7 +1293,9 @@ async function runLearningAutomation(item,question,controller){
   const cwd=environmentId?await dockerEnvs.workingDirectory(ownerId,environmentId):path.join(app.getPath('userData'),'learning-workspaces',item.id);
   if(!environmentId)await mkdir(cwd,{recursive:true,mode:0o700});if(!valid())throw new Error('账号、环境或代理已变化');
   let text='',nextSession=item.sessionId;
-  const prompt=(item.language==='zh'?'请结合本次对话的前文，回答当前问题；需要时给出可验证的例子。':'Answer the current question in the context of this conversation. Include verifiable examples when useful.')+'\n\n'+question.prompt;
+  const memoryQuestion=(item.language==='zh'?'请结合本次对话的前文，回答当前问题；需要时给出可验证的例子。':'Answer the current question in the context of this conversation. Include verifiable examples when useful.')+'\n\n'+question.prompt;
+  await memoryLibrary.sync({owner:ownerId,environmentId},{force:true}).catch(()=>{});
+  const prompt=withMemory(memoryQuestion,await memoryLibrary.recallAsync({owner:ownerId,environmentId},question.prompt));
   if(item.engine==='codex'){
    const executable=environmentId?'codex':await findExecutable('codex');if(!executable)throw new Error('未安装 Codex');
    await runCodex({executable,project:cwd,prompt,sessionId:item.sessionId,gateway:proxy,signal:controller.signal,canStart:valid,spawnProcess,useLocalModel:!environmentId,onEvent:(type,value)=>{if(type==='text')text+=value;if(type==='session')nextSession=value;}});
@@ -1248,7 +1307,8 @@ async function runLearningAutomation(item,question,controller){
     if(message.type==='result'&&message.is_error)throw new Error('运行时返回错误，请检查登录、额度与代理');
    }
   }
-  if(!valid())throw new Error('执行期间环境或代理已变化');if(!text.trim())throw new Error('未收到对话回复');return{text:text.slice(0,60000),sessionId:nextSession,ip:proxy.status.ip};
+  if(!valid())throw new Error('执行期间环境或代理已变化');if(!text.trim())throw new Error('未收到对话回复');
+  await memoryService?.recordTurn({owner:ownerId,environmentId},{turnId:item.id+':'+item.cursor,automationId:item.id,engine:item.engine,model:null,project:null,networkMode:requiresProxy?'proxy':'direct',userText:question.prompt,assistantText:text}).catch(()=>{});return{text:text.slice(0,60000),sessionId:nextSession,ip:proxy.status.ip};
  }finally{clearTimeout(timeout);clearInterval(abortIfInvalid);}
 }
 ipcMain.handle('workspace:notification',guarded((action,value={})=>{
@@ -1423,7 +1483,8 @@ ipcMain.handle('workspace:cc', guarded(async (prompt,rewind,chatId=activeAISessi
   const controller=runs.begin(chatId,{engine,requestId,networkMode:chatRequestRoute(preparedChat,gateway?.status)});
   const fileChangeTurn={id:randomUUID(),owner:requestOwner,environmentId,chatId};
   preparedChat.fileChangeTurn=fileChangeTurn;(preparedChat.fileChangeTurns||=[]).push(fileChangeTurn);
-  const emitChat=(type,data)=>{if(type==='ccActivity')recordArtifacts(preparedChat,data,fileChangeTurn.id);emit(type,data,{chatId,requestId,owner:requestOwner,environmentId});};
+  const memoryInput=typeof prompt==='string'?prompt:prompt?.text||'';let memoryAnswer='',memorySucceeded=false,memoryFailed=false;
+  const emitChat=(type,data)=>{if(type==='ccText'&&typeof data==='string')memoryAnswer=(memoryAnswer+data).slice(0,6000);if(type==='ccResult'){if(data?.error)memoryFailed=true;else memorySucceeded=true;}if(type==='ccError')memoryFailed=true;if(type==='ccActivity')recordArtifacts(preparedChat,data,fileChangeTurn.id);emit(type,data,{chatId,requestId,owner:requestOwner,environmentId});};
   const valid=()=>!controller.signal.aborted && generation===chatGeneration && requestOwner===(account?.user?.id || null) && environmentId===activeContainerId && aiSessions.get(chatId)===preparedChat;
   try {
   if(['deepseek','codex'].includes(engine)){if(prompt && typeof prompt==='object')prompt={...prompt,text:documentPrompt(prompt.text,normalizeDocuments(prompt.documents||[]))};prompt=engine==='codex'?normalizeCodexInput(prompt):normalizeDeepSeekInput(prompt);for(const image of prompt.images){if(!image.dataURL)continue;const decoded=nativeImage.createFromDataURL(image.dataURL),size=decoded.getSize();const limit=prompt.images.length>=15?4096:8192;if(decoded.isEmpty() || size.width>limit || size.height>limit)throw new Error('图片无效或尺寸超过 '+limit+' 像素');}}
@@ -1458,6 +1519,8 @@ ipcMain.handle('workspace:cc', guarded(async (prompt,rewind,chatId=activeAISessi
    const view=chatViews.find(v=>v.id===chatId);
    if(view)view.messages=[...rewind.messages.slice(0,rewind.index),{role:'user',text:typeof prompt==='string'?prompt:prompt.text,images:prompt.images || [],documents:prompt.documents || []}];
   }
+  if(requestOwner)await memoryLibrary.sync({owner:requestOwner,environmentId},{force:true}).catch(()=>{});
+  const memorySnapshot=requestOwner?await memoryLibrary.recallAsync({owner:requestOwner,environmentId},memoryInput,{project:requestProject||null}):[];
   controller.networkMode=requiresProxy?'proxy':'direct';
   const nativeSessionId=preparedChat.sessionId,nativeCodexId=preparedChat.codexSessionId;
   const owner = requiresProxy?gateway:{status:{state:'ready',mode:'direct'}};
@@ -1475,13 +1538,13 @@ ipcMain.handle('workspace:cc', guarded(async (prompt,rewind,chatId=activeAISessi
       const browserTool=createBrowserAgentTool({features:browserFeatures,scope:{owner:requestOwner,environmentId},signal:controller.signal,getScope:()=>({owner:dockerOwner(),environmentId:activeContainerId}),getTabs:()=>[...browserTabs.values()],getActive:()=>browserTabs.get(activeTabId),openURL:url=>createBrowserTab(url),navigate:navigateBrowserTab,networkReady:browserNetworkReady});
       if(engine==='deepseek'){
         if(!containerSpawn)throw new Error('DeepSeek 仅在当前容器环境可用');
-        const usage=await runDeepSeek({browserTool,onUsage:usage=>{latestUsage=Number.isSafeInteger(usage?.total_tokens)?usage.total_tokens:null;latestUsageDetails=usageDetails('deepseek',usage);},onCompaction:record=>{delete currentChat.contextPrefix;currentChat.compression=record;if(Number.isSafeInteger(record.usage?.total_tokens)){const entry={at:record.at,totalTokens:record.usage.total_tokens,purpose:'compaction',details:usageDetails('deepseek',record.usage)};(currentChat.tokenUsage||=[]).push(entry);emitChat('ccUsage',{sessionId:currentChat.id,entry});}void persistAISessions();},project:workingDirectory,onActivity:activity=>emitChat('ccActivity',activity),networkMode:requiresProxy?'proxy':'direct',spawnProcess:launch,sessionId:currentChat.deepseekSessionId || chatId,history:currentChat.contextPrefix?deepSeekPrefix(currentChat.contextPrefix):undefined,model:model,prompt,signal:controller.signal,onText:text=>emitChat('ccText',text),onReasoning:text=>emitChat('ccReasoning',text),onFinish:reason=>{if(reason==='length')emitChat('ccNotice','回复达到长度限制，可继续追问。');}});latestUsage=Number.isSafeInteger(usage?.total_tokens)?usage.total_tokens:null;latestUsageDetails=usageDetails('deepseek',usage);
+        const usage=await runDeepSeek({browserTool,onUsage:usage=>{latestUsage=Number.isSafeInteger(usage?.total_tokens)?usage.total_tokens:null;latestUsageDetails=usageDetails('deepseek',usage);},onCompaction:record=>{delete currentChat.contextPrefix;currentChat.compression=record;if(Number.isSafeInteger(record.usage?.total_tokens)){const entry={at:record.at,totalTokens:record.usage.total_tokens,purpose:'compaction',details:usageDetails('deepseek',record.usage)};(currentChat.tokenUsage||=[]).push(entry);emitChat('ccUsage',{sessionId:currentChat.id,entry});}void persistAISessions();},project:workingDirectory,onActivity:activity=>emitChat('ccActivity',activity),networkMode:requiresProxy?'proxy':'direct',spawnProcess:launch,sessionId:currentChat.deepseekSessionId || chatId,history:currentChat.contextPrefix?deepSeekPrefix(currentChat.contextPrefix):undefined,model:model,prompt:withMemory(prompt,memorySnapshot),signal:controller.signal,onText:text=>emitChat('ccText',text),onReasoning:text=>emitChat('ccReasoning',text),onFinish:reason=>{if(reason==='length')emitChat('ccNotice','回复达到长度限制，可继续追问。');}});latestUsage=Number.isSafeInteger(usage?.total_tokens)?usage.total_tokens:null;latestUsageDetails=usageDetails('deepseek',usage);
         delete currentChat.contextPrefix;emitChat('ccResult',{error:false});return;
       }
       if(engine==='codex') {
         const pdfFiles=await stageCodexDocuments([...(!nativeCodexId?currentChat.contextPrefix?.flatMap(m=>m.documents||[])||[]:[]),...(prompt.documents||[])],{directory:activeContainerId?'/workspace/.kuneco-attachments/'+chatId:path.join(app.getPath('userData'),'chat-attachments',String(requestOwner),chatId),...(activeContainerId?{exec:(args,options)=>dockerEnvs.exec(requestOwner,environmentId,args,options)}:{})});
         if(!canContinue())throw new Error('对话已变化，未发送附件');
-        await runCodex({browserTool,useLocalModel:!activeContainerId,spawnProcess:launch || undefined,executable:activeContainerId?'codex':codexPath,project:workingDirectory,model:model,reasoningEffort:preparedChat.reasoningEffort,images:[...(!nativeCodexId?currentChat.contextPrefix?.flatMap(m=>m.images || []) || []:[]),...prompt.images],prompt:originalDocumentPrompt(!nativeCodexId?replayPrompt(currentChat.contextPrefix,prompt.text):prompt.text,pdfFiles),sessionId:nativeCodexId,gateway:owner,signal:controller.signal,canStart:canContinue,onEvent:(type,value)=>{if(type==='session'){currentChat.codexSessionId=value;if(activeAISessionId===currentChat.id)codexSessionId=value;}else if(type==='usage'){latestUsage=totalUsageTokens('codex',value);latestUsageDetails=usageDetails('codex',value);}else emitChat({text:'ccText',tool:'ccTool',process:'ccProcess',activity:'ccActivity',error:'ccError'}[type],type==='tool'?{name:value}:value);}});
+        await runCodex({browserTool,useLocalModel:!activeContainerId,spawnProcess:launch || undefined,executable:activeContainerId?'codex':codexPath,project:workingDirectory,model:model,reasoningEffort:preparedChat.reasoningEffort,images:[...(!nativeCodexId?currentChat.contextPrefix?.flatMap(m=>m.images || []) || []:[]),...prompt.images],prompt:withMemory(originalDocumentPrompt(!nativeCodexId?replayPrompt(currentChat.contextPrefix,prompt.text):prompt.text,pdfFiles),memorySnapshot),sessionId:nativeCodexId,gateway:owner,signal:controller.signal,canStart:canContinue,onEvent:(type,value)=>{if(type==='session'){currentChat.codexSessionId=value;if(activeAISessionId===currentChat.id)codexSessionId=value;}else if(type==='usage'){latestUsage=totalUsageTokens('codex',value);latestUsageDetails=usageDetails('codex',value);}else emitChat({text:'ccText',tool:'ccTool',process:'ccProcess',activity:'ccActivity',error:'ccError'}[type],type==='tool'?{name:value}:value);}});
         delete currentChat.contextPrefix;emitChat('ccResult',{sessionId:currentChat.codexSessionId,error:false});return;
       }
       const snapshotOwner=dockerOwner(),snapshotEnvironment=activeContainerId;
@@ -1490,7 +1553,7 @@ ipcMain.handle('workspace:cc', guarded(async (prompt,rewind,chatId=activeAISessi
        if(snapshotOwner!==dockerOwner()||snapshotEnvironment!==activeContainerId)return {available:false,reason:'环境已变化'};
        return snapshotEnvironment?JSON.parse(await dockerEnvs.exec(snapshotOwner,snapshotEnvironment,['node','--input-type=module','-e',snapshotSource+"\nconsole.log(JSON.stringify(await readTextSnapshot(process.argv[1])));",file],{timeout:5000,maxBuffer:300000})):readTextSnapshot(file);
       }});
-      const execution = query({ prompt: (async function* () { yield { type: 'user', message: { role: 'user', content: !nativeSessionId?replayPrompt(currentChat.contextPrefix,prompt):prompt }, parent_tool_use_id: null, session_id: '' }; })(), options: {
+      const execution = query({ prompt: (async function* () { yield { type: 'user', message: { role: 'user', content: withMemory(!nativeSessionId?replayPrompt(currentChat.contextPrefix,prompt):prompt,memorySnapshot) }, parent_tool_use_id: null, session_id: '' }; })(), options: {
         mcpServers:{kuneco:createSdkMcpServer({name:'kuneco',version:'1.0.0',tools:[tool('KunecoBrowser',browserTool.definition.description,{action:z.string(),tabId:z.string().optional(),url:z.string().optional(),selector:z.string().optional(),text:z.string().optional(),amount:z.number().optional(),name:z.string().optional(),input:z.record(z.string(),z.unknown()).optional()},async args=>{try{return {content:[{type:'text',text:JSON.stringify(await browserTool.execute(args))}]};}catch(error){return {isError:true,content:[{type:'text',text:error.message}]};}})]})},
         cwd: workingDirectory, pathToClaudeCodeExecutable: activeContainerId?'claude':claudePath, model:model || undefined,
         env: chatRuntimeEnvironment(requiresProxy?proxyEnvironment(process.env, owner.url):directChatEnvironment(process.env)), settingSources: ['user','project','local'],
@@ -1517,6 +1580,7 @@ ipcMain.handle('workspace:cc', guarded(async (prompt,rewind,chatId=activeAISessi
     } catch (error) {
       emitChat('ccError', {...(!controller.signal.aborted&&error.recovery?{recovery:error.recovery}:{}),status:controller.signal.aborted?'stopped':'failed',message:controller.signal.aborted ? '请求已取消；未自动重放操作。' : (['codex','deepseek'].includes(engine) ? error.message : 'CC 调用失败，请检查本机登录、CLI兼容性及代理；不会转为直连。')});
     } finally {
+      if(memorySucceeded&&!memoryFailed&&memoryAnswer.trim()&&valid()&&requestOwner)await memoryService?.recordTurn({owner:requestOwner,environmentId},{turnId:fileChangeTurn.id,chatId,requestId,engine,model,project:requestProject||null,networkMode:requiresProxy?'proxy':'direct',userText:memoryInput,assistantText:memoryAnswer}).catch(()=>emitChat('ccNotice','本轮回复已完成，记忆提取未能排队。'));
       if(currentChat.contextPrefix && engine!=='deepseek'){currentChat.sessionId=undefined;currentChat.codexSessionId=undefined;if(activeAISessionId===currentChat.id){sessionId=undefined;codexSessionId=undefined;}}
       if(latestUsage!==null && currentChat && chatOwner===usageOwner && aiSessions.get(currentChat.id)===currentChat){
         const entry={at:new Date().toISOString(),totalTokens:latestUsage,details:latestUsageDetails};
@@ -1560,6 +1624,12 @@ app.whenReady().then(async () => {
   observeEnvironmentOperations(dockerEnvs,environmentEvents,()=>({id:activeContainerId}));
   browserFeatures=createBrowserFeatures({app,safeStorage,dialog,shell,browserSync:async(s,scope,body)=>{const owner=account?.user?.id,token=account?.token;if(owner!==s.owner)throw Error('账号已变化');const result=await account.request('/v1/me/browser-settings?scope='+encodeURIComponent(scope),{method:body?'PUT':'GET',...(body?{body}:{}),token});if(account?.user?.id!==owner||account?.token!==token)throw Error('账号已变化');return result;},containerDownloads:createContainerDownloads({docker:dockerEnvs,directory:path.join(app.getPath('temp'),'kuneco-download-preview')}),getStorage:currentBrowserStorage,getWindow:()=>window,getScope:()=>({owner:dockerOwner(),environmentId:activeContainerId}),getTabs:()=>[...browserTabs.values()],getActive:()=>browserTabs.get(activeTabId),openURL:(url,fresh,extension)=>{const tab=fresh?createBrowserTab():browserTabs.get(activeTabId)||createBrowserTab();tab.agentPolicy=null;if(extension){tab.started=true;tab.url=url;void tab.wc.loadURL(url);publishTabs();}else navigateBrowserTab(tab,url);},emit,valid:()=>!accountChanging&&!containerOperation,importCookies:async(cookies,s)=>{if(browserDataBusy)throw Error('正在处理浏览器数据');browserDataBusy=true;const ctx=cookieContext();try{await ctx.sync.enqueue(async()=>{for(const cookie of cookies){if(s.owner!==dockerOwner()||s.environmentId!==activeContainerId)throw Error('账号或环境已变化');await ctx.sites.storage.cookies.set(cookie);}await ctx.sites.storage.cookies.flushStore();});}finally{browserDataBusy=false;}await ctx.sync.sync().catch(ctx.sync.onError);},clearSites:async kind=>{if(browserDataBusy)throw Error('正在处理浏览器数据');browserDataBusy=browserClearBusy=true;try{const ctx=cookieContext();for(const tab of [...browserTabs.values()])removeBrowserTab(tab,true);await ctx.sites.clear({kind},ctx.sync);}finally{browserDataBusy=browserClearBusy=false;publishTabs();}}});
   setInterval(()=>{if(account?.user&&!accountChanging&&!containerOperation)void browserFeatures.refresh().catch(()=>{});},30000).unref();
+  const memoryIO={notify:scope=>emit('memoryLibraryChanged',scope),encrypt:value=>{if(!safeStorage.isEncryptionAvailable())throw Error('系统加密不可用');return safeStorage.encryptString(value);},decrypt:value=>safeStorage.decryptString(value)},legacyMemoryFile=path.join(app.getPath('userData'),'memory-library.bin');
+  const memoryEmbeddings=new LocalMemoryEmbeddings({directory:path.join(app.getPath('userData'),'memory-models'),notify:()=>{const owner=account?.user?.id;if(owner)emit('memoryLibraryChanged',{owner,environmentId:activeContainerId});}});await memoryEmbeddings.load();memoryRetriever=new MemoryRetriever({embeddings:memoryEmbeddings,file:path.join(app.getPath('userData'),'memory-index.bin'),encrypt:memoryIO.encrypt,decrypt:memoryIO.decrypt});await memoryRetriever.load();
+  memoryLibrary=new MemoryRepository({...memoryIO,retriever:memoryRetriever,file:path.join(app.getPath('userData'),'memory-storage.bin'),legacyFile:legacyMemoryFile,local:new MemoryStore({...memoryIO,file:path.join(app.getPath('userData'),'memory-local.bin')}),remote:new SyncedMemoryStore({...memoryIO,legacyFile:legacyMemoryFile,file:path.join(app.getPath('userData'),'memory-cache.bin'),remote:(scope,snapshot)=>account.memorySnapshot(scope,snapshot)})});
+  await memoryLibrary.load().catch(error=>console.warn(error.message));
+  memoryService=new MemoryService({store:memoryLibrary,getScope:()=>({owner:account?.user?.id,environmentId:activeContainerId}),extract:extractMemoryTurn,judge:extractMemoryTurn,onJobEvent:(scope,event)=>recordEnvironmentEvent(scope.owner,scope.environmentId,'Memory',event.status==='failed'?'ERROR':'INFO',(event.phase==='dedup'?'正在批量去重':({queued:'等待提取',running:'正在提取',completed:'提取完成',failed:'提取失败',cancelled:'提取取消'})[event.status])+' · '+event.engine+' · '+event.id+(Number.isInteger(event.count)?' · '+event.count+' 条记忆':'')+(event.error?' · '+event.error:'')),canRun:job=>!accountChanging&&!containerOperation&&!chatNetworkChanging&&!runs.size&&!learningAutomations?.running.size&&!shutdown.requested&&(!job||job.source.networkMode==='direct'||gateway?.status.state==='ready'),notify:scope=>emit('memoryLibraryChanged',scope)});memoryService.start();
+  memoryHistoryTasks=new MemoryHistoryTasks({...memoryIO,file:path.join(app.getPath('userData'),'memory-history-tasks.bin'),store:memoryLibrary,getScope:()=>({owner:account?.user?.id,environmentId:activeContainerId}),getTurns:memoryHistoryTurns,recordTurn:(scope,turn)=>memoryService.recordTurn(scope,turn),ready:()=>chatReady&&!accountChanging&&!containerOperation&&!memoryLocationChanging&&!shutdown.requested,completed:task=>emit('memoryHistoryCompleted',task)});await memoryHistoryTasks.load().catch(error=>console.warn(error.message));memoryHistoryTasks.start();
   await account.restore();await loadUserRuntimes();
   if(account.user){await loadAccountChats(true);const proxy=activeContainerId?(await dockerEnvs.get(dockerOwner(),activeContainerId)).item.proxy:await account.proxy().catch(()=>null);if(proxy)savedConfig=validateProxy(proxy);else savedConfig={protocol:'http',host:'',port:8080,username:'',password:''};}
   setInterval(()=>{if(!accountChanging && chatDirty && chatReady && account?.user?.id===chatOwner)void persistAISessions().catch(()=>{});},15000).unref();
@@ -1596,6 +1666,7 @@ app.whenReady().then(async () => {
   }
 });
 const shutdown=createShutdownBarrier([
+ async()=>{await memoryHistoryTasks?.stop();await memoryService?.stop();await memoryRetriever?.close();},
  ()=>{stopEnvironmentLogs();stopEnvironmentHealth();learningAutomations?.stop();closeConsole();desktopReturn?.close();containerLogin?.kill();account?.cancel();account?.closeConnections();clearInterval(environmentTimer);clearInterval(healthTimer);gateway?.block('应用退出');stopBrowserTabs();},
  ()=>{environmentEvents?.stopCleanup();return environmentEvents?.flush();},
  ()=>dockerEnvs?.shutdownTasks(),
