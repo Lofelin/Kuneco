@@ -47,6 +47,18 @@ test('macOS bundle has product identity, uses the Kuneco icon, and reuses its co
     assert.equal(bundledApp.type, 'module');
     assert.equal(bundledApp.productName, 'Kuneco');
     assert.ok((await stat(executable)).mode & 0o111);
+    for (const [suffix, identifier] of [['', 'helper'], [' (GPU)', 'helper.GPU'], [' (Plugin)', 'helper.Plugin'], [' (Renderer)', 'helper.Renderer']]) {
+      const name = `Kuneco Helper${suffix}`;
+      const helper = path.join(bundle, 'Contents/Frameworks', `${name}.app`);
+      const helperInfo = path.join(helper, 'Contents/Info.plist');
+      const helperValue = key => execFileSync('/usr/libexec/PlistBuddy', ['-c', `Print :${key}`, helperInfo], {encoding: 'utf8'}).trim();
+      for (const key of ['CFBundleName', 'CFBundleDisplayName', 'CFBundleExecutable']) assert.equal(helperValue(key), name);
+      assert.equal(helperValue('CFBundleIdentifier'), `io.github.lofelin.kuneco.${identifier}`);
+      assert.ok((await stat(path.join(helper, 'Contents/MacOS', name))).mode & 0o111);
+      await assert.rejects(access(path.join(bundle, 'Contents/Frameworks', `Electron Helper${suffix}.app`)));
+    }
+    // Framework install names and third-party licenses must remain upstream names.
+    await access(path.join(bundle, 'Contents/Frameworks/Electron Framework.framework/Electron Framework'));
     execFileSync('/usr/bin/codesign', ['--verify', '--deep', '--strict', bundle]);
     assert.equal(value('CFBundleIconFile'), 'kuneco.icns');
     assert.deepEqual(await readFile(path.join(bundle, 'Contents/Resources/kuneco.icns')), await readFile(path.join(root, 'src/assets/brand/kuneco.icns')));

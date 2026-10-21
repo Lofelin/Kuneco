@@ -7,6 +7,13 @@ import {promisify} from 'node:util';
 import {appIdentity} from '../shared/app-identity.mjs';
 
 const exec = promisify(execFile);
+const helperKinds = [
+  {suffix: '', identifier: 'helper'},
+  {suffix: ' (GPU)', identifier: 'helper.GPU'},
+  {suffix: ' (Plugin)', identifier: 'helper.Plugin'},
+  {suffix: ' (Renderer)', identifier: 'helper.Renderer'},
+];
+
 async function setBundleValue(info, key, value) {
   // Some upstream helper plists omit CFBundleExecutable/CFBundleDisplayName.
   try { await exec('/usr/libexec/PlistBuddy', ['-c', `Set :${key} ${value}`, info]); }
@@ -79,6 +86,22 @@ export async function desktopExecutable({root, electron, platform = process.plat
     }
     await copyFile(icon, path.join(staged, 'Contents/Resources/kuneco.icns'));
     await rename(path.join(staged, 'Contents/MacOS', path.basename(electron)), path.join(staged, 'Contents/MacOS', appIdentity.title));
+    for (const {suffix, identifier} of helperKinds) {
+      const upstreamName = `Electron Helper${suffix}`;
+      const helperName = `${appIdentity.title} Helper${suffix}`;
+      const upstreamBundle = path.join(staged, 'Contents/Frameworks', `${upstreamName}.app`);
+      const helperInfo = path.join(upstreamBundle, 'Contents/Info.plist');
+      for (const [key, value] of Object.entries({
+        CFBundleName: helperName,
+        CFBundleDisplayName: helperName,
+        CFBundleExecutable: helperName,
+        CFBundleIdentifier: `${appIdentity.bundleId}.${identifier}`,
+      })) await setBundleValue(helperInfo, key, value);
+      await rename(path.join(upstreamBundle, 'Contents/MacOS', upstreamName), path.join(upstreamBundle, 'Contents/MacOS', helperName));
+      const helperBundle = path.join(staged, 'Contents/Frameworks', `${helperName}.app`);
+      await rename(upstreamBundle, helperBundle);
+      await exec('/usr/bin/codesign', ['--force', '--preserve-metadata=entitlements', '--sign', '-', helperBundle]);
+    }
     // Local development signature; this is not a signed/notarized release build.
     // The development runtime includes linker-signed frameworks without resource
     // envelopes. Deep signing also seals those unchanged framework resources.

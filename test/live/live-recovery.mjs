@@ -6,10 +6,14 @@ import { mkdtemp, readFile, writeFile, rm, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import electron from 'electron';
+import { fileURLToPath } from 'node:url';
+import { desktopExecutable } from '../../src/app/desktop-launcher.mjs';
 import { parseIproyalExport } from '../../src/features/proxy/iproyal-import.mjs';
+const root = fileURLToPath(new URL('../..', import.meta.url));
 const exported = process.argv[2];
 if (!exported) throw new Error('请提供现有 IPRoyal TXT 导出文件路径');
 const config = parseIproyalExport(await readFile(exported, 'utf8')).entries[0];
+const executable = await desktopExecutable({root, electron});
 const sockets = new Set(); let offline = false, outbound = 0, child, client;
 const relay = net.createServer(socket => {
   if (offline) { socket.destroy(); return; }
@@ -32,7 +36,7 @@ let debugPort;
 async function evaluate(expression) { const r=await client.call('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true}); if(r.exceptionDetails) throw new Error('应用验收操作失败'); return r.result.value; }
 async function boot() {
   const port=net.createServer();await new Promise(resolve=>port.listen(0,'127.0.0.1',resolve)); debugPort=port.address().port;await new Promise(resolve=>port.close(resolve));
-  child=spawn(electron,['.',`--remote-debugging-port=${debugPort}`,'--test-fixture',...(process.platform==='darwin'?['-AppleLanguages','(en-US)']:[])],{cwd:process.cwd(),env:{...process.env,WORKSPACE_TEST_ENV:JSON.stringify({timeZone:'America/New_York',languages:['en-US']}),WORKSPACE_TEST_DATA_DIR:temp},stdio:'ignore'});
+  child=spawn(executable,['.',`--remote-debugging-port=${debugPort}`,'--test-fixture',...(process.platform==='darwin'?['-AppleLanguages','(en-US)']:[])],{cwd:root,env:{...process.env,WORKSPACE_TEST_ENV:JSON.stringify({timeZone:'America/New_York',languages:['en-US']}),WORKSPACE_TEST_DATA_DIR:temp},stdio:'ignore'});
   const page=await until(async()=> (await fetch(`http://127.0.0.1:${debugPort}/json`).then(r=>r.json())).find(p=>p.url.includes('src/index.html')));
   client=await cdp(page.webSocketDebuggerUrl);
   await until(() => evaluate("Boolean(window.workspace && typeof window.workspace.connect === 'function' && document.getElementById('connect'))"));
