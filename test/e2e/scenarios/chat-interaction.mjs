@@ -72,6 +72,9 @@ async function checkZoomMenu(selector,name){
  await checkZoomMenu('#deepseekPreviewZoom','image-zoom-menu');
  const backdrop=await evaluate(()=>{const dialog=document.getElementById('deepseekImagePreview').shadowRoot.querySelector('dialog'),style=getComputedStyle(dialog,'::backdrop');return {color:style.backgroundColor,filter:style.backdropFilter};});assert.equal(backdrop.filter,'blur(4px)');assert.equal(backdrop.color,'rgba(160, 165, 175, 0.18)');
  await evaluate(()=>{const zoom=document.getElementById('deepseekPreviewZoom');zoom.value='200';zoom.dispatchEvent(new Event('change'));});
+ // Wait for the image and the real dialog opening/resize cycle before taking
+ // pointer coordinates. ResizeObserver deliberately releases an active drag.
+ await evaluate(async()=>{const host=document.getElementById('deepseekImagePreview'),dialog=host.shadowRoot.querySelector('dialog');await document.querySelector('#deepseekImagePreview img').decode();await Promise.all(dialog.getAnimations({subtree:true}).filter(animation=>animation.effect?.getTiming().iterations!==Infinity).map(animation=>animation.finished.catch(()=>{})));await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));});
  const stage=await evaluate(()=>{const r=document.querySelector('#deepseekImagePreview .image-gallery-stage').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};});
  const transform=()=>evaluate(()=>document.querySelector('#deepseekImagePreview img').style.transform),before=await transform();
  const mouse=(type,x,y,extra={})=>client.call('Input.dispatchMouseEvent',{type,x,y,button:'left',...extra});
