@@ -2528,3 +2528,7 @@ wa-dropdown-item::part(details){font-size:var(--menu-font-size);font-weight:400;
 .browser-access-hint{color:var(--muted)}
 #browserAccessTrigger[data-access=full]{color:var(--warning)}
 @container chat-column (max-width:480px){.chat-column .compose-footer{display:flex;flex-wrap:wrap}.chat-column .compose-footer>.compose-actions{flex:1 1 100%}.chat-column .compose-footer>.compose-send-actions{flex:1 1 100%;max-width:none}.chat-column .compose-footer>.compose-actions #browserAccessMenu{flex:none}}
+
+.proxy-profile-in-use{display:inline-flex;align-items:center;gap:6px;color:var(--success);white-space:nowrap}
+.proxy-profile-in-use::before{content:"";width:6px;height:6px;flex:none;border-radius:50%;background:currentColor;animation:environment-running-pulse 1.4s ease-in-out infinite}
+@media(prefers-reduced-motion:reduce){.proxy-profile-in-use::before{animation:none}}
