@@ -401,7 +401,9 @@ $('accountMenu').addEventListener('wa-show',layoutAccountMenu);
 new ResizeObserver(layoutAccountMenu).observe(document.querySelector('.sidebar'));
 let proxyActionBusy=false;
 new ResizeObserver(()=>{const width=$('environmentTrigger').getBoundingClientRect().width;$('environmentMenu').style.setProperty('--environment-menu-width',(width>56?width:220)+'px');}).observe($('environmentTrigger'));
-$('newEnvironment').onclick=()=>beginEnvironmentSetup('docker',true);
+function openEnvironmentCreation(){if(!accountState.user)return;$('environmentMenu').open=false;beginEnvironmentSetup('docker',true);}
+$('newEnvironment').onclick=openEnvironmentCreation;
+$('createEnvironmentMenuItem').onclick=openEnvironmentCreation;
 let pendingEnvironmentDeletion=null,environmentDeleting=false;
 $('deleteEnvironmentName').addEventListener('input',()=>{$('confirmDeleteEnvironment').disabled=environmentDeleting || $('deleteEnvironmentName').value!==pendingEnvironmentDeletion?.name;});
 $('cancelDeleteEnvironment').onclick=()=>{if(!environmentDeleting)$('deleteEnvironmentDialog').open=false;};
@@ -434,7 +436,7 @@ $('setupDockerSource').addEventListener('change',()=>{renderSetupDocker();setupP
 $('setupExistingContainer').addEventListener('change',()=>{validateSetupEnvironment();void previewSetupRuntimes(true);});$('setupRefreshExisting').onclick=()=>void loadExistingContainers();
 function validateSetupEnvironment(){
  const name=($('setupEnvironmentName').value || '').trim(),existing=setupEnvironmentKind==='docker' && $('setupDockerSource').value==='existing';
- const valid=name.length>0 && name.length<=40 && ['local','docker'].includes(setupEnvironmentKind);
+ const valid=name.length>0 && (setupEnvironmentKind==='local' || name.length<=40) && ['local','docker'].includes(setupEnvironmentKind);
  const dockerReady=setupEnvironmentKind!=='docker' || (existing?Boolean($('setupExistingContainer').value) && !existingContainerBusy:setupImageConfirmed && setupDockerChecked && !setupDockerBusy && dockerEnvironmentState.engine.ready && dockerEnvironmentState.engine.image);
  $('setupCreateLabel').textContent='下一步';$('setupCreate').loading=setupCreating;$('setupCreate').disabled=setupCreating || !valid || (setupWizardStep===2 && !dockerReady);$('setupPrevious').disabled=setupCreating || setupDockerPreparing;
  $('setupCreatingStatus').classList.toggle('hidden',!setupCreating);$('setupCreatingStatus').textContent=setupCreating?`正在创建「${name}」`:'';
@@ -444,10 +446,10 @@ function setSetupWizardStep(step){
  setupWizardStep=step;$('setupNameStep').classList.toggle('hidden',step!==1);$('setupTypeStep').classList.toggle('hidden',step!==2);
  $('setupCreateView').classList.toggle('hidden',step===3);$('setupDetectView').classList.toggle('hidden',step!==3);
  $('setupPrevious').classList.toggle('hidden',step===1);$('setupCancel').classList.toggle('hidden',!setupAllowCancel);
- $('setupOverallTitle').textContent=step===1?'给你的环境起个名字。':$('setupEnvironmentName').value.trim();
- $('setupOverallDescription').textContent=step===1?'为不同的工作创建独立环境，选择图标和名称，方便随时识别。':'配置你的工作环境，完成后即可开始使用。';
+ $('setupOverallTitle').textContent=step===1?(setupEnvironmentKind==='local'?'使用当前设备名称。':'给你的环境起个名字。'):$('setupEnvironmentName').value.trim();
+ $('setupOverallDescription').textContent=step===1?(setupEnvironmentKind==='local'?'本机环境名称跟随系统设备名称，可选择图标方便识别。':'为不同的工作创建独立环境，选择图标和名称，方便随时识别。'):step===2 && setupEnvironmentKind==='local'?`本机环境使用当前设备名称「${dockerEnvironmentState.localName || '本机环境'}」，第一步填写的名称不会用于本机环境。`:'配置你的工作环境，完成后即可开始使用。';
  $('setupStepLabel').textContent=`第 ${step} / 3 步`;
- $('setupStepTitle').textContent=['填写环境名称','选择环境类型','检测运行时'][step-1];
+ $('setupStepTitle').textContent=[setupEnvironmentKind==='local'?'确认设备名称':'填写环境名称','选择环境类型','检测运行时'][step-1];
  $('setupFinishLabel').textContent=`创建「${$('setupEnvironmentName').value.trim()}」环境`;
  $('setupStatus').textContent='';
  validateSetupEnvironment();bounds();
@@ -540,7 +542,7 @@ $('setupEnvironmentName').addEventListener('input',validateSetupEnvironment);
 $('setupEnvironmentName').addEventListener('change',validateSetupEnvironment);
 validateSetupEnvironment();
 new ResizeObserver(()=>{$('setupEnvironmentType').style.setProperty('--setup-type-width',$('setupTypeTrigger').getBoundingClientRect().width+'px');}).observe($('setupTypeTrigger'));
-document.querySelectorAll('[data-setup-type]').forEach(option=>option.addEventListener('click',()=>{if(option.disabled)return;setupEnvironmentKind=option.dataset.setupType;const docker=setupEnvironmentKind==='docker';$('setupTypeName').textContent=docker?'Docker 容器':'本机环境';$('setupTypeSubtitle').textContent=option.querySelector('small').textContent;document.querySelectorAll('[data-setup-type]').forEach(item=>item.querySelector('wa-icon').classList.toggle('hidden',item!==option));renderSetupDocker();$('setupRuntimePreviewList').replaceChildren();$('setupRuntimeOrigin').textContent=docker?'容器':'本机';if(docker){$('setupRuntimePreviewStatus').textContent='等待容器环境检测…';if($('setupDockerSource').value==='existing')void loadExistingContainers();else void checkSetupDocker();void previewSetupRuntimes(true);}else void previewSetupRuntimes(true);}));
+document.querySelectorAll('[data-setup-type]').forEach(option=>option.addEventListener('click',()=>{if(option.disabled)return;setupEnvironmentKind=option.dataset.setupType;const docker=setupEnvironmentKind==='docker';$('setupEnvironmentName').readonly=!docker;if(docker)$('setupEnvironmentName').setAttribute('maxlength','40');else $('setupEnvironmentName').removeAttribute('maxlength');$('setupEnvironmentName').placeholder=docker?'给环境起个名字，或点击右侧随机生成':'使用当前设备名称';$('setupRandomName').disabled=!docker;if(!docker)$('setupEnvironmentName').value=dockerEnvironmentState.localName || '本机环境';else if($('setupEnvironmentName').value===dockerEnvironmentState.localName)$('setupEnvironmentName').value='';$('setupTypeName').textContent=docker?'Docker 容器':'本机环境';$('setupTypeSubtitle').textContent=option.querySelector('small').textContent;document.querySelectorAll('[data-setup-type]').forEach(item=>item.querySelector('wa-icon').classList.toggle('hidden',item!==option));renderSetupDocker();$('setupRuntimePreviewList').replaceChildren();$('setupRuntimeOrigin').textContent=docker?'容器':'本机';if(docker){$('setupRuntimePreviewStatus').textContent='等待容器环境检测…';if($('setupDockerSource').value==='existing')void loadExistingContainers();else void checkSetupDocker();void previewSetupRuntimes(true);}else void previewSetupRuntimes(true);setSetupWizardStep(setupWizardStep);}));
 let setupDetectionVersion=0;
 $('setupCreate').onclick=()=>void action(async()=>{
  if(setupCreating || !validateSetupEnvironment())return;
@@ -1270,7 +1272,7 @@ function openRuntimeDetails(entry){
  const content=$('runtimeDetailContent');content.replaceChildren();
  const access=runtimeAccess(entry),authLabel=access.status;
  const hero=$('runtimeDetailHero');hero.replaceChildren();const name=document.createElement('h1');name.textContent=entry.name;const badge=document.createElement('span');badge.className='runtime-auth-badge';badge.dataset.ready=String(entry.auth?.state==='signed-in');badge.dataset.kind=access.kind;badge.append(createIcon(access.icon),document.createTextNode(authLabel));hero.append(createIcon(runtimeIcon(entry.id)),name,badge);
- const environment=dockerEnvironmentState.environments.find(item=>item.id===dockerEnvironmentState.activeId)?.name || '本机环境';$('runtimeDetailBreadcrumb').textContent=entry.name;
+ const environment=dockerEnvironmentState.environments.find(item=>item.id===dockerEnvironmentState.activeId)?.name || dockerEnvironmentState.localName || '本机环境';$('runtimeDetailBreadcrumb').textContent=entry.name;
  const summary=$('runtimeDetailSummary');summary.replaceChildren();for(const [label,value] of [['登录账号',entry.auth?.state==='signed-in'?(entry.auth.accountName?.trim() || '—'):'未登录'],['执行环境',environment],['运行时',entry.version]]){const cell=document.createElement('div'),term=document.createElement('span'),valueNode=document.createElement('strong');term.textContent=label;valueNode.className='runtime-summary-value';
   if(label==='登录账号' && entry.auth?.state==='signed-in' && entry.auth.accountName?.trim()){const avatar=createUI('wa-avatar');avatar.className='runtime-owner-avatar';setAccountAvatar(avatar,entry.auth.avatarUrl,runtimeAccountAvatar(entry));avatar.label=value+'的头像';valueNode.append(avatar);}
   if(label==='执行环境'){const active=dockerEnvironmentState.environments.find(item=>item.id===dockerEnvironmentState.activeId);valueNode.append(createIcon(environmentIcon(active?.icon || dockerEnvironmentState.localIcon,active?'boxes':'monitor')));}
@@ -1686,7 +1688,7 @@ async function refreshEnvironments(existing){
  document.body.classList.toggle('environment-onboarding',setupInProgress);$('environmentSetup').classList.toggle('hidden',!setupInProgress);
  const selected=state.environments.find(item=>item.id===state.activeId);
  $('environmentMenu').querySelector('[slot=trigger] wa-icon').src='assets/icons/'+environmentIcon(selected?selected.icon:state.localIcon,selected?'boxes':'monitor')+'.svg';
- $('renameEnvironment').disabled=noEnvironments || !accountState.user;
+ $('renameEnvironment').disabled=noEnvironments || !accountState.user || !selected;
  $('environmentName').textContent=selected?.name || (hasLocal?localName:'暂无环境');
  setEnvironmentTypeIcon($('environmentTypeBadge'),!selected);$('environmentTypeBadge').classList.toggle('hidden',noEnvironments);
  document.querySelectorAll('[data-environment-option]').forEach(item=>item.remove());
@@ -1695,9 +1697,9 @@ async function refreshEnvironments(existing){
   const icon=createIcon(environmentIcon(item.icon,item.id===null?'monitor':'boxes'));icon.className='environment-option-icon';
   const copy=document.createElement('span');copy.className='environment-option-copy';const name=document.createElement('span');name.className='environment-option-name';name.textContent=item.name;name.title=item.name;const type=document.createElement('span');setEnvironmentTypeIcon(type,item.id===null);copy.append(icon,name,type);option.append(copy);
   const check=createIcon('check');check.style.visibility=item.id===state.activeId?'visible':'hidden';copy.append(check);if(item.id===state.activeId){option.setAttribute('aria-current','true');option.disabled=true;}
-  option.onclick=()=>{if(item.id===dockerEnvironmentState.activeId)return;void action(async()=>{$('environmentMenu').open=false;await environmentOperation('select',{id:item.id});});};$('environmentMenu').append(option);
+  option.onclick=()=>{if(item.id===dockerEnvironmentState.activeId)return;void action(async()=>{$('environmentMenu').open=false;await environmentOperation('select',{id:item.id});});};$('environmentMenu').insertBefore(option,$('environmentMenuDivider'));
  }
- $('newEnvironment').disabled=!accountState.user;
+ $('newEnvironment').disabled=!accountState.user;$('createEnvironmentMenuItem').disabled=!accountState.user;
  $('deleteEnvironmentMenuTrigger').disabled=noEnvironments;
  $('environmentList').replaceChildren();
  const localRow=document.createElement('div');localRow.className='docker-environment-row';localRow.dataset.localEnvironment='true';

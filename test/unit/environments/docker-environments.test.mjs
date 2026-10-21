@@ -6,17 +6,17 @@ import path from 'node:path';
 import {DockerEnvironments,workerArguments,resourcePrefix} from '../../../src/features/environments/docker-environments.mjs';
 test('local environment deletion persists, allows zero environments, and recreation is account scoped',async()=>{
  const directory=await mkdtemp(path.join(tmpdir(),'dingtu-local-'));
- const manager=new DockerEnvironments({directory,sourceRoot:process.cwd(),encrypt:Buffer.from,decrypt:b=>b.toString()});manager.engineStatus=async()=>({ready:false});
+ const manager=new DockerEnvironments({directory,sourceRoot:process.cwd(),encrypt:Buffer.from,decrypt:b=>b.toString(),readDeviceName:async()=>'测试设备'});manager.engineStatus=async()=>({ready:false});
  try{
   await manager.createLocal('owner');
   await assert.rejects(manager.forgetLocal('owner','wrong'));
-  await manager.forgetLocal('owner','本机环境');
+  await manager.forgetLocal('owner','测试设备');
   assert.equal((await manager.state('owner')).localEnabled,false);
   assert.equal((await manager.state('other')).localEnabled,false);
   await assert.rejects(manager.select('owner',null));
   const id=await manager.create('owner','Docker');await manager.select('owner',id);await manager.forget('owner',id,'Docker');
   assert.equal((await manager.state('owner')).environments.length,0);assert.equal((await manager.state('owner')).localEnabled,false);
-  await manager.createLocal('owner','我的本机');assert.equal((await manager.state('owner')).localName,'我的本机');await assert.rejects(manager.createLocal('owner'));
+  await manager.createLocal('owner','我的本机');assert.equal((await manager.state('owner')).localName,'测试设备');await assert.rejects(manager.createLocal('owner'));
  }finally{await rm(directory,{recursive:true,force:true});}
 });
 
@@ -120,7 +120,7 @@ test('deleting active environment follows menu order and wraps to the first rema
   await manager.select('owner',first);await manager.forget('owner',first,'First');
   assert.equal((await manager.load('owner')).activeId,second);
   await manager.forget('owner',second,'Second');assert.equal((await manager.load('owner')).activeId,null);
-  const last=await manager.create('owner','Last');await manager.forgetLocal('owner','Local');
+  const last=await manager.create('owner','Last');await manager.forgetLocal('owner',(await manager.load('owner')).localName);
   assert.equal((await manager.load('owner')).activeId,last);
   await manager.forget('owner',last,'Last');const state=await manager.load('owner');
   assert.equal(state.localEnabled,false);assert.deepEqual(state.environments,[]);assert.equal(state.activeId,null);

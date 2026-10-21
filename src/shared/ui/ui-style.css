@@ -624,7 +624,7 @@ app-button.content-tab-pin::part(base),app-button.content-tab-close::part(base){
 #environmentMenu::part(menu){box-sizing:border-box;width:var(--environment-menu-width,228px);max-width:calc(100vw - 32px);padding:8px;border:1px solid var(--line);border-radius:12px;background:var(--surface);box-shadow:0 8px 24px #00000012,0 2px 5px #00000008}
 .environment-menu-heading{padding:6px 8px 8px;color:var(--muted);font-size:12px;line-height:18px}
 #environmentMenu wa-dropdown-item{min-height:38px;padding:7px 8px;border-radius:7px;font-size:14px;color:var(--ink)}
-#environmentMenu wa-dropdown-item::part(icon){display:flex;align-items:center;justify-content:center;width:24px;min-width:24px;margin-right:8px}
+#environmentMenu wa-dropdown-item::part(icon){display:flex;align-items:center;justify-content:flex-start;width:16px;min-width:16px;margin-inline-end:10px}
 #environmentMenu wa-dropdown-item::part(label){flex:1;min-width:0;overflow-wrap:anywhere}
 #environmentMenu wa-dropdown-item::part(details){display:flex;align-items:center;margin-left:12px;color:var(--ink)}
 #environmentMenu .environment-option-icon{padding:4px;box-sizing:content-box;border-radius:50%;background:var(--canvas);color:var(--muted)}
@@ -818,6 +818,8 @@ wa-checkbox{--wa-form-control-activated-color:var(--ink)}
 
 .setup-name-field{display:flex;align-items:flex-end;gap:10px;margin-top:24px}
 .setup-name-field #setupEnvironmentName{flex:1;min-width:0;margin-top:0}
+#setupEnvironmentName::part(form-control-label){display:none}
+#setupNameHint{margin:var(--settings-section-content-gap,8px) 0 0;font-size:12px;line-height:20px;color:var(--muted)}
 #setupRandomName{flex:none;margin-top:0}
 #setupRandomName::part(base){height:34px;min-height:34px;white-space:nowrap}
 #setupRandomName wa-icon{width:16px;height:16px}
@@ -1074,7 +1076,7 @@ body.environment-onboarding:not(.auth-mode)>.setup-window-drag{display:block}
 #contentTabMenu::part(menu){width:max-content;min-width:0;border-radius:12px;padding:6px 0;box-shadow:0 8px 24px #0002}
 #contentTabMenu wa-dropdown-item{min-height:34px;margin-inline:6px;padding:7px 10px;font-size:14px;white-space:nowrap;border-radius:6px;box-sizing:border-box}
 #contentTabMenu .tab-menu-danger{color:#e23e43}
-.tab-menu-divider{height:1px;background:var(--line);margin:5px 0}
+.tab-menu-divider,.environment-menu-divider{height:1px;background:var(--line);margin:5px 0}
 /* Compact, content-sized header actions retain a readable icon and label. */
 :is(.content-page-header app-button,.content-action){font-size:12px}
 :is(.content-page-header app-button,.content-action)::part(base){height:30px;min-height:30px;padding-inline:8px;gap:6px;font-size:12px;line-height:18px}
@@ -1246,7 +1248,8 @@ body.environment-onboarding:not(.auth-mode)>.setup-window-drag{display:block}
 .sidebar-collapsed #environmentTrigger::part(label){grid-template-columns:16px 0 0 0;gap:0;justify-content:start;min-width:16px}
 #environmentTypeBadge{margin-left:0}
 #environmentMenu wa-dropdown-item{padding-left:1px;padding-right:9px}
-#environmentMenu wa-dropdown-item::part(icon),#environmentMenu wa-dropdown-item::part(details){display:none}
+#environmentMenu wa-dropdown-item[data-environment-option]::part(icon),#environmentMenu wa-dropdown-item::part(details){display:none}
+#environmentMenu wa-dropdown-item>wa-icon[slot=icon]{margin-inline-end:0!important}
 #environmentMenu .environment-option-copy{display:grid;grid-template-columns:16px minmax(0,1fr) 20px 16px;gap:10px;align-items:center}
 #environmentMenu .environment-option-copy .environment-type-icon{margin:0}
 #environmentTypeBadge[data-kind=docker] wa-icon{color:#2496ed}

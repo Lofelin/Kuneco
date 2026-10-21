@@ -1,3 +1,4 @@
+import {deviceName} from './device-name.mjs';
 import {TaskCapacity} from './task-capacity.mjs';
 import {accountMutation} from './account-mutation.mjs';
 import {cleanupDirectTask,waitForTaskCleanup} from './direct-task-cleanup.mjs';
@@ -38,7 +39,7 @@ export function directTaskArguments({prefix,name,image,projectMounts=[],task,com
  return run;
 }
 export class DockerEnvironments {
- constructor({directory,sourceRoot,encrypt,decrypt,defaultLocalEnabled=false}){Object.assign(this,{directory,sourceRoot,encrypt,decrypt,defaultLocalEnabled});this.context='colima-dingtu';this.endpoint='unix://'+path.join(homedir(),'.colima','dingtu','docker.sock');this.busy=false;}
+ constructor({directory,sourceRoot,encrypt,decrypt,defaultLocalEnabled=false,readDeviceName=deviceName}){Object.assign(this,{directory,sourceRoot,encrypt,decrypt,defaultLocalEnabled,readDeviceName});this.context='colima-dingtu';this.endpoint='unix://'+path.join(homedir(),'.colima','dingtu','docker.sock');this.busy=false;}
  async binary(name){for(const location of [path.join(process.resourcesPath||this.sourceRoot,'container-engine','bin',name),path.join(this.sourceRoot,'vendor','container-engine','bin',name),'/opt/homebrew/bin/'+name,'/usr/local/bin/'+name]){try{await access(location);return location;}catch{}}throw new Error('容器引擎组件未安装，请初始化容器引擎');}
  async command(args,{input,inputFile,timeout=30000,endpoint=this.endpoint,maxBuffer=4*1024*1024,combinedOutput=false}={}){
   const binary=await this.binary('docker');
@@ -102,7 +103,7 @@ export class DockerEnvironments {
   }catch{return {...info,ready:false,image:false,busy:this.busy};}
  }
  file(owner){if(!owner)throw new Error('请先登录再创建 Docker 环境');return path.join(this.directory,createHash('sha256').update(owner).digest('hex')+'.bin');}
- async load(owner){if(!owner)return {activeId:null,environments:[]};try{return JSON.parse(this.decrypt(await readFile(this.file(owner))));}catch(error){if(error.code==='ENOENT')return{activeId:null,localEnabled:this.defaultLocalEnabled,environments:[]};throw new Error('环境配置无法读取，已停止切换');}}
+ async load(owner){const localName=await this.readDeviceName();if(!owner)return {activeId:null,localName,environments:[]};try{return {...JSON.parse(this.decrypt(await readFile(this.file(owner)))),localName};}catch(error){if(error.code==='ENOENT')return{activeId:null,localName,localEnabled:this.defaultLocalEnabled,environments:[]};throw new Error('环境配置无法读取，已停止切换');}}
  async save(owner,value){await mkdir(this.directory,{recursive:true,mode:0o700});const file=this.file(owner),temporary=file+'.'+randomUUID()+'.tmp';try{await writeFile(temporary,this.encrypt(JSON.stringify(value)),{mode:0o600,flag:'wx'});await rename(temporary,file);}finally{await rm(temporary,{force:true});}}
  async get(owner,id){const data=await this.load(owner);const item=data.environments.find(item=>item.id===id);if(!item)throw new Error('当前账号下不存在该环境');return {data,item,prefix:resourcePrefix(owner,id)};}
  async create(owner,name,icon){return accountMutation(this,owner,async()=>{if(typeof name!=='string'||!name.trim()||name.length>40)throw new Error('环境名称需为1至40个字符');const data=await this.load(owner);if(data.environments.length>=10)throw new Error('最多创建10个环境');const item={id:randomUUID(),name:name.trim(),icon:environmentIcon(icon),createdAt:new Date().toISOString(),imageName:imageConfiguration(data.imageConfig).imageName,baseImage:imageConfiguration(data.imageConfig).baseImage,registry:null,proxy:null};data.environments.push(item);await this.save(owner,data);return item.id;});}
@@ -211,11 +212,11 @@ export class DockerEnvironments {
   if(!owner)throw new Error('请先登录');
   if(typeof name!=='string' || !name.trim() || name.trim().length>40)throw new Error('环境名称需为1至40个字符');
   const data=await this.load(owner),value=name.trim();
-  if(id===null){if(data.localEnabled===false)throw new Error('环境不存在');data.localName=value;}
+  if(id===null)throw new Error('本机环境名称跟随当前设备名称，请在系统设置中修改');
   else{const item=data.environments.find(item=>item.id===id);if(!item)throw new Error('当前账号下不存在该环境');item.name=value;}
   await this.save(owner,data);
  });}
- async createLocal(owner,name='本机环境',icon){return accountMutation(this,owner,async()=>{const data=await this.load(owner);if(data.localEnabled!==false)throw new Error('本机环境已存在');if(typeof name!=='string'||!name.trim()||name.length>40)throw new Error('环境名称需为1至40个字符');data.localEnabled=true;data.localName=name.trim();data.localIcon=environmentIcon(icon,"monitor");await this.save(owner,data);});}
+ async createLocal(owner,name,icon){return accountMutation(this,owner,async()=>{const data=await this.load(owner);if(data.localEnabled!==false)throw new Error('本机环境已存在');data.localEnabled=true;delete data.localName;data.localIcon=environmentIcon(icon,"monitor");await this.save(owner,data);});}
  async forgetLocal(owner,name){return accountMutation(this,owner,async()=>{const data=await this.load(owner);if(data.localEnabled===false || name!==(data.localName || '本机环境'))throw new Error('请输入完整且一致的环境名称');data.localEnabled=false;if(!data.activeId)data.activeId=data.environments[0]?.id || null;await this.save(owner,data);});}
  async deleteResources(owner,id,name){
   const {item,prefix}=await this.get(owner,id);if(name!==item.name)throw new Error('请输入完整且一致的环境名称');if(item.external)return;
