@@ -14,7 +14,8 @@ export async function listExternalContainers(manager,owner){
  for(const [endpoint,engine] of endpoints){try{
   const rows=await manager.command(['ps','-a','--no-trunc','--format','{{json .}}'],{endpoint,timeout:8000});
   for(const row of rows.split('\n')){try{const item=JSON.parse(row);if(!/^[a-f0-9]{64}$/.test(item.ID))continue;
-   const name=String(item.Names);if(name.startsWith('dingtu-') && (!name.startsWith(ownPrefix)||name.endsWith('-gateway')))continue;
+   const name=String(item.Names);if(name.startsWith('dingtu-') && (!name.startsWith(ownPrefix)||!name.endsWith('-worker')))continue;
+   if(String(item.Labels||'').split(',').some(label=>['app=kuneco-browser','app=kuneco-browser-transport','app=dingtu-direct','app=dingtu-installer'].includes(label)))continue;
    // Engine aliases can expose the same Docker daemon twice.
    if(seen.has(item.ID))continue;seen.add(item.ID);
    const key=containerKey(endpoint,item.ID);let claim;try{claim=await readFile(claimFile(manager,digest(item.ID)),'utf8');}catch{}
@@ -27,6 +28,7 @@ export async function listExternalContainers(manager,owner){
 export async function inspectExternal(manager,owner,key){
  const item=(await listExternalContainers(manager,owner)).find(item=>item.key===key);if(!item)throw new Error('该容器已不可用或属于其他账号，请重新选择');
  const raw=JSON.parse(await manager.command(['inspect',item.id],{endpoint:item.endpoint}))[0];
+ if(['kuneco-browser','kuneco-browser-transport','dingtu-direct','dingtu-installer'].includes(raw.Config?.Labels?.app))throw new Error('此容器是 Kuneco 内部服务，不能作为工作环境导入');
  return {...item,workingDirectory:raw.Config?.WorkingDir?.startsWith('/')?raw.Config.WorkingDir:'/',networkMode:raw.HostConfig?.NetworkMode || 'default'};
 }
 export async function claimExternal(manager,owner,item){
