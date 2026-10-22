@@ -353,9 +353,9 @@ export class DockerEnvironments {
   finally{invalidate();this.environmentStops.delete(prefix);}
  }
  async stop(owner,id){const {prefix,item}=await this.get(owner,id);await this.stopEnvironmentResources(prefix,item);return this.state(owner);}
- async connect(owner,id,config,expectedIp,onVerified){
+ async connect(owner,id,config,expectedIp,onVerified,{browserOnly=false}={}){
   return this.withEnvironmentPreparation(resourcePrefix(owner,id),async assertEnvironmentCurrent=>{
-  const {item}=await this.get(owner,id);if(item.external)throw new Error('已有容器使用原网络，请使用应用代理连接');assertEnvironmentCurrent();const {prefix,name,network}=await this.ensureGateway(owner,id,config.node?'mihomo':undefined);assertEnvironmentCurrent();
+  const {item}=await this.get(owner,id);if(item.external&&!browserOnly)throw new Error('已有容器使用原网络，请使用应用代理连接');assertEnvironmentCurrent();const {prefix,name,network}=await this.ensureGateway(owner,id,config.node?'mihomo':undefined);assertEnvironmentCurrent();
   // Give the container service time to bind without silently retrying a proxy request.
   let ready=false;for(let i=0;i<30;i++){try{await this.rpc(owner,id,'status');assertEnvironmentCurrent();ready=true;break;}catch{assertEnvironmentCurrent();await new Promise(r=>setTimeout(r,100));}}if(!ready)throw new Error('容器代理服务未启动');
   const info=await this.rpc(owner,id,'connect',{config,expectedIp,engine:config.node?'mihomo':process.env.KUNECO_PROXY_ENGINE || 'native'});
@@ -366,6 +366,9 @@ export class DockerEnvironments {
    const generation=adapter.generation;
    const assertCurrent=()=>{assertEnvironmentCurrent();if(!adapter.current(generation)||!isCurrent())throw Object.assign(new Error('代理操作已取消'),{name:'AbortError'});};
    assertCurrent();
+   // Imported environments keep their original container/network untouched.
+   // The independent browser uses only its own gateway and named volumes.
+   if(browserOnly)return;
    await this.prepareWorker({prefix,item,network,gatewayIP,token:info.token,assertCurrent});assertCurrent();
    await this.exec(owner,id,['/usr/local/bin/node','-e',"let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>require('fs').writeFileSync('/tmp/dingtu-chat-proxy',s,{mode:0o600}));"],{input:`http://workspace:${info.token}@${gatewayIP}:8080`});
   });

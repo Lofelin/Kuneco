@@ -13,3 +13,13 @@ test('proxy reconnect keeps a running worker and updates gateway credentials wit
  m.command=async args=>{calls.push(args);if(args.includes('{{json .NetworkSettings.Ports}}'))return JSON.stringify({'8080/tcp':[{HostPort:'1234'}]});if(args.includes('{{.State.Running}}'))return 'true';if(args.includes('--format'))return '172.19.0.2';return '{}';};m.exec=async(_o,_i,args,options)=>writes.push(options.input);m.prepareWorker=async({assertCurrent})=>assertCurrent();
  const adapter=await m.connect('owner','11111111-1111-1111-1111-111111111111',{host:'fixture'},null);await adapter.startWorker();await adapter.startWorker();assert.ok(!calls.some(a=>a[0]==='rm'||a[0]==='run'||a[0]==='start'));assert.equal(writes.length,2);assert.ok(writes.every(v=>v.includes('fixture-token@172.19.0.2')));
 });
+test('imported environment proxy prepares an independent browser gateway without modifying the source container',async()=>{
+ const m=new DockerEnvironments({sourceRoot:process.cwd()}),calls=[];const external={id:'source-container',endpoint:'unix:///other-daemon.sock'};
+ m.get=async()=>({prefix,item:{external}});m.ensureGateway=async()=>({prefix,name:prefix+'-gateway',network:prefix+'-private'});
+ m.rpc=async(_o,_i,action)=>action==='connect'?{token:'fixture-token'}:{state:'ready',ip:'198.51.100.2'};
+ m.command=async args=>{calls.push(args);if(args.includes('{{json .NetworkSettings.Ports}}'))return JSON.stringify({'8080/tcp':[{HostPort:'1234'}]});return '172.19.0.2';};
+ m.prepareWorker=async()=>{throw Error('must not provision a worker for an imported environment');};m.exec=async()=>{throw Error('must not write to source container');};
+ const id='11111111-1111-1111-1111-111111111111';await assert.rejects(m.connect('owner',id,{},null),/已有容器/);
+ const adapter=await m.connect('owner',id,{},null,undefined,{browserOnly:true});await adapter.verify();await adapter.stop();
+ assert.ok(calls.every(args=>!args.includes(external.id)));assert.ok(calls.every(args=>!args.includes('network')&&!args.includes('rm')));
+});

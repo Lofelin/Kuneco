@@ -19,7 +19,7 @@ iptables -A INPUT -i lo -j ACCEPT
 iptables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
 ip6tables -P INPUT DROP
 ip6tables -A INPUT -i lo -j ACCEPT
-chown 1000:1000 /home/browser
+chown 1000:1000 /home/browser /workspace
 setpriv --reuid=1000 --regid=1000 --init-groups --bounding-set=-all --no-new-privs \
  sh -c 'umask 077; mkdir -p /home/browser/downloads /home/browser/uploads; chmod 700 /home/browser/downloads /home/browser/uploads'
 # Require working unprivileged user namespaces before reporting readiness.

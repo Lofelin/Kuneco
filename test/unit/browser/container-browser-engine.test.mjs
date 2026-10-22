@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {EventEmitter} from 'node:events';
 import {PassThrough,Writable} from 'node:stream';
-import {browserContainerArguments,ContainerBrowserEngine} from '../../../src/features/browser/container-browser-engine.mjs';
+import {browserContainerArguments,ContainerBrowserEngine,ensureContainerBrowserWorkspace} from '../../../src/features/browser/container-browser-engine.mjs';
 const owner='browser-test-owner',environmentId='183494cd-1b80-4886-a620-4956f9535772';
 const settings={prefix:'dingtu-test-'+environmentId,image:'kuneco-browser:test',gatewayIP:'10.2.0.2',timezone:'Asia/Tokyo',locale:'ja-JP',spec:'abc'};
 test('browser uses environment private network and exclusive volume with no host mounts or ports',()=>{
@@ -127,4 +127,13 @@ test('sandbox verification requires namespace and seccomp evidence, never falls 
  await engine.verifySandbox();assert.equal(engine.sandboxVerified,true);assert.equal(calls.at(-1)[0],'Target.closeTarget');assert.equal(calls.find(c=>c[0]==='Page.navigate')[1].url,'chrome://sandbox');
  engine.command=async method=>{if(method==='Target.createTarget')return {targetId:'failed'};if(method==='Target.attachToTarget')return {sessionId:'failed-session'};if(method==='Runtime.evaluate')throw Error('unavailable');return {};};
  await assert.rejects(engine.verifySandbox(),/unavailable/);
+});
+
+test('imported browser workspace is allocated as its own volume and existing owned workspaces survive reconnect',async()=>{
+ const calls=[],name=settings.prefix+'-worker-work';let present=false;
+ const manager={command:async args=>{calls.push(args);if(args[1]==='inspect'){if(!present)throw Error('missing');return JSON.stringify([{Name:name,Labels:{'io.kuneco.environment':settings.prefix}}]);}if(args[1]==='ls')return '';if(args[1]==='create'){present=true;return name;}throw Error('unexpected');}};
+ await ensureContainerBrowserWorkspace(manager,settings.prefix);await ensureContainerBrowserWorkspace(manager,settings.prefix);
+ assert.equal(calls.filter(args=>args[1]==='create').length,1);assert.ok(calls.every(args=>args[0]==='volume'));
+ manager.command=async()=>JSON.stringify([{Name:name,Labels:{'io.kuneco.environment':'another-environment'}}]);
+ await assert.rejects(ensureContainerBrowserWorkspace(manager,settings.prefix),/归属/);
 });

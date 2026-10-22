@@ -1,3 +1,4 @@
+import {ensurePrivateNetwork} from '../features/environments/container-reliability.mjs';
 import {browserAccessMode} from '../features/browser/browser-agent.mjs';
 import {MemoryHistoryTasks} from '../features/memory/memory-history-tasks.mjs';
 import {createContainerBrowserNetwork} from '../features/browser/container-browser-network.mjs';
@@ -260,8 +261,8 @@ function showBrowserViews() {
   for (const tab of browserTabs.values()) {
     if (!tab.wc || tab.wc.isDestroyed()) continue;
     tab.view.setBounds(browserBounds);
-    if(tab.remote){void tab.wc.resize(browserBounds).catch(()=>{});tab.wc.setVisible(browserVisible && browserNetworkReady() && tab.id===activeTabId && tab.started);}
-    tab.view.setVisible(browserVisible && browserNetworkReady() && tab.id === activeTabId && tab.started);
+    if(tab.remote){void tab.wc.resize(browserBounds).catch(()=>{});tab.wc.setVisible(browserVisible && browserNetworkReady() && tab.id===activeTabId && tab.started && !tab.error);}
+    tab.view.setVisible(browserVisible && browserNetworkReady() && tab.id === activeTabId && tab.started && (!tab.remote || !tab.error));
   }
 }
 function publishTabs() { showBrowserViews(); emit('browserTabs', browserState()); }
@@ -321,9 +322,10 @@ async function ensureContainerBrowser(){
  if(containerBrowserStarting)return containerBrowserStarting;
  const pending=(async()=>{
   await closeContainerBrowser();assertCurrent();
+  const {prefix}=await dockerEnvs.get(owner,environmentId);assertCurrent();
+  await ensurePrivateNetwork(dockerEnvs,prefix+'-private');assertCurrent();
   if(mode==='proxy')await proxy.checkNow();
   else if(mode==='mixed'&&proxy?.status.state==='ready')await proxy.checkNow().catch(()=>{});assertCurrent();
-  const {item,prefix}=await dockerEnvs.get(owner,environmentId);assertCurrent();if(item.external)throw Error('外部容器尚未接入独立浏览器，请使用受管理的环境');
   let gatewayIP=mode==='direct'||proxy?.status.state!=='ready'?null:await dockerEnvs.command(['inspect','--format',`{{(index .NetworkSettings.Networks "${prefix}-private").IPAddress}}`,prefix+'-gateway']);assertCurrent();
   // Region lookup is performed by the already verified proxy, never the host.
   if(mode!=='direct'&&proxy?.status.state==='ready'&&!proxy.status.timezone)await proxy.detectRegion().catch(()=>{});assertCurrent();
@@ -627,7 +629,7 @@ async function connect(config, remember, {environmentSwitch=false}={}) {
     await stopGateway({preserveDirectChat:true});assertScope();
     emit('network', { state: 'checking', reason: '正在通过指定代理核验出口' });
     const externalContainer=scope.environment && (await dockerEnvs.get(scope.owner,scope.environment)).item.external;assertScope();
-    const next = scope.environment && !externalContainer?await dockerEnvs.connect(scope.owner,scope.environment,upstream,expectedIp,onVerified):await new ProxyGateway(upstream, { mihomoBinary:validated.node?path.join(here,'..','vendor','mihomo',process.platform+'_'+(process.arch==='x64'?'amd64':process.arch),'mihomo'):null,gostBinary:!validated.node&&process.env.KUNECO_PROXY_ENGINE==='gost'?path.join(here,'..','vendor','gost',process.platform+'_'+(process.arch==='x64'?'amd64':process.arch),'gost'):null, healthInterval:60000,jitter:0.2, expectedIp,onVerified }).start();
+    const next = scope.environment?await dockerEnvs.connect(scope.owner,scope.environment,upstream,expectedIp,onVerified,{browserOnly:Boolean(externalContainer)}):await new ProxyGateway(upstream, { mihomoBinary:validated.node?path.join(here,'..','vendor','mihomo',process.platform+'_'+(process.arch==='x64'?'amd64':process.arch),'mihomo'):null,gostBinary:!validated.node&&process.env.KUNECO_PROXY_ENGINE==='gost'?path.join(here,'..','vendor','gost',process.platform+'_'+(process.arch==='x64'?'amd64':process.arch),'gost'):null, healthInterval:60000,jitter:0.2, expectedIp,onVerified }).start();
     try{assertScope();}catch(error){await next.stop({strict:true});throw error;}
     gateway = next;
     next.on('requestFailure', failure => { if (gateway === next) emit('requestFailure', failure); });

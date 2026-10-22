@@ -23,6 +23,18 @@ export async function ensureContainerBrowserImage(manager){
   try{await manager.command(['image','inspect',image]);}catch{await manager.command(['build','-t',image,'-f','docker/browser/Dockerfile','.'],{timeout:900000,maxBuffer:1024*1024});}
  return image;
 }
+// Imported environments receive a separate browser workspace; source mounts
+// and source container filesystem are never adopted or changed.
+export async function ensureContainerBrowserWorkspace(manager,prefix){
+ const name=prefix+'-worker-work';let workspace;
+ try{workspace=JSON.parse(await manager.command(['volume','inspect',name]))[0];}catch{
+  const volumes=(await manager.command(['volume','ls','--format','{{.Name}}'])).split('\n');if(volumes.includes(name))throw Error('浏览器工作区无法核对');
+  await manager.command(['volume','create','--label','app='+ROLE,'--label','io.kuneco.environment='+prefix,name]);
+  workspace=JSON.parse(await manager.command(['volume','inspect',name]))[0];
+ }
+ if(workspace?.Name!==name || (workspace.Labels?.['io.kuneco.environment']&&workspace.Labels['io.kuneco.environment']!==prefix))throw Error('当前环境工作区归属不匹配');
+ return workspace;
+}
 export class ContainerBrowserEngine extends EventEmitter {
  constructor(manager,{owner,environmentId,gatewayIP,token,timezone='UTC',locale='en-US',assertCurrent=()=>{},allowRequest=async()=>false}){
   super();Object.assign(this,{manager,owner,environmentId,gatewayIP,token,timezone,locale,assertCurrent,allowRequest});
@@ -52,8 +64,7 @@ export class ContainerBrowserEngine extends EventEmitter {
   try{volumeInfo=JSON.parse(await this.manager.command(['volume','inspect',volume]))[0];}catch{}
   if(volumeInfo && (volumeInfo.Labels?.app!==ROLE || volumeInfo.Labels?.['io.kuneco.environment']!==this.prefix))throw new Error('浏览器存储归属不匹配，已停止操作');
   if(!volumeInfo)await this.manager.command(['volume','create','--label','app='+ROLE,'--label','io.kuneco.environment='+this.prefix,volume]);
-  const workspace=JSON.parse(await this.manager.command(['volume','inspect',this.prefix+'-worker-work']))[0];
-  if(!workspace || workspace.Name!==this.prefix+'-worker-work')throw Error('当前环境工作区不可用');
+  await ensureContainerBrowserWorkspace(this.manager,this.prefix);
   this.assertCurrent();await this.manager.command(existing?['start',this.name]:args);this.assertCurrent();
   let ready=false;for(let i=0;i<50;i++){
    try{await this.manager.command(['exec',this.name,'test','-f','/tmp/kuneco-browser-ready']);ready=true;break;}catch{await new Promise(resolve=>setTimeout(resolve,100));this.assertCurrent();}
