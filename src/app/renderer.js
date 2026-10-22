@@ -464,14 +464,14 @@ function setSetupWizardStep(step){
  $('setupStepLabel').textContent=`第 ${step} / 3 步`;
  $('setupStepTitle').textContent=[setupEnvironmentKind==='local'?'确认设备名称':'填写环境名称','选择环境类型','检测运行时'][step-1];
  $('setupFinishLabel').textContent=`创建「${$('setupEnvironmentName').value.trim()}」环境`;
- $('setupStatus').textContent='';
+ $('setupStatus').textContent='配置好后就能创建。';
  validateSetupEnvironment();bounds();
 }
 $('setupPrevious').onclick=()=>{if(!setupCreating && !setupDockerPreparing){setupDetectionVersion++;setSetupWizardStep(Math.max(1,setupWizardStep-1));}};
 function beginEnvironmentSetup(kind='local',allowCancel=false){
  setupWizardStep=1;setupAllowCancel=allowCancel;setupSessionStarted=true;setupInProgress=true;setupImageConfirmed=false;setupDockerProgress=null;setupDockerError='';setupPreviewKey='';
  selectSetupIcon(ENVIRONMENT_ICONS[Math.floor(Math.random()*ENVIRONMENT_ICONS.length)]);$('setupEnvironmentName').value='';$('setupImageVersion').value='';$('setupImageSource').value='';$('setupImageRepository').value='';$('setupImageError').textContent='';$('setupImageRepository').classList.add('hidden');$('setupDockerSource').value='new';$('setupExistingContainer').value='';
- $('setupStatus').textContent='';$('setupCreateView').classList.remove('hidden');$('setupDetectView').classList.add('hidden');$('setupCancel').classList.toggle('hidden',!allowCancel);
+ $('setupStatus').textContent='配置好后就能创建。';$('setupCreateView').classList.remove('hidden');$('setupDetectView').classList.add('hidden');$('setupCancel').classList.toggle('hidden',!allowCancel);
  $('environmentSetup').classList.remove('hidden');document.body.classList.add('environment-onboarding');
  const localOption=document.querySelector('[data-setup-type=local]');localOption.classList.remove('hidden');localOption.disabled=dockerEnvironmentState.localEnabled!==false;$('setupLocalExists').classList.toggle('hidden',!localOption.disabled);if(localOption.disabled && kind==='local')kind='docker';
  document.querySelector(`[data-setup-type=${kind}]`).click();setSetupWizardStep(1);
@@ -565,7 +565,7 @@ $('setupCreate').onclick=()=>void action(async()=>{
 async function detectSetupRuntimes(){
  const version=++setupDetectionVersion,owner=accountState.user?.id,kind=setupEnvironmentKind;
  $('setupDetect').disabled=true;$('setupFinish').disabled=true;
- $('setupRuntimeCount').textContent='检测运行时';$('setupRuntimeState').textContent='正在检测…';$('setupRuntimeResults').replaceChildren();$('setupStatus').textContent='';
+ $('setupRuntimeCount').textContent='检测运行时';$('setupRuntimeState').textContent='正在检测…';$('setupRuntimeResults').replaceChildren();$('setupStatus').textContent='配置好后就能创建。';
  try{
   const existing=kind==='docker' && $('setupDockerSource').value==='existing';
   const registry=existing?await api.dockerEnvironments('previewExisting',{key:$('setupExistingContainer').value}):kind==='local'?await api.runtimePreview('local'):{runtimes:[]};
