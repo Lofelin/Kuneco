@@ -966,8 +966,10 @@ body.dark .environment-setup .setup-account-actions app-button:hover::part(base)
 .environment-created-content>p{color:var(--muted);line-height:1.7;margin:0 0 24px}
 .environment-created-mark{display:grid;place-items:center;width:64px;height:64px;margin:0 auto;font-size:52px;line-height:1;font-family:"Apple Color Emoji","Segoe UI Emoji",sans-serif}
 #environmentCreatedDialog::part(title){visibility:hidden}
-.environment-created-next{text-align:left;border:1px solid var(--line);border-radius:8px;padding:14px 16px;margin:10px 0}
-.environment-created-next strong{font-size:14px}.environment-created-next p{font-size:13px;color:var(--muted);line-height:1.6;margin:6px 0 0}
+.environment-created-next{text-align:left;border:1px solid var(--line);border-radius:var(--interaction-radius);padding:14px 16px;margin:10px 0;white-space:normal;box-sizing:border-box}
+.environment-created-next[layout="custom"]::part(base){display:block;height:auto;min-height:0;border:0;background:transparent;box-shadow:none;text-align:left;white-space:normal}
+.environment-created-card-copy{display:block;width:100%}
+.environment-created-next strong{font-size:14px}.environment-created-next p{font-size:13px;font-weight:400;color:var(--muted);line-height:1.6;margin:var(--settings-section-description-gap,4px) 0 0}
 #setupCreate::part(label){overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
 
 /* Keep native drag hit testing outside the scrolling, animated setup surface. */
@@ -1200,9 +1202,9 @@ body.environment-onboarding:not(.auth-mode)>.setup-window-drag{display:block}
 #setupDetectView #setupFinish{width:100%;margin:0}
 #setupFinish::part(base){background:#202126;color:white;border-color:#202126}
 #environmentCreatedDialog::part(body){padding-top:0}
-.environment-created-next{display:block;width:100%;font:inherit;color:var(--ink);background:var(--surface);cursor:pointer;transition:background .15s,border-color .15s}
-.environment-created-next:hover{background:var(--soft);border-color:var(--muted)}
-.environment-created-next:focus-visible{outline:2px solid var(--ink);outline-offset:3px}
+.environment-created-next{display:block;width:100%;font:inherit;color:var(--ink);background:var(--surface);cursor:pointer;transition:background .15s}
+.environment-created-next:hover{background:var(--hover);border-color:var(--line)}
+.environment-created-next:focus-visible{outline:2px solid var(--field-focus-ring);outline-offset:3px}
 #environmentCreatedDismiss::part(base){background:#202126;border-color:#202126;color:white}
 #environmentCreatedDialog[open] .environment-created-mark{animation:environment-celebrate 1.6s ease-in-out infinite;transform-origin:50% 80%}
 @keyframes environment-celebrate{0%,100%{transform:rotate(0) scale(1)}20%{transform:rotate(-12deg) scale(1.12)}40%{transform:rotate(10deg) scale(1.08)}60%{transform:rotate(-5deg)}80%{transform:rotate(3deg)}}
@@ -1748,7 +1750,7 @@ body{--field-border-hover:var(--line);--field-border-focus:var(--line);--field-f
 :is(wa-input,wa-number-input,wa-textarea):not([disabled]):is(:hover,:focus-within)::part(base),wa-select:not([disabled]):is(:hover,:focus-within,[open])::part(combobox){border-color:var(--line)!important;outline:0!important;box-shadow:none!important}
 :is(app-button,input,select,textarea,a,[tabindex]):focus-visible{outline:2px solid var(--field-focus-ring)!important;outline-offset:2px}
 app-button::part(base):focus-visible{outline:2px solid var(--field-focus-ring)!important;outline-offset:2px}
-:is(.learning-template,.environment-created-next):is(:hover,:focus-visible,:active){border-color:var(--line)!important;background:var(--soft)}
+:is(.learning-template,.environment-created-next):is(:hover,:focus-visible,:active){border-color:var(--line)!important;background:var(--hover)}
 .environment-detail-icon-button:hover::part(base){border-color:var(--line)}
 /* Plain actions are transparent in every pointer state; keyboard focus stays visible. */
 app-button:is([appearance=plain],.transparent-action,.text-button),app-button.transparent-action{background:transparent!important;border-color:transparent!important;box-shadow:none!important}
