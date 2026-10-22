@@ -40,7 +40,9 @@ export class ContainerTerminal extends EventEmitter{
   if(!this.endpoint.startsWith('unix://'))throw new Error('控制台仅支持本机 Docker 引擎');
   const socketPath=this.endpoint.slice(7),container=item.external?.id || prefix+'-worker';
   this.pidFile='/tmp/dingtu-console-'+this.token;
-  this.browserFile=(item.external?.workingDirectory || '/home/node')+'/.dingtu-browser-'+this.token;
+  // External working directories may be read-only (including /). Keep helpers
+  // in temporary storage, independently of the shell's selected directory.
+  this.browserFile=(item.external?'/tmp':'/home/node')+'/.dingtu-browser-'+this.token;
   const browserScript=String.raw`#!/bin/sh
 for url do case "$url" in http://*|https://*) printf '\033]777;dingtu-open-url;%s\007' "$url"; exit;; esac; done
 `;
@@ -60,7 +62,7 @@ for url do case "$url" in http://*|https://*) printf '\033]777;dingtu-open-url;%
   const result=await request(socketPath,'/containers/'+encodeURIComponent(container)+'/exec',{
    AttachStdin:true,AttachStdout:true,AttachStderr:true,Tty:true,Cmd:command,
    ...(item.external?{}:{User:'1000:1000'}),WorkingDir:workingDirectory || item.external?.workingDirectory || '/workspace',
-   Env:['TERM=xterm-256color','COLORTERM=truecolor','LANG=C.UTF-8','LC_ALL=C.UTF-8','BROWSER='+this.browserFile,...(this.rcFile?['KUNECO_CONSOLE_RC='+this.rcFile]:[])],ConsoleSize:[rows,cols]
+   Env:['TERM=xterm-256color','COLORTERM=truecolor','LANG=C.UTF-8','LC_ALL=C.UTF-8','BROWSER='+(item.external?'sh '+this.browserFile:this.browserFile),...(this.rcFile?['KUNECO_CONSOLE_RC='+this.rcFile]:[])],ConsoleSize:[rows,cols]
   });
   this.execId=result.Id;if(this.closed)return;
   const detectLoginLink=createLoginLinkDetector(loginEngine,(url,login)=>{this.browserLogin=login;this.emit('open-url',url);});
