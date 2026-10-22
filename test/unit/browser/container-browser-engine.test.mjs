@@ -62,8 +62,8 @@ test('child target is intercepted recursively before resuming and maps policy to
  engine.configured.set('root',Promise.resolve());
  engine.command=async(method,params,sessionId)=>{sent.push({method,params,sessionId});return {};};
  await engine.handleAttached({sessionId:'root',params:{sessionId:'worker',targetInfo:{targetId:'w',type:'worker'}}});
- assert.deepEqual(sent.map(x=>x.method),['Fetch.enable','Browser.getVersion','Network.setUserAgentOverride','Target.setAutoAttach','Runtime.runIfWaitingForDebugger']);
- assert.equal(sent[3].params.waitForDebuggerOnStart,true);assert.equal(engine.policySession('worker'),'root');
+ assert.deepEqual(sent.map(x=>x.method),['Fetch.enable','Target.setAutoAttach','Runtime.runIfWaitingForDebugger']);
+ assert.equal(sent[1].params.waitForDebuggerOnStart,true);assert.equal(engine.policySession('worker'),'root');
  await engine.handleAttached({sessionId:'worker',params:{sessionId:'nested',targetInfo:{targetId:'n',type:'worker'}}});
  assert.equal(engine.policySession('nested'),'root');engine.finish();
 });
@@ -87,12 +87,12 @@ test('late close from old engine cannot stop replacement instance with same acco
  const engine=new ContainerBrowserEngine(manager, {owner,environmentId,gatewayIP:'10.2.0.2',token:'secret'});
  await engine.close();assert.equal(calls.length,1);assert.equal(calls[0][0],'inspect');
 });
-test('worker fallback installs deny-all network and locale before it can resume',async()=>{
+test('worker fallback installs deny-all network before it can resume without replacing browser identity',async()=>{
  const engine=new ContainerBrowserEngine({}, {owner,environmentId,gatewayIP:'10.2.0.2',token:'secret',locale:'ja-JP'}),sent=[];
  engine.configured.set('root',Promise.resolve());engine.command=async(method,params,sessionId)=>{sent.push({method,params,sessionId});if(method==='Fetch.enable')throw Error('unavailable');return {userAgent:'Linux Chromium'};};
  await engine.handleAttached({sessionId:'root',params:{sessionId:'w',targetInfo:{targetId:'wid',type:'worker'}}});
- const methods=sent.map(c=>c.method);assert.deepEqual(methods,['Fetch.enable','Network.enable','Network.setBlockedURLs','Browser.getVersion','Network.setUserAgentOverride','Target.setAutoAttach','Runtime.runIfWaitingForDebugger']);
- assert.deepEqual(sent[2].params.urls,['*']);assert.equal(sent[4].params.acceptLanguage,'ja-JP,en');engine.finish();
+ const methods=sent.map(c=>c.method);assert.deepEqual(methods,['Fetch.enable','Network.enable','Network.setBlockedURLs','Target.setAutoAttach','Runtime.runIfWaitingForDebugger']);
+ assert.deepEqual(sent[2].params.urls,['*']);assert.ok(!methods.includes('Network.setUserAgentOverride')); engine.finish();
 });
 test('automatic page debugger wait only resumes after explicit managed page configuration',async()=>{
  const engine=new ContainerBrowserEngine({}, {owner,environmentId,gatewayIP:'10.2.0.2',token:'secret'}),sent=[];

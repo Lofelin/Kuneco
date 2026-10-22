@@ -175,8 +175,8 @@ export class ContainerBrowserEngine extends EventEmitter {
     await this.command('Emulation.setTimezoneOverride',{timezoneId:this.timezone},sessionId);
     await this.command('Emulation.setLocaleOverride',{locale:this.locale},sessionId);
     }
-   const {userAgent}=await this.command('Browser.getVersion');
-   await this.command('Network.setUserAgentOverride',{userAgent,acceptLanguage:this.locale+',en',platform:'Linux'},sessionId);
+   // Chromium supplies its native User-Agent and Client Hints. Language is
+   // configured in its persistent profile before launch, not by UA emulation.
    // Workers inherit the container's TZ and Chromium --lang; unlike page
    // targets they do not expose Emulation. Recursively pause their children.
    await this.command('Target.setAutoAttach',{autoAttach:true,waitForDebuggerOnStart:true,flatten:true,filter:[{}]},sessionId);

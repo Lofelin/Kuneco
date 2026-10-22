@@ -1,5 +1,5 @@
 import {spawn} from 'node:child_process';
-import {readdir,readlink,lstat,mkdir,mkdtemp,rename} from 'node:fs/promises';
+import {readdir,readlink,lstat,mkdir,mkdtemp,rename,access,readFile,writeFile} from 'node:fs/promises';
 import path from 'node:path';
 
 // A prior abrupt container stop can leave Chromium singleton symlinks pointing
@@ -21,9 +21,26 @@ if(locks.length){
  const backup=await mkdtemp(path.join(profile,'.kuneco-singleton-backup-'));
  for(const name of locks)await rename(path.join(profile,name),path.join(backup,name));
 }
+// Use Chromium's own language preference so request headers, navigator.language
+// and native Client Hints stay consistent without a User-Agent override.
+const preferenceFile=path.join(profile,'Default','Preferences');await mkdir(path.dirname(preferenceFile),{recursive:true,mode:0o700});
+let preferences={};try{preferences=JSON.parse(await readFile(preferenceFile,'utf8'));}catch(error){if(error.code!=='ENOENT')throw Error('浏览器偏好配置无法读取，已保留原数据');}
+const language=process.env.KUNECO_BROWSER_LOCALE||'en-US';
+preferences.intl={...preferences.intl,accept_languages:language+',en'};
+await writeFile(preferenceFile+'.kuneco-tmp',JSON.stringify(preferences),{mode:0o600});await rename(preferenceFile+'.kuneco-tmp',preferenceFile);
+// A real display-backed Chromium is used for interactive websites. The X server
+// has no TCP listener, lives only inside this container, and never mounts a host
+// display. Keep Chromium's own sandbox and its unmodified browser identity.
+const display=spawn('/usr/bin/Xvfb',[':99','-screen','0','3840x2880x24','-nolisten','tcp'],{stdio:'ignore'});
+let displayError;display.on('error',error=>{displayError=error;});
+let displayReady=false;for(let i=0;i<100;i++){
+ if(displayError||display.exitCode!==null)break;
+ try{await access('/tmp/.X11-unix/X99');displayReady=true;break;}catch{await new Promise(resolve=>setTimeout(resolve,50));}
+}
+if(!displayReady){display.kill('SIGTERM');throw Error('容器浏览器显示服务启动失败');}
 // Anonymous fd 3/4 carry CDP. Never publish a debugging TCP port reachable by a page.
 const browser=spawn('/usr/bin/chromium',[
- '--headless=new','--disable-dev-shm-usage',
+ '--disable-dev-shm-usage',
  '--remote-debugging-pipe','--user-data-dir=/home/browser/profile',
  '--no-first-run','--no-default-browser-check','--disable-background-networking',
  '--disable-component-update','--disable-sync','--disable-quic',
@@ -34,10 +51,11 @@ const browser=spawn('/usr/bin/chromium',[
  '--proxy-server=http://'+process.env.KUNECO_GATEWAY_IP+':8080',
  '--lang='+process.env.KUNECO_BROWSER_LOCALE,
  'about:blank'
-],{stdio:['ignore','ignore','ignore','pipe','pipe'],env:{...process.env}});
+],{stdio:['ignore','ignore','ignore','pipe','pipe'],env:{...process.env,DISPLAY:':99'}});
 process.stdin.pipe(browser.stdio[3]);browser.stdio[4].pipe(process.stdout);
 process.stdin.on('end',()=>browser.kill('SIGTERM'));
 process.on('SIGTERM',()=>browser.kill('SIGTERM'));
 process.on('SIGINT',()=>browser.kill('SIGTERM'));
-browser.on('error',()=>process.exit(1));
-browser.on('exit',code=>process.exit(code || 0));
+display.on('exit',()=>browser.kill('SIGTERM'));
+browser.on('error',()=>{display.kill('SIGTERM');process.exit(1);});
+browser.on('exit',code=>{display.kill('SIGTERM');process.exit(code || 0);});
